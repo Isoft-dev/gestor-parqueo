@@ -1,0 +1,27 @@
+Cómo correr el proyecto
+
+Necesitas Node.js instalado.
+
+Primera vez: instalar dependencias
+
+  cd server
+  npm install
+  cd ..
+
+  cd client
+  npm install
+  cd ..
+
+Para ejecutar hay que abrir dos terminales. En una:
+
+  cd server
+  npm run dev
+
+En la otra:
+
+  cd client
+  npm run dev
+
+Cuando arranquen los dos, abrir en el navegador http://localhost:5173
+
+Para apagar, Ctrl+C en cada terminal.
