@@ -12,6 +12,17 @@ Primera vez: instalar dependencias
   npm install
   cd ..
 
+Conexión a Oracle (base gestorParqueo)
+
+  1. En la carpeta server, copia .env.example a .env
+
+  2. Edita .env y completa:
+     - ORACLE_USER=tu_usuario
+     - ORACLE_PASSWORD=tu_password
+     - ORACLE_CONNECT_STRING=localhost:PUERTO/SID
+
+  3. Si no usas Oracle aún, el servidor igual arranca; la ruta /api/health indicará si la DB está conectada.
+
 Para ejecutar hay que abrir dos terminales. En una:
 
   cd server
@@ -25,3 +36,5 @@ En la otra:
 Cuando arranquen los dos, abrir en el navegador http://localhost:5173
 
 Para apagar, Ctrl+C en cada terminal.
+
+Arquitectura y plan de desarrollo: ver GUIA-ARQUITECTURA.md

@@ -1,0 +1,60 @@
+import oracledb from 'oracledb';
+import { oracleConfig, isOracleConfigured } from '../config.js';
+
+let pool = null;
+
+/**
+ * Obtiene un pool de conexiones Oracle (singleton).
+ * Usar getConnection() desde este módulo para obtener una conexión.
+ */
+export async function getPool() {
+  if (!isOracleConfigured()) {
+    throw new Error(
+      'Oracle no configurado. Define ORACLE_USER, ORACLE_PASSWORD y ORACLE_CONNECT_STRING en server/.env'
+    );
+  }
+  if (!pool) {
+    pool = await oracledb.createPool({
+      user: oracleConfig.user,
+      password: oracleConfig.password,
+      connectString: oracleConfig.connectString,
+      poolMin: 1,
+      poolMax: 10,
+      poolIncrement: 1,
+    });
+  }
+  return pool;
+}
+
+/**
+ * Obtiene una conexión del pool. Debe cerrarse con connection.close() cuando termines.
+ * @returns {Promise<oracledb.Connection>}
+ */
+export async function getConnection() {
+  const p = await getPool();
+  return p.getConnection();
+}
+
+/**
+ * Cierra el pool (llamar al apagar el servidor si lo implementas).
+ */
+export async function closePool() {
+  if (pool) {
+    await pool.close(10);
+    pool = null;
+  }
+}
+
+/**
+ * Prueba la conexión a Oracle (útil para health check).
+ */
+export async function ping() {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute('SELECT 1 FROM DUAL');
+    return { ok: true, rows: result.rows };
+  } finally {
+    if (conn) await conn.close();
+  }
+}
