@@ -23,6 +23,10 @@ Conexión a Oracle (base gestorParqueo)
 
   3. Si no usas Oracle aún, el servidor igual arranca; la ruta /api/health indicará si la DB está conectada.
 
+  4. Probar la conexión en Postman (con el servidor levantado):
+     GET http://localhost:3001/api/health
+     Respuesta esperada: { "ok": true, "oracle": true } si la BD está conectada.
+
 Para ejecutar hay que abrir dos terminales. En una:
 
   cd server
