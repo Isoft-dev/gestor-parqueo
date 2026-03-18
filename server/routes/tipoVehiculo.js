@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import * as ctrl from '../controllers/tipoAlerta.js';
+import * as ctrl from '../controllers/tipoVehiculo.js';
 
 const router = Router();
 
@@ -7,10 +7,6 @@ router.get('/', ctrl.getAll);
 router.get('/:id', ctrl.getById);
 router.post('/', ctrl.create);
 router.put('/:id', ctrl.update);
-<<<<<<< HEAD
-router.delete('/:id', ctrl.remove);
-=======
 router.delete('/:id', ctrl.deleteItem);
->>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7
 
 export default router;

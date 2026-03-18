@@ -1,4 +1,4 @@
-import * as service from '../services/tipoAlerta.js';
+import * as service from '../services/tipoCobro.js';
 
 export async function getAll(_req, res) {
   try {
@@ -11,11 +11,7 @@ export async function getAll(_req, res) {
 export async function getById(req, res) {
   try {
     const row = await service.getById(req.params.id);
-<<<<<<< HEAD
-    if (!row) return res.status(404).json({ error: 'Tipo de alerta no encontrado' });
-=======
     if (!row) return res.status(404).json({ error: 'Registro no encontrado' });
->>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -24,15 +20,9 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { TAL_ID, TAL_TIPO } = req.body;
-    if (!TAL_ID || !TAL_TIPO) {
-<<<<<<< HEAD
-      return res.status(400).json({
-        error: 'TAL_ID y TAL_TIPO son requeridos',
-      });
-=======
+    const { TCO_ID, TCO_TIPO } = req.body;
+    if (!TCO_ID || !TCO_TIPO) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
->>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7
     }
     const created = await service.create(req.body);
     res.status(201).json(created);
@@ -44,11 +34,7 @@ export async function create(req, res) {
 export async function update(req, res) {
   try {
     const existing = await service.getById(req.params.id);
-<<<<<<< HEAD
-    if (!existing) return res.status(404).json({ error: 'Tipo de alerta no encontrado' });
-=======
     if (!existing) return res.status(404).json({ error: 'Registro no encontrado' });
->>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7
     const updated = await service.update(req.params.id, req.body);
     res.json(updated);
   } catch (err) {
@@ -56,19 +42,6 @@ export async function update(req, res) {
   }
 }
 
-<<<<<<< HEAD
-export async function remove(req, res) {
-  try {
-    const existing = await service.getById(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Tipo de alerta no encontrado' });
-    
-    await service.remove(req.params.id);
-    res.status(204).json();
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-}
-=======
 export async function deleteItem(req, res) {
   try {
     const existing = await service.getById(req.params.id);
@@ -80,4 +53,3 @@ export async function deleteItem(req, res) {
   }
 }
 
->>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7

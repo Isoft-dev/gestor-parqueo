@@ -1,4 +1,4 @@
-import * as service from '../services/alerta.js';
+import * as service from '../services/cobro.js';
 
 export async function getAll(_req, res) {
   try {
@@ -20,23 +20,12 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { ALE_ID, ALE_MOTIVO, ALE_FECHA_HORA_GENERACION, EAL_ID, TAL_ID } = req.body;
-    if (!ALE_ID || !ALE_MOTIVO || !ALE_FECHA_HORA_GENERACION || !EAL_ID || !TAL_ID) {
+    const { COB_ID, COB_HORAS_TOTALES, TCO_ID, COB_MONTO_TOTAL, COB_MONTO_RECIBIDO, COB_VUELTO, COB_FECHA_HORA, TAR_ID } = req.body;
+    if (!COB_ID || !COB_HORAS_TOTALES || !TCO_ID || !COB_MONTO_TOTAL || !COB_MONTO_RECIBIDO || !COB_VUELTO || !COB_FECHA_HORA || !TAR_ID) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
     const created = await service.create(req.body);
     res.status(201).json(created);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-}
-
-export async function update(req, res) {
-  try {
-    const existing = await service.getById(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Registro no encontrado' });
-    const updated = await service.update(req.params.id, req.body);
-    res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

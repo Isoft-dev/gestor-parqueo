@@ -1,6 +1,7 @@
 import { executeCursor, executeProcedure } from '../db/oracle.js';
 
 export async function getAll() {
+<<<<<<< HEAD
   return executeCursor(
     `BEGIN SP_ALERTA_GET_ALL(:cursor); END;`
   );
@@ -11,10 +12,18 @@ export async function getById(id) {
     `BEGIN SP_ALERTA_GET_BY_ID(:id, :cursor); END;`,
     { id }
   );
+=======
+  return executeCursor(`BEGIN SP_ALERTA_GET_ALL(:cursor); END;`);
+}
+
+export async function getById(id) {
+  const rows = await executeCursor(`BEGIN SP_ALERTA_GET_BY_ID(:id, :cursor); END;`, { id });
+>>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7
   return rows[0] || null;
 }
 
 export async function create(data) {
+<<<<<<< HEAD
   await executeProcedure(
     `BEGIN SP_ALERTA_CREATE(
       :ALE_ID, :MAQ_ID, :ALE_MOTIVO, :ALE_DESCRIPCION, 
@@ -31,10 +40,23 @@ export async function create(data) {
       ALE_FECHA_ATENCION: data.ALE_FECHA_ATENCION ?? null,
     }
   );
+=======
+  await executeProcedure(`BEGIN SP_ALERTA_CREATE(:ALE_ID, :MAQ_ID, :ALE_MOTIVO, :ALE_DESCRIPCION, :ALE_FECHA_HORA_GENERACION, :EAL_ID, :TAL_ID, :ALE_FECHA_ATENCION); END;`, {
+    ALE_ID: data.ALE_ID ?? null,
+    MAQ_ID: data.MAQ_ID ?? null,
+    ALE_MOTIVO: data.ALE_MOTIVO ?? null,
+    ALE_DESCRIPCION: data.ALE_DESCRIPCION ?? null,
+    ALE_FECHA_HORA_GENERACION: data.ALE_FECHA_HORA_GENERACION ?? null,
+    EAL_ID: data.EAL_ID ?? null,
+    TAL_ID: data.TAL_ID ?? null,
+    ALE_FECHA_ATENCION: data.ALE_FECHA_ATENCION ?? null,
+  });
+>>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7
   return getById(data.ALE_ID);
 }
 
 export async function update(id, data) {
+<<<<<<< HEAD
   await executeProcedure(
     `BEGIN SP_ALERTA_UPDATE(
       :id, :EAL_ID, :ALE_FECHA_ATENCION
@@ -47,3 +69,13 @@ export async function update(id, data) {
   );
   return getById(id);
 }
+=======
+  await executeProcedure(`BEGIN SP_ALERTA_UPDATE(:id, :EAL_ID, :ALE_FECHA_ATENCION); END;`, {
+    id,
+    EAL_ID: data.EAL_ID ?? null,
+    ALE_FECHA_ATENCION: data.ALE_FECHA_ATENCION ?? null,
+  });
+  return getById(id);
+}
+
+>>>>>>> 7201aaf1947b037e8bed0619c18efd831d4ccfe7

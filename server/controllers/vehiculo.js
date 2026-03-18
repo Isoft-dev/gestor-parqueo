@@ -1,4 +1,4 @@
-import * as service from '../services/alerta.js';
+import * as service from '../services/vehiculo.js';
 
 export async function getAll(_req, res) {
   try {
@@ -20,8 +20,8 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { ALE_ID, ALE_MOTIVO, ALE_FECHA_HORA_GENERACION, EAL_ID, TAL_ID } = req.body;
-    if (!ALE_ID || !ALE_MOTIVO || !ALE_FECHA_HORA_GENERACION || !EAL_ID || !TAL_ID) {
+    const { VEH_ID, VEH_PLACA, VEH_MODELO, TVE_ID } = req.body;
+    if (!VEH_ID || !VEH_PLACA || !VEH_MODELO || !TVE_ID) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
     const created = await service.create(req.body);
