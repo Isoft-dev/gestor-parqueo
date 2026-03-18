@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import * as ctrl from '../controllers/tarifa.js';
+import * as ctrl from '../controllers/tipoAlerta.js';
 
 const router = Router();
 
