@@ -1,501 +1,359 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '../config.js';
 
-const toArr = (data) => (Array.isArray(data) ? data : []);
+// ── CONFIG ────────────────────────────────────────────────────
+// ops: c=create, u=update, d=delete
+// updateFields: si existe, el formulario de edición solo muestra esos campos
+const SECTIONS = {
+  'me-ms': {
+    label: 'ME-MS — Entrada/Salida',
+    entities: [
+      { key: 'estado-ticket', label: 'Estado Ticket', id: 'ETI_ID',
+        fields: [{ k:'ETI_ID',l:'ID',req:true },{ k:'ETI_ESTADO',l:'Estado',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tarifa', label: 'Tarifa', id: 'TAR_ID',
+        fields: [{ k:'TAR_ID',l:'ID',req:true },{ k:'TAR_TIPO',l:'Tipo',req:true },{ k:'TAR_PRECIO',l:'Precio',t:'number',req:true }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'ticket', label: 'Ticket', id: 'TIC_ID',
+        fields: [{ k:'TIC_ID',l:'ID',req:true },{ k:'TIC_CODIGO',l:'Código',req:true },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'TIC_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local',req:true },{ k:'TIC_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'ETI_ID',l:'ETI_ID',req:true },{ k:'COB_ID',l:'COB_ID' }],
+        ops:{c:true,u:true,d:false}, updateFields:['TIC_FECHA_HORA_SALIDA','ETI_ID','COB_ID'] },
+      { key: 'tipo-cobro', label: 'Tipo Cobro', id: 'TCO_ID',
+        fields: [{ k:'TCO_ID',l:'ID',req:true },{ k:'TCO_TIPO',l:'Tipo',req:true },{ k:'TCO_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'cobro', label: 'Cobro', id: 'COB_ID',
+        fields: [{ k:'COB_ID',l:'ID',req:true },{ k:'COB_HORAS_TOTALES',l:'Horas',t:'number',req:true },{ k:'TCO_ID',l:'TCO_ID',req:true },{ k:'COB_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'COB_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'COB_VUELTO',l:'Vuelto',t:'number' },{ k:'COB_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'COB_PROCESADO_MAQUINA',l:'Proc. Máq.',t:'checkbox' },{ k:'TAR_ID',l:'TAR_ID',req:true }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'detalle-maquina-ticket', label: 'Det. Máq./Ticket', id: 'DMT_ID',
+        fields: [{ k:'DMT_ID',l:'ID',req:true },{ k:'DMT_TRANSACCION',l:'Transacción' },{ k:'TIC_ID',l:'TIC_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'DMT_HORA_TRANSACCION',l:'Hora',t:'datetime-local' }],
+        ops:{c:true,u:false,d:false} },
+    ],
+  },
+  'mc': {
+    label: 'MC — Máquina Cobro',
+    entities: [
+      { key: 'estado-maquina', label: 'Estado Máquina', id: 'EMA_ID',
+        fields: [{ k:'EMA_ID',l:'ID',req:true },{ k:'EMA_ESTADO',l:'Estado',req:true },{ k:'EMA_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'tipo-maquina', label: 'Tipo Máquina', id: 'TMA_ID',
+        fields: [{ k:'TMA_ID',l:'ID',req:true },{ k:'TMA_TIPO',l:'Tipo',req:true },{ k:'TMA_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'saldo-disponible', label: 'Saldo Disponible', id: 'SDI_ID',
+        fields: [{ k:'SDI_ID',l:'ID',req:true },{ k:'SDI_TIPO',l:'Tipo' },{ k:'SDI_VALOR',l:'Valor',t:'number' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'detalle-saldo', label: 'Detalle Saldo', id: 'DSA_ID',
+        fields: [{ k:'DSA_ID',l:'ID',req:true },{ k:'DSA_CANTIDAD',l:'Cantidad',t:'number' },{ k:'DSA_SUBTOTAL',l:'Subtotal',t:'number' },{ k:'SDI_ID',l:'SDI_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'maquina', label: 'Máquina', id: 'MAQ_ID',
+        fields: [{ k:'MAQ_ID',l:'ID',req:true },{ k:'MAQ_CODIGO',l:'Código',req:true },{ k:'TMA_ID',l:'TMA_ID',req:true },{ k:'EMA_ID',l:'EMA_ID',req:true },{ k:'MAQ_FECHA_ULTIMA_RECARGA',l:'Última Recarga',t:'datetime-local' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'recargo-maquina', label: 'Recargo Máquina', id: 'RMA_ID',
+        fields: [{ k:'RMA_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'RMA_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'RMA_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'registro-mantenimiento', label: 'Reg. Mantenimiento', id: 'REM_ID',
+        fields: [{ k:'REM_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'REM_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'REM_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tipo-alerta', label: 'Tipo Alerta', id: 'TAL_ID',
+        fields: [{ k:'TAL_ID',l:'ID',req:true },{ k:'TAL_TIPO',l:'Tipo',req:true },{ k:'TAL_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'estado-alerta', label: 'Estado Alerta', id: 'EAL_ID',
+        fields: [{ k:'EAL_ID',l:'ID',req:true },{ k:'EAL_ESTADO',l:'Estado',req:true },{ k:'EAL_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'alerta', label: 'Alerta', id: 'ALE_ID',
+        fields: [{ k:'ALE_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID' },{ k:'ALE_MOTIVO',l:'Motivo' },{ k:'ALE_DESCRIPCION',l:'Descripción' },{ k:'ALE_FECHA_HORA_GENERACION',l:'Generación',t:'datetime-local',req:true },{ k:'EAL_ID',l:'EAL_ID',req:true },{ k:'TAL_ID',l:'TAL_ID',req:true },{ k:'ALE_FECHA_ATENCION',l:'Atención',t:'datetime-local' }],
+        ops:{c:true,u:true,d:false}, updateFields:['EAL_ID','ALE_FECHA_ATENCION'] },
+    ],
+  },
+  'pa': {
+    label: 'PA — Parqueo General',
+    entities: [
+      { key: 'rol', label: 'Rol', id: 'ROL_ID',
+        fields: [{ k:'ROL_ID',l:'ID',req:true },{ k:'ROL_TIPO',l:'Tipo',req:true },{ k:'ROL_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'usuario', label: 'Usuario', id: 'USU_ID',
+        fields: [{ k:'USU_ID',l:'ID',req:true },{ k:'USU_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'USU_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'USU_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'USU_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'USU_CORREO',l:'Correo',req:true },{ k:'USU_PASSWORD',l:'Contraseña',t:'password',req:true,createOnly:true },{ k:'USU_TELEFONO',l:'Teléfono' },{ k:'ROL_ID',l:'ROL_ID',req:true },{ k:'USU_ACTIVO',l:'Activo',t:'checkbox' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'estado-espacio', label: 'Estado Espacio', id: 'EES_ID',
+        fields: [{ k:'EES_ID',l:'ID',req:true },{ k:'EES_ESTADO',l:'Estado',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'espacio', label: 'Espacio', id: 'ESP_ID',
+        fields: [{ k:'ESP_ID',l:'ID',req:true },{ k:'ESP_CODIGO',l:'Código',req:true },{ k:'EES_ID',l:'EES_ID' },{ k:'ESP_UBICACION',l:'Ubicación' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'cliente', label: 'Cliente', id: 'CLI_ID',
+        fields: [{ k:'CLI_ID',l:'ID',req:true },{ k:'CLI_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'CLI_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'CLI_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'CLI_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'CLI_DPI',l:'DPI',req:true },{ k:'CLI_NIT',l:'NIT' },{ k:'CLI_CORREO',l:'Correo' },{ k:'CLI_TELEFONO',l:'Teléfono' },{ k:'CLI_ZONA',l:'Zona' },{ k:'CLI_CALLE',l:'Calle' },{ k:'CLI_NUMERO',l:'Número' },{ k:'CLI_COLONIA',l:'Colonia' },{ k:'CLI_CIUDAD',l:'Ciudad' },{ k:'CLI_CODIGO_POSTAL',l:'Cód. Postal' },{ k:'CLI_ACTIVO',l:'Activo',t:'checkbox' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'tipo-vehiculo', label: 'Tipo Vehículo', id: 'TVE_ID',
+        fields: [{ k:'TVE_ID',l:'ID',req:true },{ k:'TVE_TIPO',l:'Tipo',req:true },{ k:'TVE_MARCA',l:'Marca' },{ k:'TVE_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'vehiculo', label: 'Vehículo', id: 'VEH_ID',
+        fields: [{ k:'VEH_ID',l:'ID',req:true },{ k:'VEH_PLACA',l:'Placa',req:true },{ k:'VEH_MODELO',l:'Modelo' },{ k:'VEH_COLOR',l:'Color' },{ k:'TVE_ID',l:'TVE_ID',req:true },{ k:'CLI_ID',l:'CLI_ID' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'estado-membresia', label: 'Estado Membresía', id: 'EME_ID',
+        fields: [{ k:'EME_ID',l:'ID',req:true },{ k:'EME_ESTADO',l:'Estado',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tipo-membresia', label: 'Tipo Membresía', id: 'TME_ID',
+        fields: [{ k:'TME_ID',l:'ID',req:true },{ k:'TME_TIPO',l:'Tipo',req:true },{ k:'TME_DESCRIPCION',l:'Descripción' },{ k:'TME_DURACION',l:'Duración (días)',t:'number',req:true },{ k:'TME_PRECIO',l:'Precio',t:'number',req:true }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'membresia', label: 'Membresía', id: 'MEM_ID',
+        fields: [{ k:'MEM_ID',l:'ID',req:true },{ k:'TME_ID',l:'TME_ID',req:true },{ k:'MEM_FECHA_INICIO',l:'Inicio',t:'datetime-local',req:true,createOnly:true },{ k:'EME_ID',l:'EME_ID' },{ k:'MEM_FECHA_VENCIMIENTO',l:'Vencimiento',t:'datetime-local',req:true },{ k:'MEM_FECHA_ULTIMO_CAMBIO_ESTADO',l:'Último Cambio',t:'datetime-local' },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'ESP_ID',l:'ESP_ID',req:true }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'registro-movimiento-membresia', label: 'Reg. Mov. Membresía', id: 'RMM_ID',
+        fields: [{ k:'RMM_ID',l:'ID',req:true },{ k:'RMM_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local' },{ k:'RMM_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'MEM_ID',l:'MEM_ID',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tipo-notificacion', label: 'Tipo Notificación', id: 'TNO_ID',
+        fields: [{ k:'TNO_ID',l:'ID',req:true },{ k:'TNO_TIPO',l:'Tipo',req:true },{ k:'TNO_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'notificacion', label: 'Notificación', id: 'NOT_ID',
+        fields: [{ k:'NOT_ID',l:'ID',req:true },{ k:'TNO_ID',l:'TNO_ID',req:true },{ k:'MEM_ID',l:'MEM_ID',req:true },{ k:'NOT_ULTIMA_FECHA_ENVIO',l:'Último Envío',t:'datetime-local',req:true },{ k:'NOT_PROXIMA_FECHA_ENVIO',l:'Próximo Envío',t:'datetime-local',req:true },{ k:'NOT_EXITO',l:'Éxito',t:'checkbox' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'incidente', label: 'Incidente', id: 'INC_ID',
+        fields: [{ k:'INC_ID',l:'ID',req:true },{ k:'INC_TIPO',l:'Tipo',req:true },{ k:'INC_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'bitacora-incidente-vehiculo', label: 'Bitácora Incidente', id: 'BIV_ID',
+        fields: [{ k:'BIV_ID',l:'ID',req:true },{ k:'BIV_DESCRIPCION',l:'Descripción' },{ k:'BIV_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'INC_ID',l:'INC_ID',req:true },{ k:'BIV_RESUELTO',l:'Resuelto',t:'checkbox' },{ k:'BIV_FECHA_RESOLUCION',l:'Fecha Resolución',t:'datetime-local' },{ k:'USU_ID',l:'USU_ID' }],
+        ops:{c:true,u:true,d:false}, updateFields:['BIV_RESUELTO','BIV_FECHA_RESOLUCION','USU_ID'] },
+      { key: 'tipo-pago', label: 'Tipo de Pago', id: 'TPA_ID',
+        fields: [{ k:'TPA_ID',l:'ID',req:true },{ k:'TPA_TIPO',l:'Tipo',req:true },{ k:'TPA_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'pago', label: 'Pago', id: 'PAG_ID',
+        fields: [{ k:'PAG_ID',l:'ID',req:true },{ k:'TPA_ID',l:'TPA_ID',req:true },{ k:'PAG_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'PAG_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'PAG_VUELTO',l:'Vuelto',t:'number' },{ k:'PAG_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'detalle-pago-membresia', label: 'Det. Pago Membresía', id: 'DPM_ID',
+        fields: [{ k:'DPM_ID',l:'ID',req:true },{ k:'MEM_ID',l:'MEM_ID',req:true },{ k:'PAG_ID',l:'PAG_ID',req:true },{ k:'DPM_MES_CANCELADO',l:'Mes Cancelado',t:'number',req:true }],
+        ops:{c:true,u:false,d:false} },
+    ],
+  },
+};
 
+// ── HELPERS ───────────────────────────────────────────────────
+function toInput(v, t) {
+  if (!v) return '';
+  try { const d = new Date(v); if (isNaN(d)) return ''; return t === 'date' ? d.toISOString().slice(0,10) : d.toISOString().slice(0,16); } catch { return ''; }
+}
+function emptyForm(fields) {
+  return Object.fromEntries(fields.map(f => [f.k, f.t === 'checkbox' ? 0 : '']));
+}
+function preparePayload(fields, form, editId) {
+  const out = {};
+  fields.forEach(f => {
+    const v = form[f.k];
+    if (f.t === 'checkbox') out[f.k] = v ? 1 : 0;
+    else if (f.t === 'number') out[f.k] = v !== '' && v != null ? Number(v) : null;
+    else if (f.t === 'datetime-local' || f.t === 'date') out[f.k] = v ? new Date(v).toISOString() : null;
+    else out[f.k] = v || null;
+  });
+  return out;
+}
+
+async function parseJsonSafe(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try { return JSON.parse(text); }
+  catch { return { message: text }; }
+}
+
+// ── COMPONENT ─────────────────────────────────────────────────
 export default function CrudDemo() {
-  const [clientes, setClientes] = useState([]);
-  const [espacios, setEspacios] = useState([]);
-  const [estadoEspacio, setEstadoEspacio] = useState([]);
-  const [estadoMaquina, setEstadoMaquina] = useState([]);
-  const [tipoMaquina, setTipoMaquina] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [usuarios, setUsuarios] = useState([]);
+  const [section, setSection] = useState('me-ms');
+  const [entity, setEntity]   = useState(null);
+  const [rows, setRows]        = useState([]);
+  const [loading, setLoading]  = useState(false);
+  const [form, setForm]        = useState({});
+  const [editId, setEditId]    = useState(null);
+  const [msg, setMsg]          = useState('');
 
-  const [loading, setLoading] = useState({
-    clientes: true, espacios: true, estadoEspacio: true, estadoMaquina: true,
-    tipoMaquina: true, roles: true, usuarios: true,
-  });
-  const [error, setError] = useState('');
+  useEffect(() => { if (entity) load(); }, [entity]);
 
-  const [editCliente, setEditCliente] = useState(null);
-  const [editEspacio, setEditEspacio] = useState(null);
-  const [editEstadoMaquina, setEditEstadoMaquina] = useState(null);
-  const [editTipoMaquina, setEditTipoMaquina] = useState(null);
-  const [editRol, setEditRol] = useState(null);
-  const [editUsuario, setEditUsuario] = useState(null);
-
-  const emptyCliente = {
-    CLI_ID: '', CLI_PRIMER_NOMBRE: '', CLI_SEGUNDO_NOMBRE: '',
-    CLI_PRIMER_APELLIDO: '', CLI_SEGUNDO_APELLIDO: '', CLI_DPI: '', CLI_NIT: '',
-    CLI_CORREO: '', CLI_TELEFONO: '', CLI_ZONA: '', CLI_CALLE: '', CLI_NUMERO: '',
-    CLI_COLONIA: '', CLI_CIUDAD: '', CLI_CODIGO_POSTAL: '', CLI_ACTIVO: 1,
-  };
-  const [formCliente, setFormCliente] = useState(emptyCliente);
-  const [formEspacio, setFormEspacio] = useState({
-    ESP_ID: '', ESP_CODIGO: '', EES_ID: '', ESP_UBICACION: '',
-  });
-  const [formEstadoEspacio, setFormEstadoEspacio] = useState({ EES_ID: '', EES_ESTADO: '' });
-  const [formEstadoMaquina, setFormEstadoMaquina] = useState({
-    EMA_ID: '', EMA_ESTADO: '', EMA_DESCRIPCION: '',
-  });
-  const [formTipoMaquina, setFormTipoMaquina] = useState({
-    TMA_ID: '', TMA_TIPO: '', TMA_DESCRIPCION: '',
-  });
-  const [formRol, setFormRol] = useState({
-    ROL_ID: '', ROL_TIPO: '', ROL_DESCRIPCION: '',
-  });
-  const [formUsuario, setFormUsuario] = useState({
-    USU_ID: '', USU_PRIMER_NOMBRE: '', USU_SEGUNDO_NOMBRE: '',
-    USU_PRIMER_APELLIDO: '', USU_SEGUNDO_APELLIDO: '', USU_CORREO: '',
-    USU_PASSWORD: '', USU_TELEFONO: '', ROL_ID: '', USU_ACTIVO: 1,
-  });
-
-  const api = (path, opt = {}) =>
-    fetch(`${API_BASE}${path}`, { ...opt, headers: { 'Content-Type': 'application/json', ...opt.headers } });
-
-  const fetchAll = (key, path) => async () => {
-    setLoading((l) => ({ ...l, [key]: true }));
-    setError('');
+  async function load() {
+    setLoading(true); setMsg('');
     try {
-      const res = await api(path);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      return toArr(data);
-    } catch (e) {
-      setError((err) => (err ? err + ' | ' : '') + `${key}: ${e.message}`);
-      return [];
-    } finally {
-      setLoading((l) => ({ ...l, [key]: false }));
-    }
-  };
+      const res = await fetch(`${API_BASE}/${entity.key}`);
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } catch (e) { setMsg('Error: ' + e.message); setRows([]); }
+    finally { setLoading(false); }
+  }
 
-  const fetchClientes = fetchAll('clientes', '/cliente');
-  const fetchEspacios = fetchAll('espacios', '/espacio');
-  const fetchEstadoEspacio = fetchAll('estadoEspacio', '/estado-espacio');
-  const fetchEstadoMaquina = fetchAll('estadoMaquina', '/estado-maquina');
-  const fetchTipoMaquina = fetchAll('tipoMaquina', '/tipo-maquina');
-  const fetchRoles = fetchAll('roles', '/rol');
-  const fetchUsuarios = fetchAll('usuarios', '/usuario');
+  function selectSection(s) {
+    setSection(s); setEntity(null); setRows([]); setEditId(null); setMsg('');
+  }
 
-  useEffect(() => {
-    (async () => {
-      setClientes(await fetchClientes());
-      setEspacios(await fetchEspacios());
-      setEstadoEspacio(await fetchEstadoEspacio());
-      setEstadoMaquina(await fetchEstadoMaquina());
-      setTipoMaquina(await fetchTipoMaquina());
-      setRoles(await fetchRoles());
-      setUsuarios(await fetchUsuarios());
-    })();
-  }, []);
+  function selectEntity(e) {
+    setEntity(e); setEditId(null); setForm(emptyForm(e.fields)); setMsg('');
+  }
 
-  const handleSaveCliente = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = {
-      ...formCliente,
-      CLI_ACTIVO: formCliente.CLI_ACTIVO ? 1 : 0,
-    };
+  function startEdit(row) {
+    const fields = entity.updateFields
+      ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+      : entity.fields;
+    const f = {};
+    fields.forEach(fd => {
+      const v = row[fd.k];
+      if (fd.t === 'checkbox') f[fd.k] = v == 1 ? 1 : 0;
+      else if (fd.t === 'datetime-local' || fd.t === 'date') f[fd.k] = toInput(v, fd.t);
+      else f[fd.k] = v ?? '';
+    });
+    setForm(f); setEditId(row[entity.id]);
+  }
+
+  function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); }
+
+  async function save(e) {
+    e.preventDefault(); setMsg('');
+    const isEdit = editId != null && editId !== '__new__';
+    const fieldsToUse =
+      isEdit && entity.updateFields
+        ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+        : entity.fields.filter(f => !(isEdit && f.createOnly));
+    const payload = preparePayload(fieldsToUse, form, editId);
     try {
-      if (editCliente != null) {
-        const res = await api(`/cliente/${editCliente.CLI_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+      const res = await fetch(
+        `${API_BASE}/${entity.key}${isEdit ? '/' + editId : ''}`,
+        { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+      );
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMsg(isEdit ? 'Actualizado.' : 'Creado.');
+      cancelEdit(); load();
+    } catch (err) { setMsg('Error: ' + err.message); }
+  }
+
+  async function del(id) {
+    if (!confirm(`¿Eliminar "${id}"?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/${entity.key}/${id}`, { method: 'DELETE' });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMsg('Eliminado.'); load();
+    } catch (err) {
+      const txt = String(err.message || '');
+      if (/ORA-20001|ORA-02292/i.test(txt)) {
+        setMsg('No se puede eliminar porque este registro está siendo usado por otro.');
       } else {
-        const res = await api('/cliente', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+        setMsg('Error: ' + txt);
       }
-      setEditCliente(null);
-      setFormCliente(emptyCliente);
-      setClientes(await fetchClientes());
-    } catch (e) {
-      setError('Cliente: ' + e.message);
     }
-  };
+  }
 
-  const handleSaveEspacio = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = {
-      ...formEspacio,
-      EES_ID: formEspacio.EES_ID || null,
-    };
-    try {
-      if (editEspacio != null) {
-        const res = await api(`/espacio/${editEspacio.ESP_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/espacio', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditEspacio(null);
-      setFormEspacio({ ESP_ID: '', ESP_CODIGO: '', EES_ID: '', ESP_UBICACION: '' });
-      setEspacios(await fetchEspacios());
-    } catch (e) {
-      setError('Espacio: ' + e.message);
-    }
-  };
-
-  const handleSaveEstadoEspacio = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      const res = await api('/estado-espacio', { method: 'POST', body: JSON.stringify(formEstadoEspacio) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      setFormEstadoEspacio({ EES_ID: '', EES_ESTADO: '' });
-      setEstadoEspacio(await fetchEstadoEspacio());
-    } catch (e) {
-      setError('Estado espacio: ' + e.message);
-    }
-  };
-
-  const handleSaveEstadoMaquina = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = { ...formEstadoMaquina };
-    try {
-      if (editEstadoMaquina != null) {
-        const res = await api(`/estado-maquina/${editEstadoMaquina.EMA_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/estado-maquina', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditEstadoMaquina(null);
-      setFormEstadoMaquina({ EMA_ID: '', EMA_ESTADO: '', EMA_DESCRIPCION: '' });
-      setEstadoMaquina(await fetchEstadoMaquina());
-    } catch (e) {
-      setError('Estado máquina: ' + e.message);
-    }
-  };
-
-  const handleSaveTipoMaquina = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = { ...formTipoMaquina };
-    try {
-      if (editTipoMaquina != null) {
-        const res = await api(`/tipo-maquina/${editTipoMaquina.TMA_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/tipo-maquina', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditTipoMaquina(null);
-      setFormTipoMaquina({ TMA_ID: '', TMA_TIPO: '', TMA_DESCRIPCION: '' });
-      setTipoMaquina(await fetchTipoMaquina());
-    } catch (e) {
-      setError('Tipo máquina: ' + e.message);
-    }
-  };
-
-  const handleSaveRol = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = { ...formRol };
-    try {
-      if (editRol != null) {
-        const res = await api(`/rol/${editRol.ROL_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/rol', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditRol(null);
-      setFormRol({ ROL_ID: '', ROL_TIPO: '', ROL_DESCRIPCION: '' });
-      setRoles(await fetchRoles());
-    } catch (e) {
-      setError('Rol: ' + e.message);
-    }
-  };
-
-  const handleSaveUsuario = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = {
-      ...formUsuario,
-      USU_ACTIVO: formUsuario.USU_ACTIVO ? 1 : 0,
-    };
-    try {
-      if (editUsuario != null) {
-        const res = await api(`/usuario/${editUsuario.USU_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/usuario', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditUsuario(null);
-      setFormUsuario({
-        USU_ID: '', USU_PRIMER_NOMBRE: '', USU_SEGUNDO_NOMBRE: '',
-        USU_PRIMER_APELLIDO: '', USU_SEGUNDO_APELLIDO: '', USU_CORREO: '',
-        USU_PASSWORD: '', USU_TELEFONO: '', ROL_ID: '', USU_ACTIVO: 1,
-      });
-      setUsuarios(await fetchUsuarios());
-    } catch (e) {
-      setError('Usuario: ' + e.message);
-    }
-  };
-
-  const handleDelete = (path, id, fetchList, setListState) => async () => {
-    if (!confirm('¿Eliminar?')) return;
-    setError('');
-    try {
-      const res = await api(`${path}/${id}`, { method: 'DELETE' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      const list = await fetchList();
-      setListState(list);
-    } catch (e) {
-      setError('Eliminar: ' + e.message);
-    }
-  };
-
-  const listItem = (item, onEdit, onDelete, label) => (
-    <li key={item.id ?? item.CLI_ID ?? item.ESP_ID ?? item.EES_ID ?? item.EMA_ID ?? item.TMA_ID ?? item.ROL_ID ?? item.USU_ID} className="crud-list-item">
-      <span>{label}</span>
-      <div className="crud-list-actions">
-        <button type="button" className="btn-editar" onClick={() => onEdit(item)}>Editar</button>
-        {onDelete && (
-          <button type="button" className="btn-eliminar" onClick={onDelete}>Eliminar</button>
-        )}
-      </div>
-    </li>
-  );
+  const sectionEntities = SECTIONS[section]?.entities ?? [];
+  const isNewRecord = editId === '__new__';
+  const formFields = entity
+    ? !isNewRecord && editId && entity.updateFields
+        ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+        : entity.fields.filter(f => !(editId && !isNewRecord && f.createOnly))
+    : [];
 
   return (
-    <div className="crud-demo">
-      <h2 className="crud-title">Gestión de Datos (CRUD)</h2>
-      {error && <div className="crud-error">{error}</div>}
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', fontFamily:'system-ui,sans-serif', fontSize:14 }}>
 
-      {/* Clientes */}
-      <section className="crud-section">
-        <h3>Clientes</h3>
-        {loading.clientes ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {clientes.length === 0 ? <li className="crud-list-empty">No hay clientes.</li> : clientes.map((c) =>
-              listItem(c, (x) => {
-                setEditCliente(x);
-                setFormCliente({
-                  CLI_ID: x.CLI_ID ?? '', CLI_PRIMER_NOMBRE: x.CLI_PRIMER_NOMBRE ?? '', CLI_SEGUNDO_NOMBRE: x.CLI_SEGUNDO_NOMBRE ?? '',
-                  CLI_PRIMER_APELLIDO: x.CLI_PRIMER_APELLIDO ?? '', CLI_SEGUNDO_APELLIDO: x.CLI_SEGUNDO_APELLIDO ?? '', CLI_DPI: x.CLI_DPI ?? '', CLI_NIT: x.CLI_NIT ?? '',
-                  CLI_CORREO: x.CLI_CORREO ?? '', CLI_TELEFONO: x.CLI_TELEFONO ?? '', CLI_ZONA: x.CLI_ZONA ?? '', CLI_CALLE: x.CLI_CALLE ?? '', CLI_NUMERO: x.CLI_NUMERO ?? '',
-                  CLI_COLONIA: x.CLI_COLONIA ?? '', CLI_CIUDAD: x.CLI_CIUDAD ?? '', CLI_CODIGO_POSTAL: x.CLI_CODIGO_POSTAL ?? '', CLI_ACTIVO: x.CLI_ACTIVO ?? 1,
-                });
-              }, null,
-                `ID: ${c.CLI_ID} — ${c.CLI_PRIMER_NOMBRE} ${c.CLI_PRIMER_APELLIDO} — DPI: ${c.CLI_DPI} — ${c.CLI_CORREO ?? '-'} — Tel: ${c.CLI_TELEFONO ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editCliente ? 'Editar cliente' : 'Agregar cliente'}</h4>
-          <form onSubmit={handleSaveCliente} className="crud-form crud-form-cliente">
-            <input placeholder="ID" value={formCliente.CLI_ID} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_ID: e.target.value }))} disabled={editCliente != null} />
-            <input placeholder="Primer nombre" value={formCliente.CLI_PRIMER_NOMBRE} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_PRIMER_NOMBRE: e.target.value }))} required />
-            <input placeholder="Segundo nombre" value={formCliente.CLI_SEGUNDO_NOMBRE} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_SEGUNDO_NOMBRE: e.target.value }))} />
-            <input placeholder="Primer apellido" value={formCliente.CLI_PRIMER_APELLIDO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_PRIMER_APELLIDO: e.target.value }))} required />
-            <input placeholder="Segundo apellido" value={formCliente.CLI_SEGUNDO_APELLIDO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_SEGUNDO_APELLIDO: e.target.value }))} />
-            <input placeholder="DPI" value={formCliente.CLI_DPI} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_DPI: e.target.value }))} required />
-            <input placeholder="NIT" value={formCliente.CLI_NIT} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_NIT: e.target.value }))} />
-            <input placeholder="Correo" type="email" value={formCliente.CLI_CORREO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CORREO: e.target.value }))} />
-            <input placeholder="Teléfono" value={formCliente.CLI_TELEFONO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_TELEFONO: e.target.value }))} />
-            <input placeholder="Zona" value={formCliente.CLI_ZONA} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_ZONA: e.target.value }))} />
-            <input placeholder="Calle" value={formCliente.CLI_CALLE} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CALLE: e.target.value }))} />
-            <input placeholder="Número" value={formCliente.CLI_NUMERO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_NUMERO: e.target.value }))} />
-            <input placeholder="Colonia" value={formCliente.CLI_COLONIA} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_COLONIA: e.target.value }))} />
-            <input placeholder="Ciudad" value={formCliente.CLI_CIUDAD} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CIUDAD: e.target.value }))} />
-            <input placeholder="Código postal" value={formCliente.CLI_CODIGO_POSTAL} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CODIGO_POSTAL: e.target.value }))} />
-            <label className="crud-checkbox"><input type="checkbox" checked={!!formCliente.CLI_ACTIVO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_ACTIVO: e.target.checked ? 1 : 0 }))} /> Activo</label>
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editCliente && <button type="button" onClick={() => { setEditCliente(null); setFormCliente(emptyCliente); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
+      {/* Tabs */}
+      <div style={{ padding:'8px 12px', borderBottom:'1px solid #ccc', display:'flex', gap:8 }}>
+        {Object.entries(SECTIONS).map(([k, s]) => (
+          <button key={k} onClick={() => selectSection(k)}
+            style={{ padding:'5px 12px', cursor:'pointer', fontWeight: section===k ? 700 : 400,
+              background: section===k ? '#222' : '#fff', color: section===k ? '#fff' : '#222',
+              border:'1px solid #999', borderRadius:4 }}>
+            {s.label}
+          </button>
+        ))}
+      </div>
 
-      {/* Espacios */}
-      <section className="crud-section">
-        <h3>Espacios</h3>
-        {loading.espacios ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {espacios.length === 0 ? <li className="crud-list-empty">No hay espacios.</li> : espacios.map((e) =>
-              listItem(e, (x) => { setEditEspacio(x); setFormEspacio({ ESP_ID: x.ESP_ID, ESP_CODIGO: x.ESP_CODIGO ?? '', EES_ID: x.EES_ID ?? '', ESP_UBICACION: x.ESP_UBICACION ?? '' }); }, null,
-                `ID: ${e.ESP_ID} — Código: ${e.ESP_CODIGO} — Estado: ${e.EES_ESTADO ?? e.EES_ID ?? '-'} — ${e.ESP_UBICACION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editEspacio ? 'Editar espacio' : 'Agregar espacio'}</h4>
-          <form onSubmit={handleSaveEspacio} className="crud-form">
-            <input placeholder="ID" value={formEspacio.ESP_ID} onChange={(e) => setFormEspacio((f) => ({ ...f, ESP_ID: e.target.value }))} disabled={editEspacio != null} />
-            <input placeholder="Código" value={formEspacio.ESP_CODIGO} onChange={(e) => setFormEspacio((f) => ({ ...f, ESP_CODIGO: e.target.value }))} required />
-            <input placeholder="EES_ID" value={formEspacio.EES_ID} onChange={(e) => setFormEspacio((f) => ({ ...f, EES_ID: e.target.value }))} />
-            <input placeholder="Ubicación" value={formEspacio.ESP_UBICACION} onChange={(e) => setFormEspacio((f) => ({ ...f, ESP_UBICACION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editEspacio && <button type="button" onClick={() => { setEditEspacio(null); setFormEspacio({ ESP_ID: '', ESP_CODIGO: '', EES_ID: '', ESP_UBICACION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
+      <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
 
-      {/* Estado Espacio (solo listar + agregar) */}
-      <section className="crud-section">
-        <h3>Estado Espacio</h3>
-        {loading.estadoEspacio ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {estadoEspacio.length === 0 ? <li className="crud-list-empty">No hay registros.</li> : estadoEspacio.map((x) => (
-              <li key={x.EES_ID} className="crud-list-item">
-                <span>ID: {x.EES_ID} — Estado: {x.EES_ESTADO}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>Agregar estado espacio</h4>
-          <form onSubmit={handleSaveEstadoEspacio} className="crud-form">
-            <input placeholder="EES_ID" value={formEstadoEspacio.EES_ID} onChange={(e) => setFormEstadoEspacio((f) => ({ ...f, EES_ID: e.target.value }))} required />
-            <input placeholder="EES_ESTADO" value={formEstadoEspacio.EES_ESTADO} onChange={(e) => setFormEstadoEspacio((f) => ({ ...f, EES_ESTADO: e.target.value }))} required />
-            <button type="submit">Guardar</button>
-          </form>
+        {/* Sidebar */}
+        <div style={{ width:170, borderRight:'1px solid #ccc', overflowY:'auto', padding:'4px 0' }}>
+          {sectionEntities.map(e => (
+            <button key={e.key} onClick={() => selectEntity(e)}
+              style={{ display:'block', width:'100%', textAlign:'left', border:'none', background: entity?.key === e.key ? '#e8f0fe' : 'transparent',
+                padding:'7px 12px', cursor:'pointer',
+                fontWeight: entity?.key === e.key ? 700 : 400,
+                borderLeft: entity?.key === e.key ? '3px solid #1a73e8' : '3px solid transparent' }}>
+              {e.label}
+            </button>
+          ))}
         </div>
-      </section>
 
-      {/* Estado Máquina */}
-      <section className="crud-section">
-        <h3>Estado Máquina</h3>
-        {loading.estadoMaquina ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {estadoMaquina.length === 0 ? <li className="crud-list-empty">No hay registros.</li> : estadoMaquina.map((x) =>
-              listItem(x,
-                (item) => { setEditEstadoMaquina(item); setFormEstadoMaquina({ EMA_ID: item.EMA_ID, EMA_ESTADO: item.EMA_ESTADO ?? '', EMA_DESCRIPCION: item.EMA_DESCRIPCION ?? '' }); },
-                () => handleDelete('/estado-maquina', x.EMA_ID, fetchEstadoMaquina, setEstadoMaquina)(),
-                `ID: ${x.EMA_ID} — ${x.EMA_ESTADO} — ${x.EMA_DESCRIPCION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editEstadoMaquina ? 'Editar estado máquina' : 'Agregar estado máquina'}</h4>
-          <form onSubmit={handleSaveEstadoMaquina} className="crud-form">
-            <input placeholder="EMA_ID" value={formEstadoMaquina.EMA_ID} onChange={(e) => setFormEstadoMaquina((f) => ({ ...f, EMA_ID: e.target.value }))} disabled={editEstadoMaquina != null} />
-            <input placeholder="Estado" value={formEstadoMaquina.EMA_ESTADO} onChange={(e) => setFormEstadoMaquina((f) => ({ ...f, EMA_ESTADO: e.target.value }))} required />
-            <input placeholder="Descripción" value={formEstadoMaquina.EMA_DESCRIPCION} onChange={(e) => setFormEstadoMaquina((f) => ({ ...f, EMA_DESCRIPCION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editEstadoMaquina && <button type="button" onClick={() => { setEditEstadoMaquina(null); setFormEstadoMaquina({ EMA_ID: '', EMA_ESTADO: '', EMA_DESCRIPCION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
+        {/* Main */}
+        <div style={{ flex:1, overflow:'auto', padding:16 }}>
+          {!entity && <p style={{ color:'#888' }}>Selecciona una entidad</p>}
 
-      {/* Tipo Máquina */}
-      <section className="crud-section">
-        <h3>Tipo Máquina</h3>
-        {loading.tipoMaquina ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {tipoMaquina.length === 0 ? <li className="crud-list-empty">No hay registros.</li> : tipoMaquina.map((x) =>
-              listItem(x,
-                (item) => { setEditTipoMaquina(item); setFormTipoMaquina({ TMA_ID: item.TMA_ID, TMA_TIPO: item.TMA_TIPO ?? '', TMA_DESCRIPCION: item.TMA_DESCRIPCION ?? '' }); },
-                () => handleDelete('/tipo-maquina', x.TMA_ID, fetchTipoMaquina, setTipoMaquina)(),
-                `ID: ${x.TMA_ID} — ${x.TMA_TIPO} — ${x.TMA_DESCRIPCION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editTipoMaquina ? 'Editar tipo máquina' : 'Agregar tipo máquina'}</h4>
-          <form onSubmit={handleSaveTipoMaquina} className="crud-form">
-            <input placeholder="TMA_ID" value={formTipoMaquina.TMA_ID} onChange={(e) => setFormTipoMaquina((f) => ({ ...f, TMA_ID: e.target.value }))} disabled={editTipoMaquina != null} />
-            <input placeholder="Tipo" value={formTipoMaquina.TMA_TIPO} onChange={(e) => setFormTipoMaquina((f) => ({ ...f, TMA_TIPO: e.target.value }))} required />
-            <input placeholder="Descripción" value={formTipoMaquina.TMA_DESCRIPCION} onChange={(e) => setFormTipoMaquina((f) => ({ ...f, TMA_DESCRIPCION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editTipoMaquina && <button type="button" onClick={() => { setEditTipoMaquina(null); setFormTipoMaquina({ TMA_ID: '', TMA_TIPO: '', TMA_DESCRIPCION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
+          {entity && (
+            <>
+              <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:10 }}>
+                <strong>{entity.label}</strong>
+                {entity.ops.c && !editId && (
+                  <button onClick={() => { setEditId('__new__'); setForm(emptyForm(entity.fields)); }}
+                    style={{ padding:'4px 10px', cursor:'pointer' }}>
+                    + Nuevo
+                  </button>
+                )}
+                {msg && <span style={{ color: msg.startsWith('Error') ? 'red' : 'green' }}>{msg}</span>}
+              </div>
 
-      {/* Rol */}
-      <section className="crud-section">
-        <h3>Roles</h3>
-        {loading.roles ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {roles.length === 0 ? <li className="crud-list-empty">No hay roles.</li> : roles.map((x) =>
-              listItem(x,
-                (item) => { setEditRol(item); setFormRol({ ROL_ID: item.ROL_ID, ROL_TIPO: item.ROL_TIPO ?? '', ROL_DESCRIPCION: item.ROL_DESCRIPCION ?? '' }); },
-                () => handleDelete('/rol', x.ROL_ID, fetchRoles, setRoles)(),
-                `ID: ${x.ROL_ID} — ${x.ROL_TIPO} — ${x.ROL_DESCRIPCION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editRol ? 'Editar rol' : 'Agregar rol'}</h4>
-          <form onSubmit={handleSaveRol} className="crud-form">
-            <input placeholder="ROL_ID" value={formRol.ROL_ID} onChange={(e) => setFormRol((f) => ({ ...f, ROL_ID: e.target.value }))} disabled={editRol != null} />
-            <input placeholder="Tipo" value={formRol.ROL_TIPO} onChange={(e) => setFormRol((f) => ({ ...f, ROL_TIPO: e.target.value }))} required />
-            <input placeholder="Descripción" value={formRol.ROL_DESCRIPCION} onChange={(e) => setFormRol((f) => ({ ...f, ROL_DESCRIPCION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editRol && <button type="button" onClick={() => { setEditRol(null); setFormRol({ ROL_ID: '', ROL_TIPO: '', ROL_DESCRIPCION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
+              {/* Form */}
+              {editId && (
+                <form onSubmit={save} style={{ background:'#f9f9f9', border:'1px solid #ddd', borderRadius:4, padding:12, marginBottom:12, display:'flex', flexWrap:'wrap', gap:8 }}>
+                  <div style={{ width:'100%', marginBottom:4 }}>
+                    <strong>{editId === '__new__' ? 'Nuevo registro' : `Editando: ${editId}`}</strong>
+                  </div>
+                  {formFields.map(f => (
+                    <div key={f.k} style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                      <label style={{ fontSize:11, color:'#666' }}>{f.l}{f.req ? ' *' : ''}</label>
+                      {f.t === 'checkbox' ? (
+                        <input type="checkbox" checked={!!form[f.k]}
+                          onChange={ev => setForm(p => ({ ...p, [f.k]: ev.target.checked ? 1 : 0 }))} />
+                      ) : (
+                        <input
+                          type={f.t === 'password' && editId !== '__new__' ? 'text' : (f.t || 'text')}
+                          value={form[f.k] ?? ''}
+                          required={!!f.req}
+                          disabled={f.k === entity.id && editId !== '__new__'}
+                          style={{ padding:'4px 6px', border:'1px solid #ccc', borderRadius:3, width: f.t === 'datetime-local' ? 175 : 130 }}
+                          onChange={ev => setForm(p => ({ ...p, [f.k]: ev.target.value }))} />
+                      )}
+                    </div>
+                  ))}
+                  <div style={{ width:'100%', display:'flex', gap:8, marginTop:4 }}>
+                    <button type="submit" style={{ padding:'5px 12px', cursor:'pointer' }}>Guardar</button>
+                    <button type="button" onClick={cancelEdit} style={{ padding:'5px 12px', cursor:'pointer' }}>Cancelar</button>
+                  </div>
+                </form>
+              )}
 
-      {/* Usuario */}
-      <section className="crud-section">
-        <h3>Usuarios</h3>
-        {loading.usuarios ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {usuarios.length === 0 ? <li className="crud-list-empty">No hay usuarios.</li> : usuarios.map((u) =>
-              listItem(u,
-                (item) => {
-                  setEditUsuario(item);
-                  setFormUsuario({
-                    USU_ID: item.USU_ID, USU_PRIMER_NOMBRE: item.USU_PRIMER_NOMBRE ?? '', USU_SEGUNDO_NOMBRE: item.USU_SEGUNDO_NOMBRE ?? '',
-                    USU_PRIMER_APELLIDO: item.USU_PRIMER_APELLIDO ?? '', USU_SEGUNDO_APELLIDO: item.USU_SEGUNDO_APELLIDO ?? '',
-                    USU_CORREO: item.USU_CORREO ?? '', USU_PASSWORD: '', USU_TELEFONO: item.USU_TELEFONO ?? '',
-                    ROL_ID: item.ROL_ID ?? '', USU_ACTIVO: item.USU_ACTIVO ?? 1,
-                  });
-                },
-                null,
-                `ID: ${u.USU_ID} — ${u.USU_PRIMER_NOMBRE} ${u.USU_PRIMER_APELLIDO} — ${u.USU_CORREO} — Rol: ${u.ROL_ID}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editUsuario ? 'Editar usuario' : 'Agregar usuario'}</h4>
-          <form onSubmit={handleSaveUsuario} className="crud-form crud-form-cliente">
-            <input placeholder="USU_ID" value={formUsuario.USU_ID} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_ID: e.target.value }))} disabled={editUsuario != null} />
-            <input placeholder="Primer nombre" value={formUsuario.USU_PRIMER_NOMBRE} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_PRIMER_NOMBRE: e.target.value }))} required />
-            <input placeholder="Segundo nombre" value={formUsuario.USU_SEGUNDO_NOMBRE} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_SEGUNDO_NOMBRE: e.target.value }))} />
-            <input placeholder="Primer apellido" value={formUsuario.USU_PRIMER_APELLIDO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_PRIMER_APELLIDO: e.target.value }))} required />
-            <input placeholder="Segundo apellido" value={formUsuario.USU_SEGUNDO_APELLIDO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_SEGUNDO_APELLIDO: e.target.value }))} />
-            <input placeholder="Correo" type="email" value={formUsuario.USU_CORREO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_CORREO: e.target.value }))} required />
-            <input placeholder="Password" type="password" value={formUsuario.USU_PASSWORD} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_PASSWORD: e.target.value }))} />
-            <input placeholder="Teléfono" value={formUsuario.USU_TELEFONO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_TELEFONO: e.target.value }))} />
-            <input placeholder="ROL_ID" value={formUsuario.ROL_ID} onChange={(e) => setFormUsuario((f) => ({ ...f, ROL_ID: e.target.value }))} required />
-            <label className="crud-checkbox"><input type="checkbox" checked={!!formUsuario.USU_ACTIVO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_ACTIVO: e.target.checked ? 1 : 0 }))} /> Activo</label>
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editUsuario && <button type="button" onClick={() => { setEditUsuario(null); setFormUsuario({ USU_ID: '', USU_PRIMER_NOMBRE: '', USU_SEGUNDO_NOMBRE: '', USU_PRIMER_APELLIDO: '', USU_SEGUNDO_APELLIDO: '', USU_CORREO: '', USU_PASSWORD: '', USU_TELEFONO: '', ROL_ID: '', USU_ACTIVO: 1 }); }}>Cancelar</button>}
-            </div>
-          </form>
+              {/* Table */}
+              {loading ? <p>Cargando…</p> : rows.length === 0 ? <p style={{ color:'#888' }}>Sin registros</p> : (
+                <table style={{ borderCollapse:'collapse', width:'100%', fontSize:13 }}>
+                  <thead>
+                    <tr style={{ background:'#f0f0f0' }}>
+                      {Object.keys(rows[0]).map(c => <th key={c} style={{ padding:'6px 8px', textAlign:'left', border:'1px solid #ddd', whiteSpace:'nowrap' }}>{c}</th>)}
+                      {(entity.ops.u || entity.ops.d) && <th style={{ padding:'6px 8px', border:'1px solid #ddd' }}>Acc.</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, i) => (
+                      <tr key={i} style={{ background: i%2 ? '#fafafa' : '#fff' }}>
+                        {Object.entries(row).map(([c, v]) => (
+                          <td key={c} style={{ padding:'5px 8px', border:'1px solid #eee', whiteSpace:'nowrap', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis' }}>
+                            {v == null ? '—'
+                              : c === 'USU_PASSWORD' ? '••••'
+                              : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
+                              : String(v)}
+                          </td>
+                        ))}
+                        {(entity.ops.u || entity.ops.d) && (
+                          <td style={{ padding:'4px 8px', border:'1px solid #eee', whiteSpace:'nowrap' }}>
+                            {entity.ops.u && <button onClick={() => startEdit(row)} style={{ marginRight:4, cursor:'pointer', padding:'2px 8px' }}>Editar</button>}
+                            {entity.ops.d && <button onClick={() => del(row[entity.id])} style={{ cursor:'pointer', padding:'2px 8px', color:'red' }}>Eliminar</button>}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
         </div>
-      </section>
+      </div>
     </div>
   );
 }
