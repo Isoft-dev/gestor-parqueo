@@ -1,7 +1,3 @@
--- ============================================================
--- Stored Procedures para PAR_ROL
--- ============================================================
-
 CREATE OR REPLACE PROCEDURE SP_ROL_GET_ALL (
     p_cursor OUT SYS_REFCURSOR
 ) AS
@@ -10,7 +6,7 @@ BEGIN
         SELECT ROL_ID, ROL_TIPO, ROL_DESCRIPCION
         FROM PAR_ROL
         ORDER BY ROL_ID;
-END;
+END SP_ROL_GET_ALL;
 /
 
 CREATE OR REPLACE PROCEDURE SP_ROL_GET_BY_ID (
@@ -22,7 +18,7 @@ BEGIN
         SELECT ROL_ID, ROL_TIPO, ROL_DESCRIPCION
         FROM PAR_ROL
         WHERE ROL_ID = p_id;
-END;
+END SP_ROL_GET_BY_ID;
 /
 
 CREATE OR REPLACE PROCEDURE SP_ROL_CREATE (
@@ -33,7 +29,8 @@ CREATE OR REPLACE PROCEDURE SP_ROL_CREATE (
 BEGIN
     INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
     VALUES (p_rol_id, p_rol_tipo, p_rol_descripcion);
-END;
+    COMMIT;
+END SP_ROL_CREATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_ROL_UPDATE (
@@ -46,7 +43,8 @@ BEGIN
     SET ROL_TIPO        = p_rol_tipo,
         ROL_DESCRIPCION = p_rol_descripcion
     WHERE ROL_ID = p_rol_id;
-END;
+    COMMIT;
+END SP_ROL_UPDATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_ROL_DELETE (
@@ -58,12 +56,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM PAR_USUARIO
     WHERE ROL_ID = p_id;
-
     IF v_count > 0 THEN
         RAISE_APPLICATION_ERROR(-20001, 'No se puede eliminar: el rol tiene usuarios asociados');
     END IF;
-
     DELETE FROM PAR_ROL WHERE ROL_ID = p_id;
     p_deleted := SQL%ROWCOUNT;
-END;
+    COMMIT;
+END SP_ROL_DELETE;
 /
