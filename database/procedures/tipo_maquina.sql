@@ -1,7 +1,3 @@
--- ============================================================
--- Stored Procedures para PAR_TIPO_MAQUINA
--- ============================================================
-
 CREATE OR REPLACE PROCEDURE SP_TIPO_MAQUINA_GET_ALL (
     p_cursor OUT SYS_REFCURSOR
 ) AS
@@ -10,7 +6,7 @@ BEGIN
         SELECT TMA_ID, TMA_TIPO, TMA_DESCRIPCION
         FROM PAR_TIPO_MAQUINA
         ORDER BY TMA_ID;
-END;
+END SP_TIPO_MAQUINA_GET_ALL;
 /
 
 CREATE OR REPLACE PROCEDURE SP_TIPO_MAQUINA_GET_BY_ID (
@@ -22,7 +18,7 @@ BEGIN
         SELECT TMA_ID, TMA_TIPO, TMA_DESCRIPCION
         FROM PAR_TIPO_MAQUINA
         WHERE TMA_ID = p_id;
-END;
+END SP_TIPO_MAQUINA_GET_BY_ID;
 /
 
 CREATE OR REPLACE PROCEDURE SP_TIPO_MAQUINA_CREATE (
@@ -33,7 +29,8 @@ CREATE OR REPLACE PROCEDURE SP_TIPO_MAQUINA_CREATE (
 BEGIN
     INSERT INTO PAR_TIPO_MAQUINA (TMA_ID, TMA_TIPO, TMA_DESCRIPCION)
     VALUES (p_tma_id, p_tma_tipo, p_tma_descripcion);
-END;
+    COMMIT;
+END SP_TIPO_MAQUINA_CREATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_TIPO_MAQUINA_UPDATE (
@@ -46,15 +43,22 @@ BEGIN
     SET TMA_TIPO        = p_tma_tipo,
         TMA_DESCRIPCION = p_tma_descripcion
     WHERE TMA_ID = p_tma_id;
-END;
+    COMMIT;
+END SP_TIPO_MAQUINA_UPDATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_TIPO_MAQUINA_DELETE (
     p_id      IN  VARCHAR2,
     p_deleted OUT NUMBER
 ) AS
+    v_count NUMBER;
 BEGIN
+    SELECT COUNT(*) INTO v_count FROM PAR_MAQUINA WHERE TMA_ID = p_id;
+    IF v_count > 0 THEN
+        RAISE_APPLICATION_ERROR(-20001, 'No se puede eliminar: existen máquinas con este tipo');
+    END IF;
     DELETE FROM PAR_TIPO_MAQUINA WHERE TMA_ID = p_id;
     p_deleted := SQL%ROWCOUNT;
-END;
+    COMMIT;
+END SP_TIPO_MAQUINA_DELETE;
 /

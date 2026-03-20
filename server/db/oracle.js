@@ -2,6 +2,8 @@ import oracledb from 'oracledb';
 import { oracleConfig, isOracleConfigured } from '../config.js';
 
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
+// Return CLOB columns as strings automatically (avoids Lob circular-ref issues)
+oracledb.fetchAsString = [oracledb.CLOB];
 
 let pool = null;
 

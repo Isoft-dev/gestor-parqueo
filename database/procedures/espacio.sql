@@ -1,7 +1,3 @@
--- ============================================================
--- Stored Procedures para PAR_ESPACIO
--- ============================================================
-
 CREATE OR REPLACE PROCEDURE SP_ESPACIO_GET_ALL (
     p_cursor OUT SYS_REFCURSOR
 ) AS
@@ -12,7 +8,7 @@ BEGIN
         FROM PAR_ESPACIO e
         LEFT JOIN PAR_ESTADO_ESPACIO ee ON e.EES_ID = ee.EES_ID
         ORDER BY e.ESP_ID;
-END;
+END SP_ESPACIO_GET_ALL;
 /
 
 CREATE OR REPLACE PROCEDURE SP_ESPACIO_GET_BY_ID (
@@ -26,7 +22,7 @@ BEGIN
         FROM PAR_ESPACIO e
         LEFT JOIN PAR_ESTADO_ESPACIO ee ON e.EES_ID = ee.EES_ID
         WHERE e.ESP_ID = p_id;
-END;
+END SP_ESPACIO_GET_BY_ID;
 /
 
 CREATE OR REPLACE PROCEDURE SP_ESPACIO_CREATE (
@@ -38,7 +34,8 @@ CREATE OR REPLACE PROCEDURE SP_ESPACIO_CREATE (
 BEGIN
     INSERT INTO PAR_ESPACIO (ESP_ID, ESP_CODIGO, EES_ID, ESP_UBICACION)
     VALUES (p_esp_id, p_esp_codigo, p_ees_id, p_esp_ubicacion);
-END;
+    COMMIT;
+END SP_ESPACIO_CREATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_ESPACIO_UPDATE (
@@ -53,5 +50,6 @@ BEGIN
         EES_ID        = p_ees_id,
         ESP_UBICACION = p_esp_ubicacion
     WHERE ESP_ID = p_esp_id;
-END;
+    COMMIT;
+END SP_ESPACIO_UPDATE;
 /

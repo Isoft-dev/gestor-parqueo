@@ -10,17 +10,41 @@ export async function getById(id) {
 }
 
 export async function create(data) {
-  await executeProcedure(`BEGIN SP_COBRO_CREATE(:COB_ID, :COB_HORAS_TOTALES, :TCO_ID, :COB_MONTO_TOTAL, :COB_MONTO_RECIBIDO, :COB_VUELTO, :COB_FECHA_HORA, :COB_PROCESADO_MAQUINA, :TAR_ID); END;`, {
-    COB_ID: data.COB_ID ?? null,
-    COB_HORAS_TOTALES: data.COB_HORAS_TOTALES ?? null,
-    TCO_ID: data.TCO_ID ?? null,
-    COB_MONTO_TOTAL: data.COB_MONTO_TOTAL ?? null,
-    COB_MONTO_RECIBIDO: data.COB_MONTO_RECIBIDO ?? null,
-    COB_VUELTO: data.COB_VUELTO ?? null,
-    COB_FECHA_HORA: data.COB_FECHA_HORA ?? null,
-    COB_PROCESADO_MAQUINA: data.COB_PROCESADO_MAQUINA ?? null,
-    TAR_ID: data.TAR_ID ?? null,
-  });
+  await executeProcedure(
+    `BEGIN SP_COBRO_CREATE(:COB_ID, :COB_HORAS_TOTALES, :TCO_ID, :COB_MONTO_TOTAL,
+      :COB_MONTO_RECIBIDO, :COB_VUELTO, :COB_FECHA_HORA,
+      :COB_PROCESADO_MAQUINA, :TAR_ID); END;`,
+    {
+      COB_ID:               data.COB_ID ?? null,
+      COB_HORAS_TOTALES:    data.COB_HORAS_TOTALES ?? null,
+      TCO_ID:               data.TCO_ID ?? null,
+      COB_MONTO_TOTAL:      data.COB_MONTO_TOTAL ?? null,
+      COB_MONTO_RECIBIDO:   data.COB_MONTO_RECIBIDO ?? null,
+      COB_VUELTO:           data.COB_VUELTO ?? null,
+      COB_FECHA_HORA:       data.COB_FECHA_HORA ? new Date(data.COB_FECHA_HORA) : new Date(),
+      COB_PROCESADO_MAQUINA: data.COB_PROCESADO_MAQUINA ?? 0,
+      TAR_ID:               data.TAR_ID ?? null,
+    }
+  );
   return getById(data.COB_ID);
 }
 
+export async function update(id, data) {
+  await executeProcedure(
+    `BEGIN SP_COBRO_UPDATE(:id, :COB_HORAS_TOTALES, :TCO_ID, :COB_MONTO_TOTAL,
+      :COB_MONTO_RECIBIDO, :COB_VUELTO, :COB_FECHA_HORA,
+      :COB_PROCESADO_MAQUINA, :TAR_ID); END;`,
+    {
+      id,
+      COB_HORAS_TOTALES: data.COB_HORAS_TOTALES ?? null,
+      TCO_ID: data.TCO_ID ?? null,
+      COB_MONTO_TOTAL: data.COB_MONTO_TOTAL ?? null,
+      COB_MONTO_RECIBIDO: data.COB_MONTO_RECIBIDO ?? null,
+      COB_VUELTO: data.COB_VUELTO ?? null,
+      COB_FECHA_HORA: data.COB_FECHA_HORA ? new Date(data.COB_FECHA_HORA) : null,
+      COB_PROCESADO_MAQUINA: data.COB_PROCESADO_MAQUINA ?? 0,
+      TAR_ID: data.TAR_ID ?? null,
+    }
+  );
+  return getById(id);
+}

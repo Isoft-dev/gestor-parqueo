@@ -1,7 +1,3 @@
--- ============================================================
--- Stored Procedures para PAR_USUARIO
--- ============================================================
-
 CREATE OR REPLACE PROCEDURE SP_USUARIO_GET_ALL (
     p_cursor OUT SYS_REFCURSOR
 ) AS
@@ -13,7 +9,7 @@ BEGIN
                USU_FECHA_CREACION, USU_FECHA_ACTUALIZACION
         FROM PAR_USUARIO
         ORDER BY USU_ID;
-END;
+END SP_USUARIO_GET_ALL;
 /
 
 CREATE OR REPLACE PROCEDURE SP_USUARIO_GET_BY_ID (
@@ -28,7 +24,7 @@ BEGIN
                USU_FECHA_CREACION, USU_FECHA_ACTUALIZACION
         FROM PAR_USUARIO
         WHERE USU_ID = p_id;
-END;
+END SP_USUARIO_GET_BY_ID;
 /
 
 CREATE OR REPLACE PROCEDURE SP_USUARIO_CREATE (
@@ -55,7 +51,8 @@ BEGIN
         p_usu_password, p_usu_telefono, p_rol_id, p_usu_activo,
         SYSDATE
     );
-END;
+    COMMIT;
+END SP_USUARIO_CREATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_USUARIO_UPDATE (
@@ -81,5 +78,6 @@ BEGIN
         USU_ACTIVO              = p_usu_activo,
         USU_FECHA_ACTUALIZACION = SYSDATE
     WHERE USU_ID = p_usu_id;
-END;
+    COMMIT;
+END SP_USUARIO_UPDATE;
 /
