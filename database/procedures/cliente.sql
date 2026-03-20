@@ -1,7 +1,3 @@
--- ============================================================
--- Stored Procedures para PAR_CLIENTE
--- ============================================================
-
 CREATE OR REPLACE PROCEDURE SP_CLIENTE_GET_ALL (
     p_cursor OUT SYS_REFCURSOR
 ) AS
@@ -14,7 +10,7 @@ BEGIN
                CLI_FECHA_REGISTRO
         FROM PAR_CLIENTE
         ORDER BY CLI_ID;
-END;
+END SP_CLIENTE_GET_ALL;
 /
 
 CREATE OR REPLACE PROCEDURE SP_CLIENTE_GET_BY_ID (
@@ -30,7 +26,7 @@ BEGIN
                CLI_FECHA_REGISTRO
         FROM PAR_CLIENTE
         WHERE CLI_ID = p_id;
-END;
+END SP_CLIENTE_GET_BY_ID;
 /
 
 CREATE OR REPLACE PROCEDURE SP_CLIENTE_CREATE (
@@ -65,7 +61,8 @@ BEGIN
         p_cli_colonia, p_cli_ciudad, p_cli_codigo_postal, p_cli_activo,
         SYSDATE
     );
-END;
+    COMMIT;
+END SP_CLIENTE_CREATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_CLIENTE_UPDATE (
@@ -104,5 +101,6 @@ BEGIN
         CLI_CODIGO_POSTAL    = p_cli_codigo_postal,
         CLI_ACTIVO           = p_cli_activo
     WHERE CLI_ID = p_cli_id;
-END;
+    COMMIT;
+END SP_CLIENTE_UPDATE;
 /

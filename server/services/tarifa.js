@@ -1,4 +1,4 @@
-import { executeCursor, executeProcedure } from '../db/oracle.js';
+import { executeCursor, executeProcedure, executeDelete } from '../db/oracle.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_TARIFA_GET_ALL(:cursor); END;`);
@@ -28,6 +28,6 @@ export async function update(id, data) {
 }
 
 export async function deleteItem(id) {
-  return executeProcedure(`BEGIN SP_TARIFA_DELETE(:id); END;`, { id });
+  return executeDelete(`BEGIN SP_TARIFA_DELETE(:id, :deleted); END;`, { id });
 }
 
