@@ -10,25 +10,34 @@ export async function getById(id) {
 }
 
 export async function create(data) {
-  await executeProcedure(`BEGIN SP_ALERTA_CREATE(:ALE_ID, :MAQ_ID, :ALE_MOTIVO, :ALE_DESCRIPCION, :ALE_FECHA_HORA_GENERACION, :EAL_ID, :TAL_ID, :ALE_FECHA_ATENCION); END;`, {
-    ALE_ID: data.ALE_ID ?? null,
-    MAQ_ID: data.MAQ_ID ?? null,
-    ALE_MOTIVO: data.ALE_MOTIVO ?? null,
-    ALE_DESCRIPCION: data.ALE_DESCRIPCION ?? null,
-    ALE_FECHA_HORA_GENERACION: data.ALE_FECHA_HORA_GENERACION ?? null,
-    EAL_ID: data.EAL_ID ?? null,
-    TAL_ID: data.TAL_ID ?? null,
-    ALE_FECHA_ATENCION: data.ALE_FECHA_ATENCION ?? null,
-  });
+  await executeProcedure(
+    `BEGIN SP_ALERTA_CREATE(:ALE_ID, :MAQ_ID, :ALE_MOTIVO, :ALE_DESCRIPCION,
+      :ALE_FECHA_HORA_GENERACION, :EAL_ID, :TAL_ID, :ALE_FECHA_ATENCION); END;`,
+    {
+      ALE_ID:                    data.ALE_ID ?? null,
+      MAQ_ID:                    data.MAQ_ID ?? null,
+      ALE_MOTIVO:                data.ALE_MOTIVO ?? null,
+      ALE_DESCRIPCION:           data.ALE_DESCRIPCION ?? null,
+      ALE_FECHA_HORA_GENERACION: data.ALE_FECHA_HORA_GENERACION
+                                   ? new Date(data.ALE_FECHA_HORA_GENERACION) : null,
+      EAL_ID:                    data.EAL_ID ?? null,
+      TAL_ID:                    data.TAL_ID ?? null,
+      ALE_FECHA_ATENCION:        data.ALE_FECHA_ATENCION
+                                   ? new Date(data.ALE_FECHA_ATENCION) : null,
+    }
+  );
   return getById(data.ALE_ID);
 }
 
 export async function update(id, data) {
-  await executeProcedure(`BEGIN SP_ALERTA_UPDATE(:id, :EAL_ID, :ALE_FECHA_ATENCION); END;`, {
-    id,
-    EAL_ID: data.EAL_ID ?? null,
-    ALE_FECHA_ATENCION: data.ALE_FECHA_ATENCION ?? null,
-  });
+  await executeProcedure(
+    `BEGIN SP_ALERTA_UPDATE(:id, :EAL_ID, :ALE_FECHA_ATENCION); END;`,
+    {
+      id,
+      EAL_ID:             data.EAL_ID ?? null,
+      ALE_FECHA_ATENCION: data.ALE_FECHA_ATENCION
+                            ? new Date(data.ALE_FECHA_ATENCION) : null,
+    }
+  );
   return getById(id);
 }
-

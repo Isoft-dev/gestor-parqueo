@@ -10,12 +10,17 @@ export async function getById(id) {
 }
 
 export async function create(data) {
-  await executeProcedure(`BEGIN SP_REGISTRO_MOV_MEM_CREATE(:RMM_ID, :RMM_FECHA_HORA_ENTRADA, :RMM_FECHA_HORA_SALIDA, :MEM_ID); END;`, {
-    RMM_ID: data.RMM_ID ?? null,
-    RMM_FECHA_HORA_ENTRADA: data.RMM_FECHA_HORA_ENTRADA ?? null,
-    RMM_FECHA_HORA_SALIDA: data.RMM_FECHA_HORA_SALIDA ?? null,
-    MEM_ID: data.MEM_ID ?? null,
-  });
+  await executeProcedure(
+    `BEGIN SP_REGISTRO_MOV_MEM_CREATE(:RMM_ID, :RMM_FECHA_HORA_ENTRADA,
+      :RMM_FECHA_HORA_SALIDA, :MEM_ID); END;`,
+    {
+      RMM_ID:                  data.RMM_ID ?? null,
+      RMM_FECHA_HORA_ENTRADA:  data.RMM_FECHA_HORA_ENTRADA
+                                 ? new Date(data.RMM_FECHA_HORA_ENTRADA) : new Date(),
+      RMM_FECHA_HORA_SALIDA:   data.RMM_FECHA_HORA_SALIDA
+                                 ? new Date(data.RMM_FECHA_HORA_SALIDA) : null,
+      MEM_ID:                  data.MEM_ID ?? null,
+    }
+  );
   return getById(data.RMM_ID);
 }
-
