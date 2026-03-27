@@ -24,3 +24,16 @@ export async function create(data) {
   );
   return getById(data.TIC_ID);
 }
+
+export async function update(id, data) {
+  await executeProcedure(
+    `BEGIN SP_TICKET_UPDATE(:id, :TIC_FECHA_HORA_SALIDA, :ETI_ID, :COB_ID); END;`,
+    {
+      id,
+      TIC_FECHA_HORA_SALIDA: data.TIC_FECHA_HORA_SALIDA ? new Date(data.TIC_FECHA_HORA_SALIDA) : null,
+      ETI_ID: data.ETI_ID ?? null,
+      COB_ID: data.COB_ID ?? null,
+    }
+  );
+  return getById(id);
+}

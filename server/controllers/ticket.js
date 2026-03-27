@@ -22,3 +22,24 @@ export async function create(req, res) {
     res.status(201).json(await service.create(req.body));
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
+
+export async function update(req, res) {
+  try {
+    const existing = await service.getById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Ticket no encontrado' });
+    res.json(await service.update(req.params.id, req.body));
+  } catch (err) {
+    const msg = String(err.message || '');
+    if (msg.includes('UK_PAR_TICKET_COB_ID')) {
+      return res.status(400).json({
+        error: 'Ese cobro ya está asociado a otro ticket. Cada cobro solo puede pertenecer a un ticket.',
+      });
+    }
+    if (msg.includes('FK_PAR_TICKET_COBRO') || msg.includes('ORA-02291')) {
+      return res.status(400).json({
+        error: 'El COB_ID indicado no existe. Debes seleccionar un cobro válido.',
+      });
+    }
+    res.status(500).json({ error: err.message });
+  }
+}

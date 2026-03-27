@@ -56,3 +56,19 @@ BEGIN
     COMMIT;
 END SP_TICKET_CREATE;
 /
+
+CREATE OR REPLACE PROCEDURE SP_TICKET_UPDATE (
+    p_id                     IN VARCHAR2,
+    p_TIC_FECHA_HORA_SALIDA  IN DATE,
+    p_ETI_ID                 IN VARCHAR2,
+    p_COB_ID                 IN VARCHAR2
+) AS
+BEGIN
+    UPDATE PAR_TICKET
+    SET TIC_FECHA_HORA_SALIDA = p_TIC_FECHA_HORA_SALIDA,
+        ETI_ID                = p_ETI_ID,
+        COB_ID                = p_COB_ID
+    WHERE TIC_ID = p_id;
+    COMMIT;
+END SP_TICKET_UPDATE;
+/

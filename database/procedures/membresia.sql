@@ -1,0 +1,89 @@
+CREATE OR REPLACE PROCEDURE SP_MEMBRESIA_GET_ALL (
+    p_cursor OUT SYS_REFCURSOR
+) AS
+BEGIN
+    OPEN p_cursor FOR
+    SELECT m.MEM_ID,
+           m.TME_ID, tm.TME_TIPO, tm.TME_PRECIO, tm.TME_DURACION,
+           m.MEM_FECHA_INICIO, m.MEM_FECHA_VENCIMIENTO,
+           m.MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
+           m.EME_ID, em.EME_ESTADO,
+           m.VEH_ID, v.VEH_PLACA, v.VEH_MODELO,
+           m.ESP_ID, e.ESP_CODIGO, e.ESP_UBICACION
+    FROM PAR_MEMBRESIA m
+    JOIN PAR_TIPO_MEMBRESIA  tm ON m.TME_ID = tm.TME_ID
+    JOIN PAR_VEHICULO         v ON m.VEH_ID = v.VEH_ID
+    JOIN PAR_ESPACIO          e ON m.ESP_ID = e.ESP_ID
+    LEFT JOIN PAR_ESTADO_MEMBRESIA em ON m.EME_ID = em.EME_ID
+    ORDER BY m.MEM_ID;
+END SP_MEMBRESIA_GET_ALL;
+/
+
+CREATE OR REPLACE PROCEDURE SP_MEMBRESIA_GET_BY_ID (
+    p_id IN VARCHAR2,
+    p_cursor OUT SYS_REFCURSOR
+) AS
+BEGIN
+    OPEN p_cursor FOR
+    SELECT m.MEM_ID,
+           m.TME_ID, tm.TME_TIPO, tm.TME_PRECIO, tm.TME_DURACION,
+           m.MEM_FECHA_INICIO, m.MEM_FECHA_VENCIMIENTO,
+           m.MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
+           m.EME_ID, em.EME_ESTADO,
+           m.VEH_ID, v.VEH_PLACA, v.VEH_MODELO,
+           m.ESP_ID, e.ESP_CODIGO, e.ESP_UBICACION
+    FROM PAR_MEMBRESIA m
+    JOIN PAR_TIPO_MEMBRESIA  tm ON m.TME_ID = tm.TME_ID
+    JOIN PAR_VEHICULO         v ON m.VEH_ID = v.VEH_ID
+    JOIN PAR_ESPACIO          e ON m.ESP_ID = e.ESP_ID
+    LEFT JOIN PAR_ESTADO_MEMBRESIA em ON m.EME_ID = em.EME_ID
+    WHERE m.MEM_ID = p_id;
+END SP_MEMBRESIA_GET_BY_ID;
+/
+
+CREATE OR REPLACE PROCEDURE SP_MEMBRESIA_CREATE (
+    p_MEM_ID                        IN VARCHAR2,
+    p_TME_ID                        IN VARCHAR2,
+    p_MEM_FECHA_INICIO              IN DATE,
+    p_EME_ID                        IN VARCHAR2,
+    p_MEM_FECHA_VENCIMIENTO         IN DATE,
+    p_MEM_FECHA_ULTIMO_CAMBIO_ESTADO IN DATE,
+    p_VEH_ID                        IN VARCHAR2,
+    p_ESP_ID                        IN VARCHAR2
+) AS
+BEGIN
+    INSERT INTO PAR_MEMBRESIA (
+        MEM_ID, TME_ID, MEM_FECHA_INICIO, EME_ID,
+        MEM_FECHA_VENCIMIENTO, MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
+        VEH_ID, ESP_ID
+    )
+    VALUES (
+        p_MEM_ID, p_TME_ID, p_MEM_FECHA_INICIO, p_EME_ID,
+        p_MEM_FECHA_VENCIMIENTO, p_MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
+        p_VEH_ID, p_ESP_ID
+    );
+    COMMIT;
+END SP_MEMBRESIA_CREATE;
+/
+
+CREATE OR REPLACE PROCEDURE SP_MEMBRESIA_UPDATE (
+    p_id                            IN VARCHAR2,
+    p_TME_ID                        IN VARCHAR2,
+    p_EME_ID                        IN VARCHAR2,
+    p_MEM_FECHA_VENCIMIENTO         IN DATE,
+    p_MEM_FECHA_ULTIMO_CAMBIO_ESTADO IN DATE,
+    p_VEH_ID                        IN VARCHAR2,
+    p_ESP_ID                        IN VARCHAR2
+) AS
+BEGIN
+    UPDATE PAR_MEMBRESIA
+    SET TME_ID                        = p_TME_ID,
+        EME_ID                        = p_EME_ID,
+        MEM_FECHA_VENCIMIENTO         = p_MEM_FECHA_VENCIMIENTO,
+        MEM_FECHA_ULTIMO_CAMBIO_ESTADO = p_MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
+        VEH_ID                        = p_VEH_ID,
+        ESP_ID                        = p_ESP_ID
+    WHERE MEM_ID = p_id;
+    COMMIT;
+END SP_MEMBRESIA_UPDATE;
+/
