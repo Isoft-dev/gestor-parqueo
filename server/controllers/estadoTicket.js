@@ -20,9 +20,9 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { ETI_ID, ETI_ESTADO } = req.body;
-    if (!ETI_ID || !ETI_ESTADO) {
-      return res.status(400).json({ error: 'ETI_ID y ETI_ESTADO son requeridos' });
+    const { ETI_ESTADO } = req.body;
+    if (!ETI_ESTADO) {
+      return res.status(400).json({ error: 'ETI_ESTADO es requerido' });
     }
     res.status(201).json(await service.create(req.body));
   } catch (err) {

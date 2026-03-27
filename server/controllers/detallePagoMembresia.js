@@ -15,9 +15,9 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { DPM_ID, MEM_ID, PAG_ID, DPM_MES_CANCELADO } = req.body;
-    if (!DPM_ID || !MEM_ID || !PAG_ID || DPM_MES_CANCELADO == null) {
-      return res.status(400).json({ error: 'DPM_ID, MEM_ID, PAG_ID y DPM_MES_CANCELADO son requeridos' });
+    const { MEM_ID, PAG_ID, DPM_MES_CANCELADO } = req.body;
+    if (!MEM_ID || !PAG_ID || DPM_MES_CANCELADO == null) {
+      return res.status(400).json({ error: 'MEM_ID, PAG_ID y DPM_MES_CANCELADO son requeridos' });
     }
     res.status(201).json(await service.create(req.body));
   } catch (err) { res.status(500).json({ error: err.message }); }
