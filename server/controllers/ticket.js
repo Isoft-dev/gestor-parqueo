@@ -1,0 +1,121 @@
+import * as service from '../services/ticket.js';
+
+function businessStatus(err) {
+  const msg = String(err?.message || '');
+  if (/no encontrado/i.test(msg)) return 404;
+  if (/no reconocido/i.test(msg)) return 404;
+  if (/ya saldado/i.test(msg)) return 409;
+  if (/salida bloqueada|solicita asistencia/i.test(msg)) return 403;
+  if (/requerid|tipo de cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_TICKET_COB_ID|FK_PAR_TICKET_COBRO/i.test(msg)) return 400;
+  if (/duplicad|ya existe|conflict|unico|ORA-00001/i.test(msg)) return 409;
+  return 500;
+}
+
+export async function getAll(_req, res) {
+  try { res.json(await service.getAll()); }
+  catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
+}
+
+export async function getById(req, res) {
+  try {
+    const row = await service.getById(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Ticket no encontrado' });
+    res.json(row);
+  } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
+}
+
+export async function create(req, res) {
+  try {
+    const { TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, ETI_ID } = req.body;
+    if (!TIC_CODIGO || !VEH_ID || !TIC_FECHA_HORA_ENTRADA || !ETI_ID) {
+      return res.status(400).json({ error: 'TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA y ETI_ID son requeridos' });
+    }
+    res.status(201).json(await service.create(req.body));
+  } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
+}
+
+export async function update(req, res) {
+  try {
+    const existing = await service.getById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Ticket no encontrado' });
+    res.json(await service.update(req.params.id, req.body));
+  } catch (err) {
+    const msg = String(err.message || '');
+    if (msg.includes('UK_PAR_TICKET_COB_ID')) {
+      return res.status(400).json({
+        error: 'Ese cobro ya está asociado a otro ticket. Cada cobro solo puede pertenecer a un ticket.',
+      });
+    }
+    if (msg.includes('FK_PAR_TICKET_COBRO') || msg.includes('ORA-02291')) {
+      return res.status(400).json({
+        error: 'El COB_ID indicado no existe. Debes seleccionar un cobro válido.',
+      });
+    }
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function quoteByCodigo(req, res) {
+  try {
+    const codigo = (req.body?.TIC_CODIGO ?? '').trim();
+    if (!codigo) {
+      return res.status(400).json({ error: 'TIC_CODIGO es requerido' });
+    }
+    const quote = await service.quoteByCodigo(codigo);
+    res.json(quote);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function checkout(req, res) {
+  try {
+    const payload = req.body || {};
+    const result = await service.checkoutByCodigo(payload);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function downloadReceipt(req, res) {
+  try {
+    const receipt = await service.generateReceiptPdfByTicketId(req.params.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${receipt.fileName}"`);
+    res.send(receipt.pdfBuffer);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function generateEntry(req, res) {
+  try {
+    const payload = req.body || {};
+    const result = await service.generateEntryTicket(payload);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function downloadEntryTicket(req, res) {
+  try {
+    const pdf = await service.generateEntryTicketPdfByTicketId(req.params.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${pdf.fileName}"`);
+    res.send(pdf.pdfBuffer);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function validateExit(req, res) {
+  try {
+    const payload = req.body || {};
+    const result = await service.validateExitByCodigo(payload);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
