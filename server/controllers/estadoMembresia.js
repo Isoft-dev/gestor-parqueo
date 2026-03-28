@@ -20,9 +20,9 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { EME_ID, EME_ESTADO } = req.body;
-    if (!EME_ID || !EME_ESTADO) {
-      return res.status(400).json({ error: 'Faltan campos requeridos' });
+    const { EME_ESTADO } = req.body;
+    if (!EME_ESTADO) {
+      return res.status(400).json({ error: 'EME_ESTADO es requerido' });
     }
     const created = await service.create(req.body);
     res.status(201).json(created);
