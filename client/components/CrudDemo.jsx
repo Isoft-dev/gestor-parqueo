@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { API_BASE } from '../config.js';
 
 // ── CONFIG ────────────────────────────────────────────────────
@@ -124,6 +124,17 @@ const SECTIONS = {
   },
 };
 
+/** Entidades en el orden indicado; cada `key` aparece como máximo una vez. */
+function collectEntitiesByKeys(keys) {
+  const byKey = new Map();
+  for (const s of Object.values(SECTIONS)) {
+    for (const e of s.entities) {
+      if (!byKey.has(e.key)) byKey.set(e.key, e);
+    }
+  }
+  return keys.map((k) => byKey.get(k)).filter(Boolean);
+}
+
 // ── HELPERS ───────────────────────────────────────────────────
 function toInput(v, t) {
   if (!v) return '';
@@ -132,7 +143,7 @@ function toInput(v, t) {
 function emptyForm(fields) {
   return Object.fromEntries(fields.map(f => [f.k, f.t === 'checkbox' ? 0 : '']));
 }
-function preparePayload(fields, form, editId) {
+function preparePayload(fields, form) {
   const out = {};
   fields.forEach(f => {
     const v = form[f.k];
@@ -152,7 +163,16 @@ async function parseJsonSafe(res) {
 }
 
 // ── COMPONENT ─────────────────────────────────────────────────
-export default function CrudDemo() {
+/**
+ * @param {{ filterEntityKeys?: string[] }} props
+ * Si `filterEntityKeys` está definido, se ocultan las pestañas ME-MS / MC / PA y solo se listan esas entidades.
+ */
+export default function CrudDemo({ filterEntityKeys = null }) {
+  const filteredEntities = useMemo(
+    () => (filterEntityKeys?.length ? collectEntitiesByKeys(filterEntityKeys) : null),
+    [filterEntityKeys],
+  );
+
   const [section, setSection] = useState('me-ms');
   const [entity, setEntity]   = useState(null);
   const [rows, setRows]        = useState([]);
@@ -161,7 +181,9 @@ export default function CrudDemo() {
   const [editId, setEditId]    = useState(null);
   const [msg, setMsg]          = useState('');
 
-  useEffect(() => { if (entity) load(); }, [entity]);
+  useEffect(() => {
+    if (entity) load();
+  }, [entity]); // eslint-disable-line react-hooks/exhaustive-deps -- recargar solo al cambiar entidad
 
   async function load() {
     setLoading(true); setMsg('');
@@ -204,7 +226,7 @@ export default function CrudDemo() {
       isEdit && entity.updateFields
         ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
         : entity.fields.filter(f => !(isEdit && f.createOnly));
-    const payload = preparePayload(fieldsToUse, form, editId);
+    const payload = preparePayload(fieldsToUse, form);
     try {
       const res = await fetch(
         `${API_BASE}/${entity.key}${isEdit ? '/' + editId : ''}`,
@@ -234,7 +256,7 @@ export default function CrudDemo() {
     }
   }
 
-  const sectionEntities = SECTIONS[section]?.entities ?? [];
+  const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
   const isNewRecord = editId === '__new__';
   const formFields = entity
     ? !isNewRecord && editId && entity.updateFields
@@ -245,17 +267,19 @@ export default function CrudDemo() {
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%', fontFamily:'system-ui,sans-serif', fontSize:14 }}>
 
-      {/* Tabs */}
-      <div style={{ padding:'8px 12px', borderBottom:'1px solid #ccc', display:'flex', gap:8 }}>
-        {Object.entries(SECTIONS).map(([k, s]) => (
-          <button key={k} onClick={() => selectSection(k)}
-            style={{ padding:'5px 12px', cursor:'pointer', fontWeight: section===k ? 700 : 400,
-              background: section===k ? '#222' : '#fff', color: section===k ? '#fff' : '#222',
-              border:'1px solid #999', borderRadius:4 }}>
-            {s.label}
-          </button>
-        ))}
-      </div>
+      {/* Tabs (demo completo; oculto en módulos del panel admin) */}
+      {!filteredEntities && (
+        <div style={{ padding:'8px 12px', borderBottom:'1px solid #ccc', display:'flex', gap:8 }}>
+          {Object.entries(SECTIONS).map(([k, s]) => (
+            <button key={k} onClick={() => selectSection(k)}
+              style={{ padding:'5px 12px', cursor:'pointer', fontWeight: section===k ? 700 : 400,
+                background: section===k ? '#222' : '#fff', color: section===k ? '#fff' : '#222',
+                border:'1px solid #999', borderRadius:4 }}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
 

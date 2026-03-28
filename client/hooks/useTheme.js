@@ -14,7 +14,9 @@ export function useTheme() {
     document.documentElement.setAttribute('data-theme', tema);
     try {
       localStorage.setItem(THEME_KEY, tema);
-    } catch (_) {}
+    } catch {
+      /* almacenamiento no disponible */
+    }
   }, [tema]);
 
   return { tema, setTema };
