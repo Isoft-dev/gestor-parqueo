@@ -66,7 +66,7 @@ export async function update(req, res) {
     const updated = await service.update(req.params.id, req.body);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(businessStatus(err)).json({ error: err.message });
   }
 }
 

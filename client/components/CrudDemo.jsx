@@ -650,6 +650,40 @@ export default function CrudDemo({ filterEntityKeys = null }) {
                   )}
                 </div>
               )}
+              {entity?.key === 'maquina' && machineView.maqId != null && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                    <strong>{machineView.title}</strong>
+                    <button onClick={() => setMachineView({ maqId: null, title: '', rows: [] })}>Cerrar</button>
+                  </div>
+                  {machineView.rows.length === 0 ? (
+                    <p style={{ color:'#777' }}>Sin registros para esta máquina.</p>
+                  ) : (
+                    <table style={{ borderCollapse:'collapse', width:'100%', fontSize:13 }}>
+                      <thead>
+                        <tr style={{ background:'#f0f0f0' }}>
+                          {Object.keys(machineView.rows[0]).map(c => (
+                            <th key={c} style={{ padding:'6px 8px', textAlign:'left', border:'1px solid #ddd', whiteSpace:'nowrap' }}>{c}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {machineView.rows.map((r, i) => (
+                          <tr key={i} style={{ background: i%2 ? '#fafafa' : '#fff' }}>
+                            {Object.entries(r).map(([c, v]) => (
+                              <td key={c} style={{ padding:'5px 8px', border:'1px solid #eee', whiteSpace:'nowrap', maxWidth:230, overflow:'hidden', textOverflow:'ellipsis' }}>
+                                {v == null ? '—'
+                                  : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
+                                  : String(v)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
             </>
           )}
       </div>
