@@ -1,5 +1,17 @@
 import * as service from '../services/ticket.js';
 
+function businessStatus(err) {
+  const msg = String(err?.message || '');
+  if (/no encontrado/i.test(msg)) return 404;
+  if (/no reconocido/i.test(msg)) return 404;
+  if (/ya saldado/i.test(msg)) return 409;
+  if (/salida bloqueada|solicita asistencia/i.test(msg)) return 403;
+  if (/efectivo suficiente|suma de billetes|vuelto/i.test(msg)) return 400;
+  if (/requerid|tipo de cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_TICKET_COB_ID|FK_PAR_TICKET_COBRO/i.test(msg)) return 400;
+  if (/duplicad|ya existe|conflict|unico|ORA-00001/i.test(msg)) return 409;
+  return 500;
+}
+
 export async function getAll(_req, res) {
   try { res.json(await service.getAll()); }
   catch (err) { res.status(500).json({ error: err.message }); }
@@ -40,6 +52,85 @@ export async function update(req, res) {
         error: 'El COB_ID indicado no existe. Debes seleccionar un cobro válido.',
       });
     }
-    res.status(500).json({ error: err.message });
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function quoteByCodigo(req, res) {
+  try {
+    const codigo = (req.body?.TIC_CODIGO ?? '').trim();
+    if (!codigo) {
+      return res.status(400).json({ error: 'TIC_CODIGO es requerido' });
+    }
+    const quote = await service.quoteByCodigo(codigo);
+    res.json(quote);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function checkout(req, res) {
+  try {
+    const payload = req.body || {};
+    const result = await service.checkoutByCodigo(payload);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function prepararExtraviado(req, res) {
+  try {
+    const placa = (req.body?.VEH_PLACA ?? '').trim();
+    if (!placa) return res.status(400).json({ error: 'VEH_PLACA es requerido' });
+    const result = await service.prepararTicketExtraviadoPorPlaca(placa);
+    res.json(result);
+  } catch (err) {
+    const msg = String(err?.message || '');
+    if (/requerid/i.test(msg)) return res.status(400).json({ error: err.message });
+    if (/no hay|no existe/i.test(msg)) return res.status(404).json({ error: err.message });
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function downloadReceipt(req, res) {
+  try {
+    const receipt = await service.generateReceiptPdfByTicketId(req.params.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${receipt.fileName}"`);
+    res.send(receipt.pdfBuffer);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function generateEntry(req, res) {
+  try {
+    const payload = req.body || {};
+    const result = await service.generateEntryTicket(payload);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function downloadEntryTicket(req, res) {
+  try {
+    const pdf = await service.generateEntryTicketPdfByTicketId(req.params.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${pdf.fileName}"`);
+    res.send(pdf.pdfBuffer);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function validateExit(req, res) {
+  try {
+    const payload = req.body || {};
+    const result = await service.validateExitByCodigo(payload);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
   }
 }
