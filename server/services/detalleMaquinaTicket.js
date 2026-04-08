@@ -1,4 +1,4 @@
-import { executeCursor, executeProcedure } from '../db/oracle.js';
+import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_DET_MAQ_TICKET_GET_ALL(:cursor); END;`);
@@ -21,4 +21,18 @@ export async function create(data) {
     }
   );
   return getById(data.DMT_ID);
+}
+
+export async function getByMachineId(maqId) {
+  return executeSql(
+    `SELECT d.DMT_ID, d.DMT_TRANSACCION, d.DMT_HORA_TRANSACCION,
+            d.TIC_ID, t.TIC_CODIGO,
+            d.MAQ_ID, m.MAQ_CODIGO
+       FROM PAR_DETALLE_MAQUINA_TICKET d
+       JOIN PAR_TICKET t ON d.TIC_ID = t.TIC_ID
+       JOIN PAR_MAQUINA m ON d.MAQ_ID = m.MAQ_ID
+      WHERE d.MAQ_ID = :maqId
+      ORDER BY d.DMT_HORA_TRANSACCION DESC`,
+    { maqId }
+  );
 }
