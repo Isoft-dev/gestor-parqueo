@@ -24,6 +24,10 @@
   padding: 0;
 }
 
+html, body, #root {
+  height: 100%;
+}
+
 body {
   font-family: system-ui, -apple-system, sans-serif;
   line-height: 1.5;
@@ -95,6 +99,177 @@ body {
 }
 
 .btn-icon:hover {
+  opacity: 0.9;
+}
+
+/* CRUD Demo */
+.crud-demo {
+  max-width: 100%;
+}
+
+.crud-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.crud-error {
+  background: #fee;
+  color: #c00;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+[data-theme='dark'] .crud-error {
+  background: #4a2020;
+  color: #f88;
+}
+
+.crud-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.crud-section h3 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.crud-loading {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.crud-list {
+  list-style: none;
+  margin-bottom: 1rem;
+}
+
+.crud-list-empty {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.crud-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.crud-list-item span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crud-list-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.btn-editar {
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.btn-editar:hover {
+  opacity: 0.9;
+}
+
+.btn-eliminar {
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.btn-eliminar:hover {
+  color: #c00;
+  border-color: #c00;
+}
+
+.crud-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.crud-form-box {
+  border-top: 1px solid var(--color-border);
+  padding-top: 1rem;
+}
+
+.crud-form-box h4 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.crud-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.crud-form input {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-width: 100px;
+}
+
+.crud-form input:disabled {
+  opacity: 0.7;
+}
+
+.crud-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.crud-form button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  background: var(--color-text);
+  color: var(--color-bg);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.crud-form button[type='button'] {
+  background: transparent;
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.crud-form button:hover {
   opacity: 0.9;
 }
 
