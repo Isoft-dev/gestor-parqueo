@@ -1,8 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
+import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { API_BASE } from '../config.js';
 
-function decodePdfText(buffer) {
+GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
+
+async function decodePdfText(buffer) {
+  try {
+    const pdf = await getDocument({ data: buffer }).promise;
+    const parts = [];
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+      const page = await pdf.getPage(pageNum);
+      const tc = await page.getTextContent();
+      parts.push(tc.items.map((i) => i.str).join(' '));
+    }
+    const parsed = parts.join(' ').trim();
+    if (parsed) return parsed;
+  } catch {
+    // fallback below for malformed PDFs
+  }
   const bytes = new Uint8Array(buffer);
   let out = '';
   for (let i = 0; i < bytes.length; i += 1) out += String.fromCharCode(bytes[i]);
@@ -11,11 +28,23 @@ function decodePdfText(buffer) {
 
 function extractTicketCodeFromPdfText(text) {
   const normalized = String(text || '').replace(/\s+/g, ' ');
-  const explicit =
-    normalized.match(/TIC[_\s-]*CODIGO[^A-Z0-9]*([A-Z0-9-]{4,40})/i) ||
-    normalized.match(/TICKET[^A-Z0-9]*([A-Z0-9-]{4,40})/i);
-  if (explicit?.[1]) return explicit[1].trim().toUpperCase();
-  const generic = normalized.match(/\b[A-Z0-9]{3,8}-[A-Z0-9-]{2,30}\b/);
+  const explicitCandidates = [
+    normalized.match(/TIC[_\s-]*CODIGO[^A-Z0-9]*([A-Z0-9-]{6,40})/i)?.[1],
+    normalized.match(/CODIGO\s*TICKET[^A-Z0-9]*([A-Z0-9-]{6,40})/i)?.[1],
+    normalized.match(/TICKET\s*ID[^A-Z0-9]*([A-Z0-9-]{1,12})/i)?.[1],
+  ]
+    .filter(Boolean)
+    .map((v) => String(v).trim().toUpperCase());
+
+  for (const c of explicitCandidates) {
+    if (/[A-Z]/.test(c) && /\d/.test(c)) return c;
+  }
+
+  // Formato esperado de ticket generado por backend: DDMMYYHHmm + PLACA
+  const formatoGenerado = normalized.match(/\b\d{10}[A-Z0-9]{3,20}\b/i);
+  if (formatoGenerado?.[0]) return formatoGenerado[0].trim().toUpperCase();
+
+  const generic = normalized.match(/\b[A-Z0-9]{3,8}-[A-Z0-9-]{2,30}\b/i);
   return generic?.[0]?.trim().toUpperCase() || '';
 }
 
@@ -52,7 +81,7 @@ function generateVehicleData() {
   };
 }
 
-export default function TicketLoaderPage() {
+export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   const fileRef = useRef(null);
   const tagFileRef = useRef(null);
   const salidaFileRef = useRef(null);
@@ -82,38 +111,98 @@ export default function TicketLoaderPage() {
   const [tagExitValidationDone, setTagExitValidationDone] = useState(null);
   const [exitMaqId, setExitMaqId] = useState('');
   const [exitValidationDone, setExitValidationDone] = useState(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [espacioResumen, setEspacioResumen] = useState(null);
+  const [assistMaqId, setAssistMaqId] = useState('');
+  const [billetes, setBilletes] = useState({ 5: 0, 10: 0, 20: 0, 50: 0 });
+  const [assistMsg, setAssistMsg] = useState('');
+  const montoTotalCalculado = Number(quote?.montoTotal || 0);
+  const horasCalculadas = Number(
+    quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
+  );
+  const montoRecibidoNum = Number(montoRecibido);
+  const vueltoCalculado =
+    Number.isFinite(montoRecibidoNum) && montoRecibidoNum >= montoTotalCalculado
+      ? Number((montoRecibidoNum - montoTotalCalculado).toFixed(2))
+      : 0;
+
+  const sumaBilletes =
+    billetes[5] * 5 + billetes[10] * 10 + billetes[20] * 20 + billetes[50] * 50;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function pollEspacios() {
+      try {
+        const res = await fetch(`${API_BASE}/espacio/resumen-publico`);
+        const data = await res.json();
+        if (!cancelled && res.ok) setEspacioResumen(data);
+      } catch {
+        /* kiosk sin API */
+      }
+    }
+    pollEspacios();
+    const t = setInterval(pollEspacios, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
+      setCatalogLoading(true);
       try {
-        const rTve = await fetch(`${API_BASE}/tipo-vehiculo`);
-        const dTve = await rTve.json();
+        const [rTve, rCobro, rMaq] = await Promise.all([
+          fetch(`${API_BASE}/tipo-vehiculo`),
+          fetch(`${API_BASE}/tipo-cobro`),
+          fetch(`${API_BASE}/maquina`),
+        ]);
+        const [dTve, dCobro, dMaq] = await Promise.all([
+          rTve.json(),
+          rCobro.json(),
+          rMaq.json(),
+        ]);
         if (!rTve.ok) throw new Error(dTve.error || rTve.statusText);
+        if (!rCobro.ok) throw new Error(dCobro.error || rCobro.statusText);
+        if (!rMaq.ok) throw new Error(dMaq.error || rMaq.statusText);
         setTipoVehiculo(Array.isArray(dTve) ? dTve : []);
-
-        const res = await fetch(`${API_BASE}/tipo-cobro`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
-        setTiposCobro(Array.isArray(data) ? data : []);
+        setTiposCobro(Array.isArray(dCobro) ? dCobro : []);
+        setMaquinas(Array.isArray(dMaq) ? dMaq : []);
+        if (Array.isArray(dMaq) && dMaq[0]?.MAQ_ID != null) {
+          setAssistMaqId((prev) => prev || String(dMaq[0].MAQ_ID));
+        }
       } catch {
         setTipoVehiculo([]);
         setTiposCobro([]);
+        setMaquinas([]);
+      } finally {
+        setCatalogLoading(false);
       }
     })();
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/maquina`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
-        setMaquinas(Array.isArray(data) ? data : []);
-      } catch {
-        setMaquinas([]);
-      }
-    })();
-  }, []);
+  async function enviarAsistencia(motivoExtra) {
+    if (!assistMaqId) {
+      setAssistMsg('Selecciona una máquina para asociar la asistencia.');
+      return;
+    }
+    setAssistMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/alerta/solicitud-asistencia`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          MAQ_ID: assistMaqId,
+          ALE_MOTIVO: motivoExtra || 'Solicitud de asistencia',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      setAssistMsg('Solicitud enviada al panel.');
+    } catch (e) {
+      setAssistMsg(`No se pudo enviar: ${String(e?.message || e)}`);
+    }
+  }
 
   function applyAutocompletado() {
     const generated = generateVehicleData();
@@ -172,7 +261,7 @@ export default function TicketLoaderPage() {
     setQuote(null);
     try {
       const buffer = await file.arrayBuffer();
-      const pdfText = decodePdfText(buffer);
+      const pdfText = await decodePdfText(buffer);
       const ticCodigo = extractTicketCodeFromPdfText(pdfText);
       if (!ticCodigo) {
         setMsg('Ticket no reconocido: no se pudo extraer TIC_CODIGO del PDF.');
@@ -215,7 +304,7 @@ export default function TicketLoaderPage() {
     setTagValidationDone(null);
     try {
       const buffer = await file.arrayBuffer();
-      const pdfText = decodePdfText(buffer);
+      const pdfText = await decodePdfText(buffer);
       const memCodigo = extractMemCodeFromPdfText(pdfText);
       if (!memCodigo) {
         setMsg('Tag no reconocido: no se pudo extraer MEM_CODIGO del PDF.');
@@ -254,7 +343,7 @@ export default function TicketLoaderPage() {
     setTagExitValidationDone(null);
     try {
       const buffer = await file.arrayBuffer();
-      const pdfText = decodePdfText(buffer);
+      const pdfText = await decodePdfText(buffer);
       const memCodigo = extractMemCodeFromPdfText(pdfText);
       if (!memCodigo) {
         setMsg('Tag no reconocido: no se pudo extraer MEM_CODIGO del PDF.');
@@ -295,7 +384,7 @@ export default function TicketLoaderPage() {
     setExitValidationDone(null);
     try {
       const buffer = await file.arrayBuffer();
-      const pdfText = decodePdfText(buffer);
+      const pdfText = await decodePdfText(buffer);
       const ticCodigo = extractTicketCodeFromPdfText(pdfText);
       if (!ticCodigo) {
         setMsg('Ticket no reconocido: no se pudo extraer TIC_CODIGO del PDF.');
@@ -348,24 +437,29 @@ export default function TicketLoaderPage() {
       setMsg('Primero debes cargar un ticket válido.');
       return;
     }
-    if (!montoRecibido || Number(montoRecibido) < Number(quote?.montoTotal || 0)) {
+    if (!montoRecibido || Number(montoRecibido) < montoTotalCalculado) {
       setMsg('El efectivo ingresado debe ser mayor o igual al monto total.');
       return;
     }
     setLoading(true);
     setMsg('');
     try {
+      const payload = {
+        TIC_CODIGO: quote.ticket.TIC_CODIGO,
+        TCO_ID: tcoId,
+        MAQ_ID: maqId,
+        COB_NIT: cf ? 'CF' : nit,
+        USE_CF: cf,
+        COB_MONTO_RECIBIDO: Number(montoRecibido),
+      };
+      const tieneBilletes = Object.values(billetes).some((n) => n > 0);
+      if (tieneBilletes) {
+        payload.BILLETES_INGRESO = { ...billetes };
+      }
       const res = await fetch(`${API_BASE}/ticket/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          TIC_CODIGO: quote.ticket.TIC_CODIGO,
-          TCO_ID: tcoId,
-          MAQ_ID: maqId,
-          COB_NIT: cf ? 'CF' : nit,
-          USE_CF: cf,
-          COB_MONTO_RECIBIDO: Number(montoRecibido),
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
@@ -377,6 +471,7 @@ export default function TicketLoaderPage() {
       setTcoId('');
       setMaqId('');
       setMontoRecibido('');
+      setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
     } catch (err) {
       setMsg(`Error: ${String(err?.message || err)}`);
     } finally {
@@ -399,6 +494,7 @@ export default function TicketLoaderPage() {
     setExitValidationDone(null);
     setExitMaqId('');
     setShowGenerateForm(false);
+    setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
   }
 
   function downloadReceiptAndReset() {
@@ -408,14 +504,52 @@ export default function TicketLoaderPage() {
   }
 
   return (
-    <div style={{ maxWidth: 860, margin: '22px auto', fontFamily: 'system-ui,sans-serif', padding: 16 }}>
+    <div className="ops-shell" style={{ maxWidth: embeddedInAdmin ? '100%' : 980, margin: '12px auto', padding: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h1 style={{ margin: 0 }}>Consulta de ticket</h1>
-        <Link to="/admin">Ir a panel admin</Link>
+        <h1 style={{ margin: 0 }}>{embeddedInAdmin ? 'Operación en cabina' : 'Consulta de ticket'}</h1>
+        {!embeddedInAdmin ? <Link to="/admin">Ir a panel admin</Link> : null}
       </div>
       <p style={{ color: '#555', marginTop: 0 }}>
         Puedes generar ticket de entrada o cargar ticket para continuar con el cobro.
       </p>
+      {espacioResumen ? (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: 10,
+            borderRadius: 8,
+            background: espacioResumen.parqueoLleno ? '#fff4f4' : '#f0fdf4',
+            border: `1px solid ${espacioResumen.parqueoLleno ? '#f5c2c2' : '#86efac'}`,
+          }}
+        >
+          <strong>Espacios disponibles:</strong> {espacioResumen.disponibles ?? '—'} de {espacioResumen.total ?? '—'}
+          {espacioResumen.parqueoLleno ? (
+            <span style={{ color: '#991b1b', marginLeft: 8 }}>Parqueo lleno — no se puede generar ticket.</span>
+          ) : null}
+        </div>
+      ) : null}
+      <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span>
+        <select
+          value={assistMaqId}
+          onChange={(e) => setAssistMaqId(e.target.value)}
+          style={{ padding: '6px 10px', minWidth: 200 }}
+        >
+          <option value="">—</option>
+          {maquinas.map((m) => (
+            <option key={m.MAQ_ID} value={m.MAQ_ID}>
+              {m.MAQ_CODIGO || `MAQ ${m.MAQ_ID}`}
+            </option>
+          ))}
+        </select>
+        {assistMsg ? <span style={{ fontSize: 13, color: '#065f46' }}>{assistMsg}</span> : null}
+      </div>
+      {catalogLoading ? (
+        <div className="ops-loader-wrap">
+          <span className="ops-loader" aria-hidden="true" />
+          <span>Cargando catálogos base...</span>
+        </div>
+      ) : null}
 
       <div style={{ marginTop: 10, border: '2px dashed #9ec5ff', borderRadius: 8, padding: 12, background: '#f4f9ff' }}>
         <h2 style={{ margin: '0 0 6px 0', fontSize: 19 }}>Cliente mensual (Tag)</h2>
@@ -430,7 +564,7 @@ export default function TicketLoaderPage() {
             if (f) onLoadTagPdf(f);
           }}
         />
-        <button type="button" onClick={() => tagFileRef.current?.click()} disabled={loading} style={{ marginTop: 10 }}>
+        <button type="button" onClick={() => tagFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Validar Tag
         </button>
       </div>
@@ -450,7 +584,7 @@ export default function TicketLoaderPage() {
             if (f) onLoadTagExitPdf(f);
           }}
         />
-        <button type="button" onClick={() => tagSalidaFileRef.current?.click()} disabled={loading} style={{ marginTop: 10 }}>
+        <button type="button" onClick={() => tagSalidaFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Cargar Tag
         </button>
       </div>
@@ -483,18 +617,27 @@ export default function TicketLoaderPage() {
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => salidaFileRef.current?.click()} disabled={loading}>
+          <button type="button" onClick={() => salidaFileRef.current?.click()} disabled={loading || catalogLoading}>
             Cargar Ticket
           </button>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => { setShowGenerateForm((v) => !v); setMsg(''); }} disabled={loading}>
+      <div className="ops-main-ticket-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={() => { setShowGenerateForm((v) => !v); setMsg(''); }}
+          disabled={loading || catalogLoading || espacioResumen?.parqueoLleno}
+        >
           Generar Ticket
         </button>
-        <button type="button" onClick={() => fileRef.current?.click()} disabled={loading}>
-          Cargar Ticket
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={loading || catalogLoading}
+          title="Sube el PDF del ticket: se cotiza el monto y aparece el formulario. El cobro queda registrado al pulsar Continuar en Detalle de pago."
+        >
+          Pagar ticket
         </button>
       </div>
 
@@ -639,10 +782,10 @@ export default function TicketLoaderPage() {
             <strong>Tarifa vigente:</strong> {quote.tarifa?.TAR_TIPO} - Q{quote.tarifa?.TAR_PRECIO} / hora
           </p>
           <p style={{ margin: '6px 0', fontSize: 18 }}>
-            <strong>Monto total a pagar: Q{quote.montoTotal}</strong>
+            <strong>Monto total a pagar: Q{montoTotalCalculado.toFixed(2)}</strong>
           </p>
           <hr />
-          <h3 style={{ marginBottom: 8 }}>Facturación</h3>
+          <h3 style={{ marginBottom: 8 }}>Facturación (campos automáticos y manuales)</h3>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={tcoId} onChange={(e) => setTcoId(e.target.value)} style={{ padding: '8px 10px', minWidth: 260 }}>
               <option value="">Selecciona tipo de cobro</option>
@@ -682,19 +825,103 @@ export default function TicketLoaderPage() {
             />
             <input
               type="number"
+              value={horasCalculadas}
+              readOnly
+              disabled
+              style={{ padding: '8px 10px', minWidth: 150, background: '#f3f4f6' }}
+              title="Se calcula automáticamente según hora de entrada y tarifa"
+            />
+            <input
+              type="number"
+              value={montoTotalCalculado.toFixed(2)}
+              readOnly
+              disabled
+              style={{ padding: '8px 10px', minWidth: 150, background: '#f3f4f6' }}
+              title="Monto total calculado automáticamente"
+            />
+            <div style={{ width: '100%', marginTop: 8 }}>
+              <span style={{ fontWeight: 600 }}>Simulación de billetes (Q5, Q10, Q20, Q50)</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                {[5, 10, 20, 50].map((d) => (
+                  <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) + 1) }))
+                      }
+                    >
+                      +Q{d}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) - 1) }))
+                      }
+                    >
+                      −
+                    </button>
+                    <small>
+                      {d}: {billetes[d] || 0}
+                    </small>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMontoRecibido(String(sumaBilletes.toFixed(2)));
+                  }}
+                >
+                  Usar suma billetes ({sumaBilletes.toFixed(2)})
+                </button>
+              </div>
+            </div>
+            <input
+              type="number"
               min="0"
               step="0.01"
-              placeholder="Efectivo recibido"
+              placeholder="Monto recibido (manual)"
               value={montoRecibido}
               onChange={(e) => setMontoRecibido(e.target.value)}
-              style={{ padding: '8px 10px', minWidth: 170 }}
+              style={{ padding: '8px 10px', minWidth: 190 }}
+            />
+            <input
+              type="number"
+              value={vueltoCalculado.toFixed(2)}
+              readOnly
+              disabled
+              style={{ padding: '8px 10px', minWidth: 150, background: '#f3f4f6' }}
+              title="Vuelto calculado automáticamente"
             />
             <button type="button" onClick={submitCheckout} disabled={loading}>
               Continuar
             </button>
           </div>
+          <p style={{ marginTop: 8, fontSize: 12, color: '#4b5563' }}>
+            Campos automáticos: horas, monto total y vuelto. Campo manual: monto recibido.
+          </p>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => enviarAsistencia()}
+        style={{
+          position: 'fixed',
+          right: 16,
+          bottom: 16,
+          zIndex: 50,
+          padding: '12px 16px',
+          borderRadius: 999,
+          border: 'none',
+          background: '#2563eb',
+          color: '#fff',
+          fontWeight: 700,
+          cursor: 'pointer',
+          boxShadow: '0 4px 14px rgba(37,99,235,0.4)',
+        }}
+      >
+        Asistencia
+      </button>
 
       {checkoutDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>

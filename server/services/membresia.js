@@ -1,3 +1,4 @@
+import oracledb from 'oracledb';
 import { executeProcedure, executeSql, getConnection } from '../db/oracle.js';
 import { buildMemCodigo, buildTagPdfBuffer } from '../utils/tag.js';
 import { sendTagMail } from '../utils/mailer.js';
@@ -51,13 +52,6 @@ async function validateEspacioDisponible(espId) {
   if (!isDisponibleEstado(row.EES_ESTADO)) {
     throw new Error('El espacio indicado no esta disponible para asignar membresia');
   }
-}
-
-async function nextId(tableName, columnName) {
-  const rows = await executeSql(
-    `SELECT NVL(MAX(${columnName}), 0) + 1 AS NEXT_ID FROM ${tableName}`
-  );
-  return Number(rows[0]?.NEXT_ID || 1);
 }
 
 async function isMembresiaIdentityAlways() {
@@ -276,6 +270,24 @@ async function findEstadoActivaId(fallbackId) {
   return rows[0]?.EME_ID ?? fallbackId ?? null;
 }
 
+async function pagoIdentityAlwaysTx(conn) {
+  const r = await conn.execute(
+    `SELECT GENERATION_TYPE
+       FROM USER_TAB_IDENTITY_COLS
+      WHERE TABLE_NAME='PAR_PAGO' AND COLUMN_NAME='PAG_ID'`
+  );
+  return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
+}
+
+async function detallePagoMemIdentityAlwaysTx(conn) {
+  const r = await conn.execute(
+    `SELECT GENERATION_TYPE
+       FROM USER_TAB_IDENTITY_COLS
+      WHERE TABLE_NAME='PAR_DETALLE_PAGO_MEMBRESIA' AND COLUMN_NAME='DPM_ID'`
+  );
+  return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
+}
+
 export async function registerMonthlyPayment(memId, payload) {
   const membership = await getById(memId);
   if (!membership) throw new Error('Membresia no encontrada');
@@ -285,11 +297,11 @@ export async function registerMonthlyPayment(memId, payload) {
   const montoTotal = Number(membership.TME_PRECIO || 0);
   if (!(montoTotal > 0)) throw new Error('No se pudo determinar el monto vigente de membresia');
 
-  const pagId = payload.PAG_ID ?? (await nextId('PAR_PAGO', 'PAG_ID'));
-  const dpmId = payload.DPM_ID ?? (await nextId('PAR_DETALLE_PAGO_MEMBRESIA', 'DPM_ID'));
   const pagRecibido = Number(payload.PAG_MONTO_RECIBIDO ?? montoTotal);
   const pagVuelto = Number(payload.PAG_VUELTO ?? Math.max(0, pagRecibido - montoTotal));
   const now = new Date();
+  let pagId;
+  let dpmId;
 
   const baseDate = membership.MEM_FECHA_VENCIMIENTO
     ? new Date(membership.MEM_FECHA_VENCIMIENTO)
@@ -306,29 +318,69 @@ export async function registerMonthlyPayment(memId, payload) {
   try {
     conn = await getConnection();
 
-    await conn.execute(
-      `INSERT INTO PAR_PAGO (PAG_ID, TPA_ID, PAG_MONTO_TOTAL, PAG_MONTO_RECIBIDO, PAG_VUELTO, PAG_FECHA_HORA)
-       VALUES (:PAG_ID, :TPA_ID, :PAG_MONTO_TOTAL, :PAG_MONTO_RECIBIDO, :PAG_VUELTO, :PAG_FECHA_HORA)`,
-      {
-        PAG_ID: pagId,
-        TPA_ID: payload.TPA_ID,
-        PAG_MONTO_TOTAL: montoTotal,
-        PAG_MONTO_RECIBIDO: pagRecibido,
-        PAG_VUELTO: pagVuelto,
-        PAG_FECHA_HORA: now,
-      }
-    );
+    if (await pagoIdentityAlwaysTx(conn)) {
+      const insPag = await conn.execute(
+        `INSERT INTO PAR_PAGO (TPA_ID, PAG_MONTO_TOTAL, PAG_MONTO_RECIBIDO, PAG_VUELTO, PAG_FECHA_HORA)
+         VALUES (:TPA_ID, :PAG_MONTO_TOTAL, :PAG_MONTO_RECIBIDO, :PAG_VUELTO, :PAG_FECHA_HORA)
+         RETURNING PAG_ID INTO :pagIdOut`,
+        {
+          TPA_ID: payload.TPA_ID,
+          PAG_MONTO_TOTAL: montoTotal,
+          PAG_MONTO_RECIBIDO: pagRecibido,
+          PAG_VUELTO: pagVuelto,
+          PAG_FECHA_HORA: now,
+          pagIdOut: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+        }
+      );
+      pagId = insPag.outBinds?.pagIdOut?.[0];
+    } else {
+      pagId = payload.PAG_ID ?? Number((await conn.execute(`SELECT NVL(MAX(PAG_ID), 0) + 1 AS N FROM PAR_PAGO`)).rows?.[0]?.N || 1);
+      await conn.execute(
+        `INSERT INTO PAR_PAGO (PAG_ID, TPA_ID, PAG_MONTO_TOTAL, PAG_MONTO_RECIBIDO, PAG_VUELTO, PAG_FECHA_HORA)
+         VALUES (:PAG_ID, :TPA_ID, :PAG_MONTO_TOTAL, :PAG_MONTO_RECIBIDO, :PAG_VUELTO, :PAG_FECHA_HORA)`,
+        {
+          PAG_ID: pagId,
+          TPA_ID: payload.TPA_ID,
+          PAG_MONTO_TOTAL: montoTotal,
+          PAG_MONTO_RECIBIDO: pagRecibido,
+          PAG_VUELTO: pagVuelto,
+          PAG_FECHA_HORA: now,
+        }
+      );
+    }
 
-    await conn.execute(
-      `INSERT INTO PAR_DETALLE_PAGO_MEMBRESIA (DPM_ID, MEM_ID, PAG_ID, DPM_MES_CANCELADO)
-       VALUES (:DPM_ID, :MEM_ID, :PAG_ID, :DPM_MES_CANCELADO)`,
-      {
-        DPM_ID: dpmId,
-        MEM_ID: memId,
-        PAG_ID: pagId,
-        DPM_MES_CANCELADO: Number(payload.DPM_MES_CANCELADO ?? now.getMonth() + 1),
-      }
-    );
+    if (pagId == null) throw new Error('No se pudo obtener PAG_ID tras insertar el pago');
+
+    if (await detallePagoMemIdentityAlwaysTx(conn)) {
+      const insDpm = await conn.execute(
+        `INSERT INTO PAR_DETALLE_PAGO_MEMBRESIA (MEM_ID, PAG_ID, DPM_MES_CANCELADO)
+         VALUES (:MEM_ID, :PAG_ID, :DPM_MES_CANCELADO)
+         RETURNING DPM_ID INTO :dpmIdOut`,
+        {
+          MEM_ID: memId,
+          PAG_ID: pagId,
+          DPM_MES_CANCELADO: Number(payload.DPM_MES_CANCELADO ?? now.getMonth() + 1),
+          dpmIdOut: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+        }
+      );
+      dpmId = insDpm.outBinds?.dpmIdOut?.[0];
+    } else {
+      dpmId =
+        payload.DPM_ID ??
+        Number((await conn.execute(`SELECT NVL(MAX(DPM_ID), 0) + 1 AS N FROM PAR_DETALLE_PAGO_MEMBRESIA`)).rows?.[0]?.N || 1);
+      await conn.execute(
+        `INSERT INTO PAR_DETALLE_PAGO_MEMBRESIA (DPM_ID, MEM_ID, PAG_ID, DPM_MES_CANCELADO)
+         VALUES (:DPM_ID, :MEM_ID, :PAG_ID, :DPM_MES_CANCELADO)`,
+        {
+          DPM_ID: dpmId,
+          MEM_ID: memId,
+          PAG_ID: pagId,
+          DPM_MES_CANCELADO: Number(payload.DPM_MES_CANCELADO ?? now.getMonth() + 1),
+        }
+      );
+    }
+
+    if (dpmId == null) throw new Error('No se pudo obtener DPM_ID tras insertar el detalle de pago');
 
     await conn.execute(
       `UPDATE PAR_MEMBRESIA
@@ -422,11 +474,23 @@ export async function validateTagAndRegisterEntry(memCodigoRaw) {
   const memCodigo = String(memCodigoRaw || '').trim().toUpperCase();
   if (!memCodigo) throw new Error('MEM_CODIGO es requerido');
 
-  const row = await executeSql(
-    `${MEM_SELECT_SQL}
-     WHERE UPPER(TRIM(m.MEM_CODIGO)) = UPPER(TRIM(:memCodigo))`,
-    { memCodigo }
-  );
+  const withColumn = await hasMemCodigoColumn();
+  const row = withColumn
+    ? await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(m.MEM_CODIGO)) = UPPER(TRIM(:memCodigo))`,
+      { memCodigo }
+    )
+    : await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(:memCodigo)) = UPPER(TRIM(
+         LPAD(EXTRACT(DAY FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         LPAD(EXTRACT(MONTH FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         SUBSTR(TO_CHAR(EXTRACT(YEAR FROM m.MEM_FECHA_INICIO)), -2) ||
+         TO_CHAR(m.MEM_ID)
+       ))`,
+      { memCodigo }
+    );
   const membership = row[0];
   if (!membership) throw new Error('Tag no reconocido');
 
@@ -466,11 +530,23 @@ export async function validateTagAndRegisterExit(memCodigoRaw) {
   const memCodigo = String(memCodigoRaw || '').trim().toUpperCase();
   if (!memCodigo) throw new Error('MEM_CODIGO es requerido');
 
-  const row = await executeSql(
-    `${MEM_SELECT_SQL}
-     WHERE UPPER(TRIM(m.MEM_CODIGO)) = UPPER(TRIM(:memCodigo))`,
-    { memCodigo }
-  );
+  const withColumn = await hasMemCodigoColumn();
+  const row = withColumn
+    ? await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(m.MEM_CODIGO)) = UPPER(TRIM(:memCodigo))`,
+      { memCodigo }
+    )
+    : await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(:memCodigo)) = UPPER(TRIM(
+         LPAD(EXTRACT(DAY FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         LPAD(EXTRACT(MONTH FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         SUBSTR(TO_CHAR(EXTRACT(YEAR FROM m.MEM_FECHA_INICIO)), -2) ||
+         TO_CHAR(m.MEM_ID)
+       ))`,
+      { memCodigo }
+    );
   const membership = row[0];
   if (!membership) throw new Error('Tag no reconocido');
 

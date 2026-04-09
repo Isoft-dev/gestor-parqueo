@@ -6,6 +6,7 @@ router.get('/:id', ctrl.getById);
 router.get('/:id/comprobante.pdf', ctrl.downloadReceipt);
 router.get('/:id/entrada.pdf', ctrl.downloadEntryTicket);
 router.post('/quote', ctrl.quoteByCodigo);
+router.post('/extraviado/preparar', ctrl.prepararExtraviado);
 router.post('/checkout', ctrl.checkout);
 router.post('/exit-validate', ctrl.validateExit);
 router.post('/entry', ctrl.generateEntry);
