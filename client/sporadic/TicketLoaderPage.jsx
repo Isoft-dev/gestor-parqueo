@@ -126,6 +126,12 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   const [assistMaqId, setAssistMaqId] = useState('');
   const [billetes, setBilletes] = useState({ 5: 0, 10: 0, 20: 0, 50: 0 });
   const [assistMsg, setAssistMsg] = useState('');
+  const isSuccessMsg = /^(Ticket de entrada generado correctamente\.|Acceso concedido\.|Salida mensual registrada\.|Salida autorizada\.|Cobro registrado correctamente\.)$/i.test(
+    String(msg || '').trim(),
+  );
+  const msgStyle = isSuccessMsg
+    ? { border: '1px solid #b6dfbc', background: '#f4fff6', color: '#166534' }
+    : { border: '1px solid #e2b4b4', background: '#fff4f4', color: '#8a1f1f' };
   const montoTotalCalculado = Number(quote?.montoTotal || 0);
   const horasCalculadas = Number(
     quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
@@ -710,7 +716,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       {loading ? <span style={{ marginLeft: 10 }}>Procesando...</span> : null}
 
       {msg ? (
-        <div style={{ marginTop: 12, padding: 10, border: '1px solid #e2b4b4', background: '#fff4f4', color: '#8a1f1f' }}>
+        <div style={{ marginTop: 12, padding: 10, ...msgStyle }}>
           {msg}
         </div>
       ) : null}
