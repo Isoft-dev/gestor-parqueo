@@ -16,6 +16,14 @@ export async function getAll(_req, res) {
   }
 }
 
+export async function getResumenPublico(_req, res) {
+  try {
+    res.json(await service.getResumenPublico());
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
 export async function getById(req, res) {
   try {
     const row = await service.getById(req.params.id);

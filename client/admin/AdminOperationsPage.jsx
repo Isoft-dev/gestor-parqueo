@@ -1,4 +1,5 @@
 import TicketLoaderPage from '../sporadic/TicketLoaderPage.jsx';
+import LostTicketPanel from './LostTicketPanel.jsx';
 
 export default function AdminOperationsPage() {
   return (
@@ -9,6 +10,7 @@ export default function AdminOperationsPage() {
           Flujos operativos para escaneo de PDF (ticket y tag), cobro y validación de salida.
         </p>
       </header>
+      <LostTicketPanel />
       <div className="admin-panel-block">
         <TicketLoaderPage embeddedInAdmin />
       </div>

@@ -47,3 +47,24 @@ export async function sendTagMail({ to, subject, text, filename, pdfBuffer }) {
     ],
   });
 }
+
+export async function sendPlainMail({ to, subject, text }) {
+  const cfg = readMailConfig();
+  if (!cfg.enabled) {
+    throw new Error(
+      'Servicio de correo no configurado (SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/MAIL_FROM)'
+    );
+  }
+  const transport = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: { user: cfg.user, pass: cfg.pass },
+  });
+  await transport.sendMail({
+    from: cfg.from,
+    to,
+    subject,
+    text,
+  });
+}

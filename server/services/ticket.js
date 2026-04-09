@@ -1,7 +1,9 @@
 import oracledb from 'oracledb';
-import PDFDocument from 'pdfkit';
+import PDFDocument from 'pdfkit/js/pdfkit.js';
 import QRCode from 'qrcode';
 import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
+import { applyCashMovementTx } from './cashMachine.js';
+import { occupySporadicSlotTx, releaseSporadicSlotTx } from './espacioCapacity.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_TICKET_GET_ALL(:cursor); END;`);
@@ -18,10 +20,11 @@ export async function getByCodigo(codigo) {
             t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
             t.TIC_FECHA_HORA_ENTRADA, t.TIC_FECHA_HORA_SALIDA,
             t.ETI_ID, e.ETI_ESTADO,
-            t.COB_ID
+            c.COB_ID AS COB_ID
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON t.VEH_ID = v.VEH_ID
        JOIN PAR_ESTADO_TICKET e ON t.ETI_ID = e.ETI_ID
+       LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
       WHERE UPPER(TRIM(t.TIC_CODIGO)) = UPPER(TRIM(:codigo))
       ORDER BY t.TIC_ID DESC`,
     { codigo: String(codigo || '') }
@@ -313,6 +316,8 @@ export async function generateEntryTicket({
     const maq = await conn.execute(`SELECT MAQ_ID FROM PAR_MAQUINA WHERE MAQ_ID = :id`, { id: MAQ_ID });
     if (!maq.rows?.length) throw new Error('MAQ_ID no válido');
 
+    await occupySporadicSlotTx(conn);
+
     const now = new Date();
     let vehId;
     if (await vehiculoIdentityAlwaysTx(conn)) {
@@ -351,9 +356,9 @@ export async function generateEntryTicket({
     if (await ticketIdentityAlwaysTx(conn)) {
       const insTicket = await conn.execute(
         `INSERT INTO PAR_TICKET
-          (TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, TIC_FECHA_HORA_SALIDA, ETI_ID, COB_ID)
+          (TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, TIC_FECHA_HORA_SALIDA, ETI_ID)
          VALUES
-          (:codigo, :vehId, :entrada, NULL, :etiId, NULL)
+          (:codigo, :vehId, :entrada, NULL, :etiId)
          RETURNING TIC_ID INTO :ticIdOut`,
         {
           codigo: ticCodigo,
@@ -369,9 +374,9 @@ export async function generateEntryTicket({
       ticId = Number(nextTic.rows?.[0]?.NEXT_ID || 1);
       await conn.execute(
         `INSERT INTO PAR_TICKET
-          (TIC_ID, TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, TIC_FECHA_HORA_SALIDA, ETI_ID, COB_ID)
+          (TIC_ID, TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, TIC_FECHA_HORA_SALIDA, ETI_ID)
          VALUES
-          (:ticId, :codigo, :vehId, :entrada, NULL, :etiId, NULL)`,
+          (:ticId, :codigo, :vehId, :entrada, NULL, :etiId)`,
         {
           ticId,
           codigo: ticCodigo,
@@ -452,7 +457,16 @@ export async function generateEntryTicketPdfByTicketId(ticketId) {
   };
 }
 
-export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, COB_MONTO_RECIBIDO, MAQ_ID }) {
+export async function checkoutByCodigo({
+  TIC_CODIGO,
+  TCO_ID,
+  COB_NIT,
+  USE_CF,
+  COB_MONTO_RECIBIDO,
+  MAQ_ID,
+  BILLETES_INGRESO,
+  COB_PROCESADO_MAQUINA = 1,
+}) {
   const codigo = String(TIC_CODIGO || '').trim();
   if (!codigo) throw new Error('TIC_CODIGO es requerido');
   if (!TCO_ID) throw new Error('Debes seleccionar un tipo de cobro');
@@ -468,10 +482,11 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
     }
 
     const tRes = await conn.execute(
-      `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA, t.ETI_ID, t.COB_ID
+      `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA, t.ETI_ID, c.COB_ID AS COB_ID
          FROM PAR_TICKET t
+         LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
         WHERE UPPER(TRIM(t.TIC_CODIGO)) = UPPER(TRIM(:codigo))
-        FOR UPDATE`,
+        FOR UPDATE OF t.TIC_ID`,
       { codigo }
     );
     const ticket = tRes.rows?.[0];
@@ -504,6 +519,23 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
     }
     const vuelto = Number((montoRecibido - monto).toFixed(2));
 
+    let ingresoMap = null;
+    if (BILLETES_INGRESO && typeof BILLETES_INGRESO === 'object') {
+      ingresoMap = {};
+      let suma = 0;
+      for (const d of [50, 20, 10, 5]) {
+        const n = Math.floor(
+          Number(BILLETES_INGRESO[d] ?? BILLETES_INGRESO[String(d)] ?? 0),
+        );
+        if (n > 0) ingresoMap[d] = n;
+        suma += n * d;
+      }
+      suma = Math.round(suma * 100) / 100;
+      if (Math.abs(suma - montoRecibido) > 0.05) {
+        throw new Error('La suma de billetes ingresados no coincide con el monto recibido');
+      }
+    }
+
     let cobId;
     if (await cobroIdentityAlwaysTx(conn)) {
       const ins = await conn.execute(
@@ -522,7 +554,7 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
-          COB_PROCESADO_MAQUINA: 1,
+          COB_PROCESADO_MAQUINA: Number(COB_PROCESADO_MAQUINA) ? 1 : 0,
           TAR_ID: tarifa.TAR_ID,
           COB_NIT: cobNit,
           COB_ID_OUT: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
@@ -548,7 +580,7 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
-          COB_PROCESADO_MAQUINA: 1,
+          COB_PROCESADO_MAQUINA: Number(COB_PROCESADO_MAQUINA) ? 1 : 0,
           TAR_ID: tarifa.TAR_ID,
           COB_NIT: cobNit,
         }
@@ -558,10 +590,9 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
     const etiPagadoId = await findEstadoPagadoIdTx(conn, ticket.ETI_ID);
     await conn.execute(
       `UPDATE PAR_TICKET
-          SET COB_ID = :cobId,
-              ETI_ID = :etiId
+          SET ETI_ID = :etiId
         WHERE TIC_ID = :ticId`,
-      { cobId, etiId: etiPagadoId, ticId: ticket.TIC_ID }
+      { etiId: etiPagadoId, ticId: ticket.TIC_ID }
     );
 
     const dmtIdentity = await detalleMaquinaTicketIdentityAlwaysTx(conn);
@@ -595,6 +626,19 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
         }
       );
     }
+
+    if (Number(COB_PROCESADO_MAQUINA)) {
+      try {
+        await applyCashMovementTx(conn, {
+          maqId: MAQ_ID,
+          vuelto,
+          ingresoPorValor: ingresoMap,
+        });
+      } catch (cashErr) {
+        throw cashErr;
+      }
+    }
+
     await conn.commit();
 
     return {
@@ -640,15 +684,15 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
     if (!maq.rows?.length) throw new Error('MAQ_ID no válido');
 
     const tRes = await conn.execute(
-      `SELECT t.TIC_ID, t.TIC_CODIGO, t.ETI_ID, et.ETI_ESTADO, t.COB_ID,
+      `SELECT t.TIC_ID, t.TIC_CODIGO, t.ETI_ID, et.ETI_ESTADO, c.COB_ID AS COB_ID,
               c.COB_FECHA_HORA, c.TAR_ID,
               tr.TAR_TIEMPO_GRACIA
          FROM PAR_TICKET t
          LEFT JOIN PAR_ESTADO_TICKET et ON et.ETI_ID = t.ETI_ID
-         LEFT JOIN PAR_COBRO c ON c.COB_ID = t.COB_ID
+         LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
          LEFT JOIN PAR_TARIFA tr ON tr.TAR_ID = c.TAR_ID
         WHERE UPPER(TRIM(t.TIC_CODIGO)) = UPPER(TRIM(:codigo))
-        FOR UPDATE`,
+        FOR UPDATE OF t.TIC_ID`,
       { codigo }
     );
     const ticket = tRes.rows?.[0];
@@ -740,6 +784,8 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
       );
     }
 
+    await releaseSporadicSlotTx(conn);
+
     await conn.commit();
     return {
       access: 'granted',
@@ -768,7 +814,7 @@ export async function getReceiptDataByTicketId(ticketId) {
             c.COB_FECHA_HORA, c.COB_NIT, c.TCO_ID
        FROM PAR_TICKET t
        LEFT JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
-       JOIN PAR_COBRO c ON c.COB_ID = t.COB_ID
+       JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
       WHERE t.TIC_ID = :ticketId`,
     { ticketId }
   );
@@ -798,16 +844,15 @@ export async function create(data) {
   if (useIdentity) {
     await executeSql(
       `INSERT INTO PAR_TICKET
-        (TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, TIC_FECHA_HORA_SALIDA, ETI_ID, COB_ID)
+        (TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, TIC_FECHA_HORA_SALIDA, ETI_ID)
        VALUES
-        (:TIC_CODIGO, :VEH_ID, :TIC_FECHA_HORA_ENTRADA, :TIC_FECHA_HORA_SALIDA, :ETI_ID, :COB_ID)`,
+        (:TIC_CODIGO, :VEH_ID, :TIC_FECHA_HORA_ENTRADA, :TIC_FECHA_HORA_SALIDA, :ETI_ID)`,
       {
         TIC_CODIGO: data.TIC_CODIGO ?? null,
         VEH_ID: data.VEH_ID ?? null,
         TIC_FECHA_HORA_ENTRADA: data.TIC_FECHA_HORA_ENTRADA ? new Date(data.TIC_FECHA_HORA_ENTRADA) : null,
         TIC_FECHA_HORA_SALIDA: data.TIC_FECHA_HORA_SALIDA ? new Date(data.TIC_FECHA_HORA_SALIDA) : null,
         ETI_ID: data.ETI_ID ?? null,
-        COB_ID: data.COB_ID ?? null,
       },
       { autoCommit: true }
     );
@@ -820,7 +865,7 @@ export async function create(data) {
     return rows[0] ? getById(rows[0].TIC_ID) : null;
   }
   await executeProcedure(
-    `BEGIN SP_TICKET_CREATE(:TIC_ID, :TIC_CODIGO, :VEH_ID, :TIC_FECHA_HORA_ENTRADA, :TIC_FECHA_HORA_SALIDA, :ETI_ID, :COB_ID); END;`,
+    `BEGIN SP_TICKET_CREATE(:TIC_ID, :TIC_CODIGO, :VEH_ID, :TIC_FECHA_HORA_ENTRADA, :TIC_FECHA_HORA_SALIDA, :ETI_ID); END;`,
     {
       TIC_ID: data.TIC_ID ?? null,
       TIC_CODIGO: data.TIC_CODIGO ?? null,
@@ -828,7 +873,6 @@ export async function create(data) {
       TIC_FECHA_HORA_ENTRADA: data.TIC_FECHA_HORA_ENTRADA ? new Date(data.TIC_FECHA_HORA_ENTRADA) : null,
       TIC_FECHA_HORA_SALIDA: data.TIC_FECHA_HORA_SALIDA ? new Date(data.TIC_FECHA_HORA_SALIDA) : null,
       ETI_ID: data.ETI_ID ?? null,
-      COB_ID: data.COB_ID ?? null,
     }
   );
   return getById(data.TIC_ID);
@@ -836,13 +880,69 @@ export async function create(data) {
 
 export async function update(id, data) {
   await executeProcedure(
-    `BEGIN SP_TICKET_UPDATE(:id, :TIC_FECHA_HORA_SALIDA, :ETI_ID, :COB_ID); END;`,
+    `BEGIN SP_TICKET_UPDATE(:id, :TIC_FECHA_HORA_SALIDA, :ETI_ID); END;`,
     {
       id,
       TIC_FECHA_HORA_SALIDA: data.TIC_FECHA_HORA_SALIDA ? new Date(data.TIC_FECHA_HORA_SALIDA) : null,
       ETI_ID: data.ETI_ID ?? null,
-      COB_ID: data.COB_ID ?? null,
     }
   );
   return getById(id);
+}
+
+async function findEstadoTicketExtraviadoTx(conn) {
+  const r = await conn.execute(
+    `SELECT ETI_ID FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%extrav%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? null;
+}
+
+/** Protocolo ticket extraviado: marca estado y devuelve cotización vigente. */
+export async function prepararTicketExtraviadoPorPlaca(vehPlaca) {
+  const placa = String(vehPlaca || '').trim().toUpperCase();
+  if (!placa) throw new Error('VEH_PLACA es requerido');
+  let conn;
+  try {
+    conn = await getConnection();
+    const etiEx = await findEstadoTicketExtraviadoTx(conn);
+    if (!etiEx) {
+      throw new Error(
+        'No existe estado de ticket «extraviado» en PAR_ESTADO_TICKET (crea un registro con ETI_ESTADO que contenga «extraviado»).'
+      );
+    }
+    const v = await conn.execute(
+      `SELECT VEH_ID FROM PAR_VEHICULO WHERE UPPER(TRIM(VEH_PLACA)) = :p AND CLI_ID IS NULL`,
+      { p: placa }
+    );
+    const vehId = v.rows?.[0]?.VEH_ID;
+    if (!vehId) throw new Error('No hay vehículo esporádico (sin CLI_ID) con esa placa');
+    const t = await conn.execute(
+      `SELECT t.TIC_ID, t.TIC_CODIGO FROM PAR_TICKET t
+        WHERE t.VEH_ID = :v
+          AND NOT EXISTS (SELECT 1 FROM PAR_COBRO c WHERE c.TIC_ID = t.TIC_ID)
+        ORDER BY t.TIC_ID DESC`,
+      { v: vehId }
+    );
+    const tic = t.rows?.[0];
+    if (!tic) throw new Error('No hay ticket pendiente de cobro para esa placa');
+    await conn.execute(
+      `UPDATE PAR_TICKET SET ETI_ID = :eti WHERE TIC_ID = :tic`,
+      { eti: etiEx, tic: tic.TIC_ID }
+    );
+    await conn.commit();
+    return quoteByCodigo(String(tic.TIC_CODIGO));
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
+  } finally {
+    if (conn) await conn.close();
+  }
 }

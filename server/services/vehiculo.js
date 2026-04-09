@@ -1,6 +1,16 @@
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
-export async function getAll() {
+export async function getAll(options = {}) {
+  if (options.soloEsporadicos) {
+    return executeSql(
+      `SELECT v.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+              v.TVE_ID, tv.TVE_TIPO, v.CLI_ID
+         FROM PAR_VEHICULO v
+         LEFT JOIN PAR_TIPO_VEHICULO tv ON v.TVE_ID = tv.TVE_ID
+        WHERE v.CLI_ID IS NULL
+        ORDER BY v.VEH_ID`,
+    );
+  }
   return executeCursor(`BEGIN SP_VEHICULO_GET_ALL(:cursor); END;`);
 }
 

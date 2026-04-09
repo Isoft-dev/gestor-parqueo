@@ -4,6 +4,7 @@ server/data/
 client/dist/
 .env
 server/.env
+server/scripts/
 
 .vscode/*
 !.vscode/extensions.json

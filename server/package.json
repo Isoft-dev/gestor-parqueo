@@ -6,12 +6,20 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "db:reinstall-procedures": "node scripts/reinstall-procedures.mjs",
+    "db:seed-demo": "node scripts/run-seed-demo.mjs",
+    "db:reset-capacity": "node scripts/reset-demo-capacity.mjs",
+    "verify:hu-api": "node scripts/verify-hu-api.mjs",
+    "verify:hu-loop": "node scripts/verify-hu-loop.mjs",
+    "verify:hu-all": "node scripts/verify-hu-all.mjs",
+    "jobs:membership:run-now": "node scripts/run-membership-jobs-now.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
+    "node-cron": "^3.0.3",
     "nodemailer": "^8.0.4",
     "oracledb": "^6.10.0",
     "pdfkit": "^0.18.0",

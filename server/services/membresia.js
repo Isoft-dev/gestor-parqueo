@@ -2,6 +2,12 @@ import oracledb from 'oracledb';
 import { executeProcedure, executeSql, getConnection } from '../db/oracle.js';
 import { buildMemCodigo, buildTagPdfBuffer } from '../utils/tag.js';
 import { sendTagMail } from '../utils/mailer.js';
+import {
+  afterMembresiaCreatedSetEspacioReservadoLibre,
+  setMembresiaEspacioReservadoLibreTx,
+  setMembresiaEspacioReservadoOcupadoTx,
+} from './espacioCapacity.js';
+import { insertSystemAlerta } from '../utils/systemAlert.js';
 
 function norm(s) {
   return String(s ?? '')
@@ -54,6 +60,27 @@ async function validateEspacioDisponible(espId) {
   }
 }
 
+/** Impide membresía si el vehículo pertenece a un cliente dado de baja (CLI_ACTIVO ≠ 1). */
+async function validateVehiculoClienteActivo(vehId) {
+  if (vehId == null || vehId === '') return;
+  const rows = await executeSql(
+    `SELECT v.VEH_ID, v.CLI_ID, c.CLI_ACTIVO
+       FROM PAR_VEHICULO v
+       LEFT JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
+      WHERE v.VEH_ID = :vehId`,
+    { vehId }
+  );
+  const row = rows[0];
+  if (!row) throw new Error('El vehículo indicado no existe');
+  if (row.CLI_ID == null) return;
+  if (Number(row.CLI_ACTIVO ?? 1) !== 1) {
+    throw new Error(
+      'No se puede crear la membresía: el cliente vinculado a este vehículo está inactivo. ' +
+        'Reactiva al cliente desde el listado de clientes o elige un vehículo asociado a un cliente activo.'
+    );
+  }
+}
+
 async function isMembresiaIdentityAlways() {
   const rows = await executeSql(
     `SELECT GENERATION_TYPE
@@ -89,6 +116,7 @@ export async function create(data) {
   if (!memCodigoEnabled) {
     throw new Error('Falta la columna MEM_CODIGO en PAR_MEMBRESIA. Esta HU requiere persistir ese valor en base de datos.');
   }
+  await validateVehiculoClienteActivo(data.VEH_ID);
   await validateEspacioDisponible(data.ESP_ID);
   const now = new Date();
   const useIdentity = (await isMembresiaIdentityAlways()) || !data.MEM_ID;
@@ -127,6 +155,14 @@ export async function create(data) {
     const memId = rows[0]?.MEM_ID;
     if (!memId) return null;
     const persisted = await persistMemCodigo(memId, data.MEM_FECHA_INICIO ?? now);
+    try {
+      await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
+    } catch (e) {
+      await insertSystemAlerta({
+        motivo: 'Membresía creada pero no se actualizó estado del espacio',
+        descripcion: `ESP_ID ${data.ESP_ID}: ${e?.message || e}`,
+      });
+    }
     const created = await getById(memId);
     return { ...created, MEM_CODIGO: persisted.memCodigo, MEM_CODIGO_PERSISTED: persisted.persisted };
   }
@@ -149,6 +185,14 @@ export async function create(data) {
     }
   );
   const persisted = await persistMemCodigo(data.MEM_ID, data.MEM_FECHA_INICIO ?? now);
+  try {
+    await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
+  } catch (e) {
+    await insertSystemAlerta({
+      motivo: 'Membresía creada pero no se actualizó estado del espacio',
+      descripcion: `ESP_ID ${data.ESP_ID}: ${e?.message || e}`,
+    });
+  }
   const created = await getById(data.MEM_ID);
   return { ...created, MEM_CODIGO: persisted.memCodigo, MEM_CODIGO_PERSISTED: persisted.persisted };
 }
@@ -156,6 +200,11 @@ export async function create(data) {
 export async function update(id, data) {
   const current = await getById(id);
   if (!current) throw new Error('Membresia no encontrada');
+
+  const nextVehId = data.VEH_ID != null ? data.VEH_ID : current.VEH_ID;
+  if (String(nextVehId ?? '') !== String(current.VEH_ID ?? '')) {
+    await validateVehiculoClienteActivo(nextVehId);
+  }
 
   const willChangeStatus =
     data.EME_ID != null && String(data.EME_ID) !== String(current.EME_ID ?? '');
@@ -504,17 +553,51 @@ export async function validateTagAndRegisterEntry(memCodigoRaw) {
     throw new Error('Acceso denegado: membresia no activa');
   }
 
-  await executeSql(
-    `INSERT INTO PAR_REGISTRO_MOVIMIENTO_MEMBRESIA
-      (RMM_FECHA_HORA_ENTRADA, RMM_FECHA_HORA_SALIDA, MEM_ID)
-     VALUES
-      (:entrada, NULL, :memId)`,
-    {
-      entrada: new Date(),
-      memId: membership.MEM_ID,
-    },
-    { autoCommit: true }
-  );
+  const espId = membership.ESP_ID ?? membership.esp_id;
+  const entrada = new Date();
+  let conn;
+  try {
+    conn = await getConnection();
+    const rmmIdentity = await conn.execute(
+      `SELECT GENERATION_TYPE FROM USER_TAB_IDENTITY_COLS
+        WHERE TABLE_NAME='PAR_REGISTRO_MOVIMIENTO_MEMBRESIA' AND COLUMN_NAME='RMM_ID'`,
+    );
+    const useId = String(rmmIdentity.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
+    if (useId) {
+      await conn.execute(
+        `INSERT INTO PAR_REGISTRO_MOVIMIENTO_MEMBRESIA
+          (RMM_FECHA_HORA_ENTRADA, RMM_FECHA_HORA_SALIDA, MEM_ID)
+         VALUES
+          (:entrada, NULL, :memId)`,
+        { entrada, memId: membership.MEM_ID },
+      );
+    } else {
+      const nxt = await conn.execute(
+        `SELECT NVL(MAX(RMM_ID), 0) + 1 AS N FROM PAR_REGISTRO_MOVIMIENTO_MEMBRESIA`,
+      );
+      const rmmId = Number(nxt.rows?.[0]?.N || 1);
+      await conn.execute(
+        `INSERT INTO PAR_REGISTRO_MOVIMIENTO_MEMBRESIA
+          (RMM_ID, RMM_FECHA_HORA_ENTRADA, RMM_FECHA_HORA_SALIDA, MEM_ID)
+         VALUES
+          (:rmmId, :entrada, NULL, :memId)`,
+        { rmmId, entrada, memId: membership.MEM_ID },
+      );
+    }
+    await setMembresiaEspacioReservadoOcupadoTx(conn, espId);
+    await conn.commit();
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
+  } finally {
+    if (conn) await conn.close();
+  }
 
   return {
     access: 'granted',
@@ -562,25 +645,42 @@ export async function validateTagAndRegisterExit(memCodigoRaw) {
   const active = activeRows[0];
   if (!active) throw new Error('No se encontró un ingreso activo asociado');
 
+  const espId = membership.ESP_ID ?? membership.esp_id;
   const now = new Date();
-  await executeSql(
-    `UPDATE PAR_REGISTRO_MOVIMIENTO_MEMBRESIA
-        SET RMM_FECHA_HORA_SALIDA = :salida
-      WHERE RMM_ID = :rmmId`,
-    {
-      salida: now,
-      rmmId: active.RMM_ID,
-    },
-    { autoCommit: true }
-  );
+  let conn;
+  try {
+    conn = await getConnection();
+    await conn.execute(
+      `UPDATE PAR_REGISTRO_MOVIMIENTO_MEMBRESIA
+          SET RMM_FECHA_HORA_SALIDA = :salida
+        WHERE RMM_ID = :rmmId`,
+      {
+        salida: now,
+        rmmId: active.RMM_ID ?? active.rmm_id,
+      },
+    );
+    await setMembresiaEspacioReservadoLibreTx(conn, espId);
+    await conn.commit();
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
+  } finally {
+    if (conn) await conn.close();
+  }
 
   return {
     access: 'granted',
     message: 'Salida registrada',
     MEM_ID: membership.MEM_ID,
     MEM_CODIGO: memCodigo,
-    RMM_ID: active.RMM_ID,
-    RMM_FECHA_HORA_ENTRADA: active.RMM_FECHA_HORA_ENTRADA,
+    RMM_ID: active.RMM_ID ?? active.rmm_id,
+    RMM_FECHA_HORA_ENTRADA: active.RMM_FECHA_HORA_ENTRADA ?? active.rmm_fecha_hora_entrada,
     RMM_FECHA_HORA_SALIDA: now.toISOString(),
     VEH_PLACA: membership.VEH_PLACA,
   };

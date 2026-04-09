@@ -23,9 +23,12 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { VEH_ID, INC_ID, BIV_FECHA_HORA } = req.body;
+    const { VEH_ID, INC_ID, BIV_FECHA_HORA, BIV_DESCRIPCION } = req.body;
     if (!VEH_ID || !INC_ID || !BIV_FECHA_HORA) {
       return res.status(400).json({ error: 'VEH_ID, INC_ID y BIV_FECHA_HORA son requeridos' });
+    }
+    if (BIV_DESCRIPCION == null || String(BIV_DESCRIPCION).trim() === '') {
+      return res.status(400).json({ error: 'BIV_DESCRIPCION es requerido' });
     }
     res.status(201).json(await service.create(req.body));
   } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
@@ -35,8 +38,13 @@ export async function resolve(req, res) {
   try {
     const existing = await service.getById(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Bitácora no encontrada' });
-    const { BIV_RESUELTO } = req.body;
+    const { BIV_RESUELTO, BIV_FECHA_RESOLUCION, USU_ID } = req.body;
     if (BIV_RESUELTO == null) return res.status(400).json({ error: 'BIV_RESUELTO es requerido' });
-    res.json(await service.resolve(req.params.id, req.body));
+    const payload = {
+      BIV_RESUELTO,
+      BIV_FECHA_RESOLUCION: BIV_FECHA_RESOLUCION ?? new Date().toISOString(),
+      USU_ID: USU_ID ?? null,
+    };
+    res.json(await service.resolve(req.params.id, payload));
   } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
 }

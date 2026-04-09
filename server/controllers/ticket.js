@@ -6,7 +6,8 @@ function businessStatus(err) {
   if (/no reconocido/i.test(msg)) return 404;
   if (/ya saldado/i.test(msg)) return 409;
   if (/salida bloqueada|solicita asistencia/i.test(msg)) return 403;
-  if (/requerid|tipo de cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_TICKET_COB_ID|FK_PAR_TICKET_COBRO/i.test(msg)) return 400;
+  if (/efectivo suficiente|suma de billetes|vuelto/i.test(msg)) return 400;
+  if (/requerid|tipo de cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_COBRO_TIC_ID|FK_PAR_COBRO_TICKET/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict|unico|ORA-00001/i.test(msg)) return 409;
   return 500;
 }
@@ -41,14 +42,14 @@ export async function update(req, res) {
     res.json(await service.update(req.params.id, req.body));
   } catch (err) {
     const msg = String(err.message || '');
-    if (msg.includes('UK_PAR_TICKET_COB_ID')) {
+    if (msg.includes('UK_PAR_COBRO_TIC_ID')) {
       return res.status(400).json({
-        error: 'Ese cobro ya está asociado a otro ticket. Cada cobro solo puede pertenecer a un ticket.',
+        error: 'Este ticket ya tiene un cobro registrado (un ticket solo puede tener un cobro).',
       });
     }
-    if (msg.includes('FK_PAR_TICKET_COBRO') || msg.includes('ORA-02291')) {
+    if (msg.includes('FK_PAR_COBRO_TICKET') || msg.includes('ORA-02291')) {
       return res.status(400).json({
-        error: 'El COB_ID indicado no existe. Debes seleccionar un cobro válido.',
+        error: 'El TIC_ID del cobro no existe o no es válido.',
       });
     }
     res.status(businessStatus(err)).json({ error: err.message });
@@ -74,6 +75,20 @@ export async function checkout(req, res) {
     const result = await service.checkoutByCodigo(payload);
     res.status(201).json(result);
   } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function prepararExtraviado(req, res) {
+  try {
+    const placa = (req.body?.VEH_PLACA ?? '').trim();
+    if (!placa) return res.status(400).json({ error: 'VEH_PLACA es requerido' });
+    const result = await service.prepararTicketExtraviadoPorPlaca(placa);
+    res.json(result);
+  } catch (err) {
+    const msg = String(err?.message || '');
+    if (/requerid/i.test(msg)) return res.status(400).json({ error: err.message });
+    if (/no hay|no existe/i.test(msg)) return res.status(404).json({ error: err.message });
     res.status(businessStatus(err)).json({ error: err.message });
   }
 }

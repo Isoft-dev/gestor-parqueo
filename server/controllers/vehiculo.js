@@ -8,9 +8,11 @@ function businessStatus(err) {
   return 500;
 }
 
-export async function getAll(_req, res) {
+export async function getAll(req, res) {
   try {
-    res.json(await service.getAll());
+    const soloEsporadicos =
+      req.query?.esporadico === '1' || String(req.query?.solo_esporadicos || '').toLowerCase() === 'true';
+    res.json(await service.getAll({ soloEsporadicos }));
   } catch (err) {
     const code = /misma VEH_PLACA/i.test(err.message) ? 400 : 500;
     res.status(code).json({ error: err.message });

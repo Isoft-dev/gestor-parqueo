@@ -4,7 +4,12 @@ function businessStatus(err) {
   const msg = String(err?.message || '');
   if (/no encontrada/i.test(msg)) return 404;
   if (/tag no reconocido/i.test(msg)) return 404;
-  if (/no esta disponible|TPA_ID|monto vigente|al menos 2 caracteres|correo|MEM_CODIGO|columna/i.test(msg)) return 400;
+  if (
+    /no esta disponible|TPA_ID|monto vigente|al menos 2 caracteres|correo|MEM_CODIGO|columna|no se puede crear la membres|veh[ií]culo indicado no existe/i.test(
+      msg
+    )
+  )
+    return 400;
   if (/no se encontro un ingreso activo asociado/i.test(msg)) return 409;
   if (/acceso denegado|suspendida|vencida|no activa/i.test(msg)) return 403;
   if (/duplicad|ya existe|conflict|placa|dpi/i.test(msg)) return 409;
