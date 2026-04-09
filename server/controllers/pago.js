@@ -15,9 +15,9 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { PAG_ID, TPA_ID, PAG_MONTO_TOTAL } = req.body;
-    if (!PAG_ID || !TPA_ID || PAG_MONTO_TOTAL == null) {
-      return res.status(400).json({ error: 'PAG_ID, TPA_ID y PAG_MONTO_TOTAL son requeridos' });
+    const { TPA_ID, PAG_MONTO_TOTAL } = req.body;
+    if (!TPA_ID || PAG_MONTO_TOTAL == null) {
+      return res.status(400).json({ error: 'TPA_ID y PAG_MONTO_TOTAL son requeridos' });
     }
     res.status(201).json(await service.create(req.body));
   } catch (err) { res.status(500).json({ error: err.message }); }

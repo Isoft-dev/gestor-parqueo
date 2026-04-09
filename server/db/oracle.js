@@ -50,22 +50,71 @@ export async function ping() {
 }
 
 /**
+ * Convierte valores de Oracle a tipos seguros para JSON.stringify (evita 500 al serializar respuestas).
+ */
+function serializeOracleValue(v) {
+  if (v === null || v === undefined) return v;
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'bigint') return Number(v);
+  if (Buffer.isBuffer(v)) return v.toString('utf8');
+  if (typeof v === 'number' && (Number.isNaN(v) || !Number.isFinite(v))) return null;
+  if (typeof v === 'object') {
+    if (typeof v.getData === 'function') {
+      try {
+        return String(v);
+      } catch {
+        return null;
+      }
+    }
+  }
+  return v;
+}
+
+function serializeOracleRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  const out = {};
+  for (const key of Object.keys(row)) {
+    out[key] = serializeOracleValue(row[key]);
+  }
+  return out;
+}
+
+function serializeOracleRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(serializeOracleRow);
+}
+
+/**
  * Ejecuta un stored procedure que retorna un SYS_REFCURSOR.
  * El bind :cursor se agrega automáticamente.
  */
 export async function executeCursor(sql, binds = {}) {
   let conn;
+  let cursor;
   try {
     conn = await getConnection();
     const result = await conn.execute(sql, {
       ...binds,
       cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR },
     });
-    const cursor = result.outBinds.cursor;
-    const rows = await cursor.getRows();
-    await cursor.close();
-    return rows;
+    cursor = result.outBinds.cursor;
+    /** Leer hasta agotar el cursor. No usar `batch.length < batchSize` para salir: el primer fetch puede traer pocas filas (p. ej. prefetch 2) y aún quedan más en el servidor. */
+    const allRows = [];
+    const batchSize = 500;
+    for (;;) {
+      const batch = await cursor.getRows(batchSize);
+      if (!batch || batch.length === 0) break;
+      allRows.push(...batch);
+    }
+    return serializeOracleRows(allRows);
   } finally {
+    if (cursor) {
+      try {
+        await cursor.close();
+      } catch {
+        /* ignore */
+      }
+    }
     if (conn) await conn.close();
   }
 }
@@ -100,6 +149,25 @@ export async function executeDelete(sql, binds = {}) {
       { autoCommit: true }
     );
     return result.outBinds.deleted > 0;
+  } finally {
+    if (conn) await conn.close();
+  }
+}
+
+/**
+ * Ejecuta SQL directo (SELECT/UPDATE) con binds.
+ * Para SELECT retorna un arreglo de filas.
+ * Para escrituras retorna metadata de filas afectadas.
+ */
+export async function executeSql(sql, binds = {}, options = {}) {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(sql, binds, {
+      autoCommit: options.autoCommit ?? false,
+    });
+    if (Array.isArray(result.rows)) return result.rows.map(serializeOracleRow);
+    return { rowsAffected: result.rowsAffected ?? 0 };
   } finally {
     if (conn) await conn.close();
   }
