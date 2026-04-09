@@ -1,15 +1,29 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { ADMIN_NAV_ROUTES, adminPath } from './adminNavConfig.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function AdminLayout() {
+  const { user, logout } = useAuth();
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar" aria-label="Navegación principal">
         <div className="admin-brand">
-          <span className="admin-brand-mark" aria-hidden="true" />
           <div>
             <div className="admin-brand-title">Gestor de Parqueo</div>
             <div className="admin-brand-sub">Panel de administración</div>
+            {user ? (
+              <div className="admin-brand-sub" style={{ marginTop: 8 }}>
+                {user.USU_PRIMER_NOMBRE} {user.USU_PRIMER_APELLIDO}
+                <button
+                  type="button"
+                  className="admin-btn-ghost"
+                  style={{ display: 'block', marginTop: 8 }}
+                  onClick={() => logout()}
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
         <nav className="admin-nav">

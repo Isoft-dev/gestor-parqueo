@@ -13,7 +13,7 @@ function pick(row, ...names) {
 }
 
 export default function DashboardPage() {
-  const { stats, loading, error, reload, updatedAt, pollMs } = useAdminDashboard();
+  const { stats, loading, error, sectionErrors, reload, updatedAt, pollMs } = useAdminDashboard();
 
   const navSections = ADMIN_NAV_ROUTES.filter((r) => !r.isDashboard && !r.isPlaceholder);
 
@@ -28,6 +28,12 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="admin-dashboard-meta">
+          {loading ? (
+            <span className="ops-loader-wrap" style={{ margin: 0 }}>
+              <span className="ops-loader" aria-hidden="true" />
+              <span>Cargando indicadores...</span>
+            </span>
+          ) : null}
           <button type="button" className="admin-btn-ghost" onClick={() => reload()}>
             Actualizar ahora
           </button>
@@ -44,6 +50,7 @@ export default function DashboardPage() {
         <div className="admin-banner admin-banner--error" role="alert">
           No se pudieron cargar los indicadores: {error}. Comprueba que el API responda y la base
           esté conectada.
+          {sectionErrors?.length > 0 ? ` Secciones con error: ${sectionErrors.join(' | ')}` : ''}
         </div>
       )}
 
@@ -70,6 +77,24 @@ export default function DashboardPage() {
             {loading && stats.alertasActivasCatalogo == null ? '—' : stats.alertasActivasCatalogo}
           </div>
           <div className="admin-kpi-hint">Según catálogo PAR_ESTADO_ALERTA</div>
+        </article>
+        <article className="admin-kpi admin-kpi--spaces">
+          <div className="admin-kpi-label">Espacios reservados (mensuales)</div>
+          <div className="admin-kpi-split">
+            <div>
+              <span className="admin-kpi-sub">Reservado ocupado</span>
+              <span className="admin-kpi-num">
+                {stats.espaciosReservadosOcupados ?? (loading ? '—' : 0)}
+              </span>
+            </div>
+            <div>
+              <span className="admin-kpi-sub">Reservado libre</span>
+              <span className="admin-kpi-num">
+                {stats.espaciosReservadosLibres ?? (loading ? '—' : 0)}
+              </span>
+            </div>
+          </div>
+          <div className="admin-kpi-hint">Basado en espacio asociado a membresías activas</div>
         </article>
         <article className="admin-kpi admin-kpi--members">
           <div className="admin-kpi-label">Membresías</div>
@@ -153,7 +178,7 @@ export default function DashboardPage() {
             to={adminPath('reportes')}
           >
             <span className="admin-quick-icon" aria-hidden="true">
-              ▤
+              📘
             </span>
             <span className="admin-quick-title">Reportes</span>
             <span className="admin-quick-desc">Disponible en un sprint posterior</span>

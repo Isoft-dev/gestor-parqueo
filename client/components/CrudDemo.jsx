@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { API_BASE } from '../config.js';
 
 // ── CONFIG ────────────────────────────────────────────────────
@@ -12,13 +13,13 @@ const SECTIONS = {
         fields: [{ k:'ETI_ID',l:'ID',req:true },{ k:'ETI_ESTADO',l:'Estado',req:true }],
         ops:{c:true,u:false,d:false} },
       { key: 'tarifa', label: 'Tarifa', id: 'TAR_ID',
-        fields: [{ k:'TAR_ID',l:'ID',req:true },{ k:'TAR_TIPO',l:'Tipo',req:true },{ k:'TAR_PRECIO',l:'Precio',t:'number',req:true }],
+        fields: [{ k:'TAR_ID',l:'ID' },{ k:'TAR_TIPO',l:'Tipo',req:true },{ k:'TAR_PRECIO',l:'Precio',t:'number',req:true },{ k:'TAR_TIEMPO_GRACIA',l:'Tiempo Gracia (min)',t:'number',req:true }],
         ops:{c:true,u:true,d:true} },
       { key: 'ticket', label: 'Ticket', id: 'TIC_ID',
         fields: [{ k:'TIC_ID',l:'ID',req:true },{ k:'TIC_CODIGO',l:'Código',req:true },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'TIC_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local',req:true },{ k:'TIC_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'ETI_ID',l:'ETI_ID',req:true },{ k:'COB_ID',l:'COB_ID' }],
         ops:{c:true,u:true,d:false}, updateFields:['TIC_FECHA_HORA_SALIDA','ETI_ID','COB_ID'] },
       { key: 'tipo-cobro', label: 'Tipo Cobro', id: 'TCO_ID',
-        fields: [{ k:'TCO_ID',l:'ID',req:true },{ k:'TCO_TIPO',l:'Tipo',req:true },{ k:'TCO_DESCRIPCION',l:'Descripción' }],
+        fields: [{ k:'TCO_ID',l:'ID' },{ k:'TCO_TIPO',l:'Tipo',req:true },{ k:'TCO_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:true,d:true} },
       { key: 'cobro', label: 'Cobro', id: 'COB_ID',
         fields: [{ k:'COB_ID',l:'ID',req:true },{ k:'COB_HORAS_TOTALES',l:'Horas',t:'number',req:true },{ k:'TCO_ID',l:'TCO_ID',req:true },{ k:'COB_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'COB_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'COB_VUELTO',l:'Vuelto',t:'number' },{ k:'COB_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'COB_PROCESADO_MAQUINA',l:'Proc. Máq.',t:'checkbox' },{ k:'TAR_ID',l:'TAR_ID',req:true }],
@@ -41,16 +42,16 @@ const SECTIONS = {
         fields: [{ k:'SDI_ID',l:'ID',req:true },{ k:'SDI_TIPO',l:'Tipo' },{ k:'SDI_VALOR',l:'Valor',t:'number' }],
         ops:{c:true,u:true,d:false} },
       { key: 'detalle-saldo', label: 'Detalle Saldo', id: 'DSA_ID',
-        fields: [{ k:'DSA_ID',l:'ID',req:true },{ k:'DSA_CANTIDAD',l:'Cantidad',t:'number' },{ k:'DSA_SUBTOTAL',l:'Subtotal',t:'number' },{ k:'SDI_ID',l:'SDI_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true }],
-        ops:{c:true,u:false,d:false} },
+        fields: [{ k:'DSA_ID',l:'ID' },{ k:'DSA_CANTIDAD',l:'Cantidad',t:'number' },{ k:'DSA_SUBTOTAL',l:'Subtotal',t:'number' },{ k:'DSA_UMBRAL_MINIMO',l:'Umbral mínimo',t:'number' },{ k:'SDI_ID',l:'SDI_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true }],
+        ops:{c:true,u:true,d:false}, updateFields:['DSA_UMBRAL_MINIMO'] },
       { key: 'maquina', label: 'Máquina', id: 'MAQ_ID',
-        fields: [{ k:'MAQ_ID',l:'ID',req:true },{ k:'MAQ_CODIGO',l:'Código',req:true },{ k:'TMA_ID',l:'TMA_ID',req:true },{ k:'EMA_ID',l:'EMA_ID',req:true },{ k:'MAQ_FECHA_ULTIMA_RECARGA',l:'Última Recarga',t:'datetime-local' }],
+        fields: [{ k:'MAQ_ID',l:'ID' },{ k:'MAQ_CODIGO',l:'Código',req:true },{ k:'TMA_ID',l:'TMA_ID',req:true },{ k:'EMA_ID',l:'EMA_ID',req:true },{ k:'MAQ_FECHA_ULTIMA_RECARGA',l:'Última Recarga',t:'datetime-local' }],
         ops:{c:true,u:true,d:false} },
       { key: 'recargo-maquina', label: 'Recargo Máquina', id: 'RMA_ID',
-        fields: [{ k:'RMA_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'RMA_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'RMA_DESCRIPCION',l:'Descripción' }],
+        fields: [{ k:'RMA_ID',l:'ID' },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'RMA_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'RMA_DESCRIPCION',l:'Descripción' },{ k:'RECARGA_DETALLE_SALDO',l:'Detalle billetes JSON' }],
         ops:{c:true,u:false,d:false} },
       { key: 'registro-mantenimiento', label: 'Reg. Mantenimiento', id: 'REM_ID',
-        fields: [{ k:'REM_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'REM_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'REM_DESCRIPCION',l:'Descripción' }],
+        fields: [{ k:'REM_ID',l:'ID' },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'REM_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'REM_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:false,d:false} },
       { key: 'tipo-alerta', label: 'Tipo Alerta', id: 'TAL_ID',
         fields: [{ k:'TAL_ID',l:'ID',req:true },{ k:'TAL_TIPO',l:'Tipo',req:true },{ k:'TAL_DESCRIPCION',l:'Descripción' }],
@@ -68,7 +69,7 @@ const SECTIONS = {
     entities: [
       { key: 'rol', label: 'Rol', id: 'ROL_ID',
         fields: [{ k:'ROL_ID',l:'ID',req:true },{ k:'ROL_TIPO',l:'Tipo',req:true },{ k:'ROL_DESCRIPCION',l:'Descripción' }],
-        ops:{c:true,u:true,d:true} },
+        ops:{c:true,u:true,d:true}, updateFields:['ROL_DESCRIPCION'] },
       { key: 'usuario', label: 'Usuario', id: 'USU_ID',
         fields: [{ k:'USU_ID',l:'ID',req:true },{ k:'USU_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'USU_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'USU_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'USU_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'USU_CORREO',l:'Correo',req:true },{ k:'USU_PASSWORD',l:'Contraseña',t:'password',req:true,createOnly:true },{ k:'USU_TELEFONO',l:'Teléfono' },{ k:'ROL_ID',l:'ROL_ID',req:true },{ k:'USU_ACTIVO',l:'Activo',t:'checkbox' }],
         ops:{c:true,u:true,d:false} },
@@ -79,7 +80,7 @@ const SECTIONS = {
         fields: [{ k:'ESP_ID',l:'ID',req:true },{ k:'ESP_CODIGO',l:'Código',req:true },{ k:'EES_ID',l:'EES_ID' },{ k:'ESP_UBICACION',l:'Ubicación' }],
         ops:{c:true,u:true,d:false} },
       { key: 'cliente', label: 'Cliente', id: 'CLI_ID',
-        fields: [{ k:'CLI_ID',l:'ID',req:true },{ k:'CLI_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'CLI_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'CLI_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'CLI_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'CLI_DPI',l:'DPI',req:true },{ k:'CLI_NIT',l:'NIT' },{ k:'CLI_CORREO',l:'Correo' },{ k:'CLI_TELEFONO',l:'Teléfono' },{ k:'CLI_ZONA',l:'Zona' },{ k:'CLI_CALLE',l:'Calle' },{ k:'CLI_NUMERO',l:'Número' },{ k:'CLI_COLONIA',l:'Colonia' },{ k:'CLI_CIUDAD',l:'Ciudad' },{ k:'CLI_CODIGO_POSTAL',l:'Cód. Postal' },{ k:'CLI_ACTIVO',l:'Activo',t:'checkbox' }],
+        fields: [{ k:'CLI_ID',l:'ID' },{ k:'CLI_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'CLI_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'CLI_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'CLI_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'CLI_DPI',l:'DPI',req:true },{ k:'CLI_NIT',l:'NIT' },{ k:'CLI_CORREO',l:'Correo' },{ k:'CLI_TELEFONO',l:'Teléfono' },{ k:'CLI_ZONA',l:'Zona' },{ k:'CLI_CALLE',l:'Calle' },{ k:'CLI_NUMERO',l:'Número' },{ k:'CLI_COLONIA',l:'Colonia' },{ k:'CLI_CIUDAD',l:'Ciudad' },{ k:'CLI_CODIGO_POSTAL',l:'Cód. Postal' },{ k:'CLI_ACTIVO',l:'Activo',t:'checkbox' }],
         ops:{c:true,u:true,d:false} },
       { key: 'tipo-vehiculo', label: 'Tipo Vehículo', id: 'TVE_ID',
         fields: [{ k:'TVE_ID',l:'ID',req:true },{ k:'TVE_TIPO',l:'Tipo',req:true },{ k:'TVE_MARCA',l:'Marca' },{ k:'TVE_DESCRIPCION',l:'Descripción' }],
@@ -162,12 +163,72 @@ async function parseJsonSafe(res) {
   catch { return { message: text }; }
 }
 
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatCellForPopup(v) {
+  if (v == null) return '—';
+  if (typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v)) {
+    try {
+      return new Date(v).toLocaleString('es-GT');
+    } catch {
+      /* keep */
+    }
+  }
+  return String(v);
+}
+
+/** Abre una ventana de navegador pequeña con todos los campos de la fila (descripción sin truncar). */
+function openAlertaDetailPopup(row) {
+  const features =
+    'width=540,height=440,left=140,top=90,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no';
+  const name = `alertaDetalle_${row?.ALE_ID ?? Date.now()}`;
+  const w = window.open('about:blank', name, features);
+  if (!w) {
+    window.alert('No se pudo abrir la ventana. Permite ventanas emergentes para este sitio.');
+    return;
+  }
+  try {
+    w.opener = null;
+  } catch {
+    /* ignore */
+  }
+
+  const title = `Alerta ${row?.ALE_ID ?? ''}`.trim() || 'Detalle de alerta';
+  const bodyRows = Object.entries(row)
+    .map(([k, v]) => {
+      const display = formatCellForPopup(v);
+      return `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(display)}</dd>`;
+    })
+    .join('');
+
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>
+  body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; padding: 16px 18px; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f8fafc; }
+  h1 { font-size: 1.05rem; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0; }
+  dl { margin: 0; }
+  dt { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin-top: 12px; }
+  dt:first-of-type { margin-top: 0; }
+  dd { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; color: #1e293b; }
+</style></head><body>
+<h1>${escapeHtml(title)}</h1>
+<dl>${bodyRows}</dl>
+</body></html>`);
+  w.document.close();
+}
+
 // ── COMPONENT ─────────────────────────────────────────────────
 /**
  * @param {{ filterEntityKeys?: string[] }} props
  * Si `filterEntityKeys` está definido, se ocultan las pestañas ME-MS / MC / PA y solo se listan esas entidades.
  */
 export default function CrudDemo({ filterEntityKeys = null }) {
+  const [searchParams] = useSearchParams();
   const filteredEntities = useMemo(
     () => (filterEntityKeys?.length ? collectEntitiesByKeys(filterEntityKeys) : null),
     [filterEntityKeys],
@@ -180,27 +241,49 @@ export default function CrudDemo({ filterEntityKeys = null }) {
   const [form, setForm]        = useState({});
   const [editId, setEditId]    = useState(null);
   const [msg, setMsg]          = useState('');
+  const [machineView, setMachineView] = useState({ maqId: null, title: '', rows: [] });
 
   useEffect(() => {
     if (entity) load();
-  }, [entity]); // eslint-disable-line react-hooks/exhaustive-deps -- recargar solo al cambiar entidad
+  }, [entity, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setLoading(true); setMsg('');
     try {
       const res = await fetch(`${API_BASE}/${entity.key}`);
       const data = await res.json();
-      setRows(Array.isArray(data) ? data : []);
+      let list = Array.isArray(data) ? data : [];
+      if (entity.key === 'alerta') {
+        const eal = searchParams.get('eal_id');
+        const tal = searchParams.get('tal_id');
+        const maq = searchParams.get('maq_id');
+        if (eal) list = list.filter((r) => String(r.EAL_ID ?? r.eal_id) === eal);
+        if (tal) list = list.filter((r) => String(r.TAL_ID ?? r.tal_id) === tal);
+        if (maq) list = list.filter((r) => String(r.MAQ_ID ?? r.maq_id) === maq);
+      }
+      setRows(list);
     } catch (e) { setMsg('Error: ' + e.message); setRows([]); }
     finally { setLoading(false); }
   }
 
   function selectSection(s) {
-    setSection(s); setEntity(null); setRows([]); setEditId(null); setMsg('');
+    if (section === s) return;
+    setSection(s);
+    setEntity(null);
+    setRows([]);
+    setEditId(null);
+    setMsg('');
+    setMachineView({ maqId: null, title: '', rows: [] });
   }
 
   function selectEntity(e) {
-    setEntity(e); setEditId(null); setForm(emptyForm(e.fields)); setMsg('');
+    if (entity?.key === e.key) return;
+    setRows([]);
+    setMachineView({ maqId: null, title: '', rows: [] });
+    setEntity(e);
+    setEditId(null);
+    setForm(emptyForm(e.fields));
+    setMsg('');
   }
 
   function startEdit(row) {
@@ -218,6 +301,22 @@ export default function CrudDemo({ filterEntityKeys = null }) {
   }
 
   function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); }
+
+  async function showMachineData(maqId, endpoint, title) {
+    try {
+      setMsg('');
+      const res = await fetch(`${API_BASE}${endpoint}`);
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMachineView({
+        maqId,
+        title,
+        rows: Array.isArray(json) ? json : [],
+      });
+    } catch (err) {
+      setMsg('Error: ' + err.message);
+    }
+  }
 
   async function save(e) {
     e.preventDefault(); setMsg('');
@@ -256,6 +355,46 @@ export default function CrudDemo({ filterEntityKeys = null }) {
     }
   }
 
+  async function deactivateCliente(row) {
+    try {
+      const payload = { ...row, CLI_ACTIVO: 0 };
+      const res = await fetch(`${API_BASE}/cliente/${row.CLI_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMsg('Cliente desactivado.');
+      load();
+    } catch (err) {
+      setMsg('Error: ' + err.message);
+    }
+  }
+
+  async function deactivateUsuario(row) {
+    try {
+      const payload = { ...row, USU_ACTIVO: 0 };
+      const res = await fetch(`${API_BASE}/usuario/${row.USU_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMsg('Usuario desactivado.');
+      load();
+    } catch (err) {
+      setMsg('Error: ' + err.message);
+    }
+  }
+
+  function downloadTag(row) {
+    const id = row?.MEM_ID ?? row?.[entity.id];
+    if (!id) return;
+    window.open(`${API_BASE}/membresia/${id}/tag.pdf`, '_blank');
+  }
+
   const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
   const isNewRecord = editId === '__new__';
   const formFields = entity
@@ -264,119 +403,300 @@ export default function CrudDemo({ filterEntityKeys = null }) {
         : entity.fields.filter(f => !(editId && !isNewRecord && f.createOnly))
     : [];
 
+  const visibleFormFields = formFields;
+
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%', fontFamily:'system-ui,sans-serif', fontSize:14 }}>
+    <div className="crudx-shell">
 
       {/* Tabs (demo completo; oculto en módulos del panel admin) */}
       {!filteredEntities && (
-        <div style={{ padding:'8px 12px', borderBottom:'1px solid #ccc', display:'flex', gap:8 }}>
+        <div className="crudx-tabs">
           {Object.entries(SECTIONS).map(([k, s]) => (
-            <button key={k} onClick={() => selectSection(k)}
-              style={{ padding:'5px 12px', cursor:'pointer', fontWeight: section===k ? 700 : 400,
-                background: section===k ? '#222' : '#fff', color: section===k ? '#fff' : '#222',
-                border:'1px solid #999', borderRadius:4 }}>
+            <button
+              key={k}
+              onClick={() => selectSection(k)}
+              className={`crudx-tab-btn${section === k ? ' crudx-tab-btn--active' : ''}`}
+            >
               {s.label}
             </button>
           ))}
         </div>
       )}
 
-      <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
-
-        {/* Sidebar */}
-        <div style={{ width:170, borderRight:'1px solid #ccc', overflowY:'auto', padding:'4px 0' }}>
+      <div className="crudx-main">
+        <div className="crudx-entity-chips">
           {sectionEntities.map(e => (
-            <button key={e.key} onClick={() => selectEntity(e)}
-              style={{ display:'block', width:'100%', textAlign:'left', border:'none', background: entity?.key === e.key ? '#e8f0fe' : 'transparent',
-                padding:'7px 12px', cursor:'pointer',
-                fontWeight: entity?.key === e.key ? 700 : 400,
-                borderLeft: entity?.key === e.key ? '3px solid #1a73e8' : '3px solid transparent' }}>
+            <button
+              key={e.key}
+              onClick={() => selectEntity(e)}
+              className={`crudx-chip${entity?.key === e.key ? ' crudx-chip--active' : ''}`}
+            >
               {e.label}
             </button>
           ))}
         </div>
-
-        {/* Main */}
-        <div style={{ flex:1, overflow:'auto', padding:16 }}>
-          {!entity && <p style={{ color:'#888' }}>Selecciona una entidad</p>}
+          {!entity && <p className="crudx-empty">Selecciona una entidad</p>}
 
           {entity && (
             <>
-              <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:10 }}>
+              <div className="crudx-toolbar">
                 <strong>{entity.label}</strong>
                 {entity.ops.c && !editId && (
                   <button onClick={() => { setEditId('__new__'); setForm(emptyForm(entity.fields)); }}
-                    style={{ padding:'4px 10px', cursor:'pointer' }}>
+                    className="crudx-btn-secondary">
                     + Nuevo
                   </button>
                 )}
-                {msg && <span style={{ color: msg.startsWith('Error') ? 'red' : 'green' }}>{msg}</span>}
+                {msg && (
+                  <span className={msg.startsWith('Error') ? 'crudx-msg crudx-msg--error' : 'crudx-msg crudx-msg--ok'}>
+                    {msg}
+                  </span>
+                )}
               </div>
 
               {/* Form */}
               {editId && (
-                <form onSubmit={save} style={{ background:'#f9f9f9', border:'1px solid #ddd', borderRadius:4, padding:12, marginBottom:12, display:'flex', flexWrap:'wrap', gap:8 }}>
-                  <div style={{ width:'100%', marginBottom:4 }}>
+                <form onSubmit={save} className="crudx-form-panel">
+                  <div className="crudx-form-head crudx-form-head--with-close">
                     <strong>{editId === '__new__' ? 'Nuevo registro' : `Editando: ${editId}`}</strong>
+                    <button
+                      type="button"
+                      className="crudx-form-close"
+                      onClick={cancelEdit}
+                      aria-label="Cerrar panel de edición"
+                      title="Cerrar"
+                    >
+                      ✕
+                    </button>
                   </div>
-                  {formFields.map(f => (
-                    <div key={f.k} style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                      <label style={{ fontSize:11, color:'#666' }}>{f.l}{f.req ? ' *' : ''}</label>
-                      {f.t === 'checkbox' ? (
-                        <input type="checkbox" checked={!!form[f.k]}
-                          onChange={ev => setForm(p => ({ ...p, [f.k]: ev.target.checked ? 1 : 0 }))} />
-                      ) : (
-                        <input
-                          type={f.t === 'password' && editId !== '__new__' ? 'text' : (f.t || 'text')}
-                          value={form[f.k] ?? ''}
-                          required={!!f.req}
-                          disabled={f.k === entity.id && editId !== '__new__'}
-                          style={{ padding:'4px 6px', border:'1px solid #ccc', borderRadius:3, width: f.t === 'datetime-local' ? 175 : 130 }}
-                          onChange={ev => setForm(p => ({ ...p, [f.k]: ev.target.value }))} />
-                      )}
+                  {isNewRecord && (
+                    <div className="crudx-form-note">
+                      El ID se genera automaticamente al guardar.
                     </div>
-                  ))}
-                  <div style={{ width:'100%', display:'flex', gap:8, marginTop:4 }}>
-                    <button type="submit" style={{ padding:'5px 12px', cursor:'pointer' }}>Guardar</button>
-                    <button type="button" onClick={cancelEdit} style={{ padding:'5px 12px', cursor:'pointer' }}>Cancelar</button>
+                  )}
+                  <div className="crudx-form-grid">
+                    {visibleFormFields.map(f => (
+                      <div key={f.k} className="crudx-field">
+                        <label>{f.l}{f.req ? ' *' : ''}</label>
+                        {f.t === 'checkbox' ? (
+                          <input
+                            type="checkbox"
+                            checked={!!form[f.k]}
+                            onChange={ev => setForm(p => ({ ...p, [f.k]: ev.target.checked ? 1 : 0 }))}
+                          />
+                        ) : (
+                          <input
+                            type={f.t === 'password' && editId !== '__new__' ? 'text' : (f.t || 'text')}
+                            value={form[f.k] ?? ''}
+                            placeholder={isNewRecord && f.k === entity?.id ? 'Se genera automaticamente al guardar' : ''}
+                            required={!!f.req && !(isNewRecord && f.k === entity?.id)}
+                            disabled={(f.k === entity.id && editId !== '__new__') || (isNewRecord && f.k === entity?.id)}
+                            onChange={ev => setForm(p => ({ ...p, [f.k]: ev.target.value }))}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="crudx-form-actions">
+                    <button type="submit" className="crudx-btn-primary">Guardar</button>
+                    <button type="button" onClick={cancelEdit} className="crudx-btn-secondary">Cancelar</button>
                   </div>
                 </form>
               )}
 
               {/* Table */}
-              {loading ? <p>Cargando…</p> : rows.length === 0 ? <p style={{ color:'#888' }}>Sin registros</p> : (
-                <table style={{ borderCollapse:'collapse', width:'100%', fontSize:13 }}>
-                  <thead>
-                    <tr style={{ background:'#f0f0f0' }}>
-                      {Object.keys(rows[0]).map(c => <th key={c} style={{ padding:'6px 8px', textAlign:'left', border:'1px solid #ddd', whiteSpace:'nowrap' }}>{c}</th>)}
-                      {(entity.ops.u || entity.ops.d) && <th style={{ padding:'6px 8px', border:'1px solid #ddd' }}>Acc.</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row, i) => (
-                      <tr key={i} style={{ background: i%2 ? '#fafafa' : '#fff' }}>
-                        {Object.entries(row).map(([c, v]) => (
-                          <td key={c} style={{ padding:'5px 8px', border:'1px solid #eee', whiteSpace:'nowrap', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis' }}>
-                            {v == null ? '—'
-                              : c === 'USU_PASSWORD' ? '••••'
-                              : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
-                              : String(v)}
-                          </td>
-                        ))}
-                        {(entity.ops.u || entity.ops.d) && (
-                          <td style={{ padding:'4px 8px', border:'1px solid #eee', whiteSpace:'nowrap' }}>
-                            {entity.ops.u && <button onClick={() => startEdit(row)} style={{ marginRight:4, cursor:'pointer', padding:'2px 8px' }}>Editar</button>}
-                            {entity.ops.d && <button onClick={() => del(row[entity.id])} style={{ cursor:'pointer', padding:'2px 8px', color:'red' }}>Eliminar</button>}
-                          </td>
-                        )}
+              {loading ? (
+                <div className="ops-loader-wrap">
+                  <span className="ops-loader" aria-hidden="true" />
+                  <span>Cargando registros...</span>
+                </div>
+              ) : rows.length === 0 ? (
+                <p className="crudx-empty">Sin registros en esta entidad.</p>
+              ) : (
+                <div className="crudx-table-scroll">
+                  <table className="crudx-table">
+                    <thead>
+                      <tr>
+                        {Object.keys(rows[0]).map(c => <th key={c}>{c}</th>)}
+                        {(entity.ops.u || entity.ops.d || entity.key === 'membresia') && <th>Acc.</th>}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, i) => (
+                        <tr key={i}>
+                          {Object.entries(row).map(([c, v]) => {
+                            if (entity?.key === 'alerta' && c === 'ALE_DESCRIPCION') {
+                              const text = v == null ? '—' : String(v);
+                              const hasTip = text !== '—' && text.length > 0;
+                              return (
+                                <td key={c} className="crudx-cell-alert-desc">
+                                  <div className="crudx-cell-alert-desc-wrap">
+                                    <span className="crudx-cell-alert-desc-text" title={hasTip ? text : undefined}>
+                                      {text}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="crudx-btn-secondary crudx-btn-xs"
+                                      onClick={() => openAlertaDetailPopup(row)}
+                                      aria-label="Abrir detalle completo de la alerta en una ventana pequeña"
+                                      title="Ver todos los campos (sin truncar) en ventana pequeña"
+                                    >
+                                      Detalle
+                                    </button>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            return (
+                              <td key={c} className="crudx-cell-ellipsis">
+                                {v == null ? '—'
+                                  : c === 'USU_PASSWORD' ? '••••'
+                                  : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
+                                  : String(v)}
+                              </td>
+                            );
+                          })}
+                          {(entity.ops.u || entity.ops.d || entity.key === 'membresia') && (
+                            <td
+                              className={
+                                entity.key === 'cliente'
+                                  ? 'crudx-actions-cell crudx-actions-cell--inline'
+                                  : 'crudx-actions-cell'
+                              }
+                            >
+                              {entity.ops.u && <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">Editar</button>}
+                              {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
+                              {entity.key === 'cliente' && Number(row.CLI_ACTIVO ?? 1) === 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => deactivateCliente(row)}
+                                  className="crudx-btn-danger crudx-btn-xs"
+                                >
+                                  Desactivar
+                                </button>
+                              )}
+                              {entity.key === 'usuario' && Number(row.USU_ACTIVO ?? 1) === 1 && (
+                                <button
+                                  onClick={() => deactivateUsuario(row)}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  Desactivar
+                                </button>
+                              )}
+                              {entity.key === 'membresia' && (
+                                <button
+                                  onClick={() => downloadTag(row)}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  Descargar Tag
+                                </button>
+                              )}
+                              {entity.key === 'maquina' && (
+                                <>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/maquina/${row.MAQ_ID}/transacciones`, `Transacciones (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Transacciones
+                                  </button>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/registro-mantenimiento/maquina/${row.MAQ_ID}`, `Mantenimientos (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Mantenimientos
+                                  </button>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/recargo-maquina/maquina/${row.MAQ_ID}`, `Recargas (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Recargas
+                                  </button>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/detalle-saldo/maquina/${row.MAQ_ID}`, `Saldo y umbral (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Saldo
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {entity?.key === 'maquina' && machineView.maqId != null && (
+                <div style={{ marginTop: 12 }} className="crudx-machine-box">
+                  <div className="crudx-machine-head">
+                    <strong>{machineView.title}</strong>
+                    <button className="crudx-btn-secondary crudx-btn-xs" onClick={() => setMachineView({ maqId: null, title: '', rows: [] })}>Cerrar</button>
+                  </div>
+                  {machineView.rows.length === 0 ? (
+                    <p className="crudx-empty">Sin registros para esta máquina.</p>
+                  ) : (
+                    <div className="crudx-table-scroll">
+                      <table className="crudx-table">
+                        <thead>
+                          <tr>
+                            {Object.keys(machineView.rows[0]).map(c => <th key={c}>{c}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {machineView.rows.map((r, i) => (
+                            <tr key={i}>
+                              {Object.entries(r).map(([c, v]) => (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {v == null ? '—'
+                                    : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
+                                    : String(v)}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+              {entity?.key === 'maquina' && machineView.maqId != null && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                    <strong>{machineView.title}</strong>
+                    <button onClick={() => setMachineView({ maqId: null, title: '', rows: [] })}>Cerrar</button>
+                  </div>
+                  {machineView.rows.length === 0 ? (
+                    <p style={{ color:'#777' }}>Sin registros para esta máquina.</p>
+                  ) : (
+                    <table style={{ borderCollapse:'collapse', width:'100%', fontSize:13 }}>
+                      <thead>
+                        <tr style={{ background:'#f0f0f0' }}>
+                          {Object.keys(machineView.rows[0]).map(c => (
+                            <th key={c} style={{ padding:'6px 8px', textAlign:'left', border:'1px solid #ddd', whiteSpace:'nowrap' }}>{c}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {machineView.rows.map((r, i) => (
+                          <tr key={i} style={{ background: i%2 ? '#fafafa' : '#fff' }}>
+                            {Object.entries(r).map(([c, v]) => (
+                              <td key={c} style={{ padding:'5px 8px', border:'1px solid #eee', whiteSpace:'nowrap', maxWidth:230, overflow:'hidden', textOverflow:'ellipsis' }}>
+                                {v == null ? '—'
+                                  : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
+                                  : String(v)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               )}
             </>
           )}
-        </div>
       </div>
     </div>
   );

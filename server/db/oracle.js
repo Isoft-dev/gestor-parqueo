@@ -146,3 +146,22 @@ export async function executeDelete(sql, binds = {}) {
     if (conn) await conn.close();
   }
 }
+
+/**
+ * Ejecuta SQL directo (SELECT/UPDATE) con binds.
+ * Para SELECT retorna un arreglo de filas.
+ * Para escrituras retorna metadata de filas afectadas.
+ */
+export async function executeSql(sql, binds = {}, options = {}) {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(sql, binds, {
+      autoCommit: options.autoCommit ?? false,
+    });
+    if (Array.isArray(result.rows)) return result.rows.map(serializeOracleRow);
+    return { rowsAffected: result.rowsAffected ?? 0 };
+  } finally {
+    if (conn) await conn.close();
+  }
+}

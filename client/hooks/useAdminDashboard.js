@@ -1,13 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_BASE } from '../config.js';
 
-const POLL_MS = 25000;
+const POLL_MS = 5000;
 
 function norm(s) {
   return String(s ?? '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '');
+}
+
+function isDisponibleState(s) {
+  const x = norm(s);
+  return x.includes('dispon') || x.includes('libre') || x.includes('vacant');
+}
+
+function isOcupadoState(s) {
+  const x = norm(s);
+  return x.includes('ocup') || x.includes('busy') || x.includes('used');
+}
+
+function isReservadoState(s) {
+  const x = norm(s);
+  return x.includes('reserv');
 }
 
 function pick(row, ...names) {
@@ -45,6 +60,8 @@ export function useAdminDashboard() {
   const [stats, setStats] = useState({
     espaciosDisponibles: null,
     espaciosTotales: null,
+    espaciosReservadosOcupados: null,
+    espaciosReservadosLibres: null,
     alertasPendientes: null,
     alertasActivasCatalogo: null,
     membresiasActivas: null,
@@ -53,6 +70,7 @@ export function useAdminDashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sectionErrors, setSectionErrors] = useState([]);
   const [updatedAt, setUpdatedAt] = useState(null);
 
   const load = useCallback(async () => {
@@ -63,6 +81,7 @@ export function useAdminDashboard() {
         ['alerta', '/alerta'],
         ['estado-alerta', '/estado-alerta'],
         ['membresia', '/membresia'],
+        ['estado-membresia', '/estado-membresia'],
       ];
       const settled = await Promise.allSettled(
         requests.map(([, path]) => fetchJsonAll(path)),
@@ -75,9 +94,11 @@ export function useAdminDashboard() {
         )
         .filter(Boolean);
       if (failed.length) {
+        setSectionErrors(failed);
         throw new Error(failed.join(' · '));
       }
-      const [espacios, alertas, estadosAlerta, membresias] = settled.map((r) => r.value);
+      setSectionErrors([]);
+      const [espacios, alertas, estadosAlerta, membresias, estadosMembresia] = settled.map((r) => r.value);
 
       const estadosPorId = {};
       for (const e of estadosAlerta) {
@@ -87,13 +108,15 @@ export function useAdminDashboard() {
       }
 
       let disponibles = 0;
+      const espaciosById = {};
       for (const row of espacios) {
+        const espId = pick(row, 'ESP_ID');
         const est = norm(pick(row, 'EES_ESTADO'));
+        if (espId != null) {
+          espaciosById[String(espId)] = est;
+        }
         if (
-          est.includes('dispon') ||
-          est.includes('libre') ||
-          est.includes('vacant') ||
-          est === 'disponible'
+          isDisponibleState(est)
         ) {
           disponibles += 1;
         }
@@ -109,12 +132,35 @@ export function useAdminDashboard() {
         if (label.includes('activ') && !label.includes('inactiv')) activasCatalogo += 1;
       }
 
+      const estadoMembresiaPorId = {};
+      for (const em of estadosMembresia) {
+        const id = pick(em, 'EME_ID');
+        const label = norm(pick(em, 'EME_ESTADO'));
+        if (id != null) estadoMembresiaPorId[id] = label;
+      }
+
       let memAct = 0;
       let memSusp = 0;
+      let reservadosOcupados = 0;
+      let reservadosLibres = 0;
       for (const m of membresias) {
-        const em = norm(pick(m, 'EME_ESTADO'));
-        if (em.includes('suspend')) memSusp += 1;
-        else memAct += 1;
+        const estadoLabel =
+          norm(pick(m, 'EME_ESTADO')) || estadoMembresiaPorId[pick(m, 'EME_ID')] || '';
+        const suspendida = estadoLabel.includes('suspend') || estadoLabel.includes('inactiv');
+
+        if (suspendida) {
+          memSusp += 1;
+          continue;
+        }
+
+        memAct += 1;
+        const espId = pick(m, 'ESP_ID');
+        const espacioEstado = espaciosById[String(espId)] || '';
+        if (isReservadoState(espacioEstado) && isOcupadoState(espacioEstado)) {
+          reservadosOcupados += 1;
+        } else if (isReservadoState(espacioEstado) && isDisponibleState(espacioEstado)) {
+          reservadosLibres += 1;
+        }
       }
 
       const ultimasAlertas = [...alertas]
@@ -128,6 +174,8 @@ export function useAdminDashboard() {
       setStats({
         espaciosDisponibles: disponibles,
         espaciosTotales: espacios.length,
+        espaciosReservadosOcupados: reservadosOcupados,
+        espaciosReservadosLibres: reservadosLibres,
         alertasPendientes: pendientesAtencion,
         alertasActivasCatalogo: activasCatalogo,
         membresiasActivas: memAct,
@@ -148,5 +196,5 @@ export function useAdminDashboard() {
     return () => clearInterval(t);
   }, [load]);
 
-  return { stats, loading, error, reload: load, updatedAt, pollMs: POLL_MS };
+  return { stats, loading, error, sectionErrors, reload: load, updatedAt, pollMs: POLL_MS };
 }
