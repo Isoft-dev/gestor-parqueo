@@ -6,6 +6,31 @@ export async function getAll() {
   );
 }
 
+/** Conteo para cabinas públicas: espacios «disponibles» vs total. */
+export async function getResumenPublico() {
+  const rows = await executeSql(
+    `SELECT
+        SUM(
+          CASE
+            WHEN LOWER(NVL(ee.EES_ESTADO, '')) LIKE '%dispon%'
+              OR LOWER(NVL(ee.EES_ESTADO, '')) LIKE '%libre%'
+            THEN 1 ELSE 0
+          END
+        ) AS DISPONIBLES,
+        COUNT(*) AS TOTAL
+       FROM PAR_ESPACIO e
+       LEFT JOIN PAR_ESTADO_ESPACIO ee ON ee.EES_ID = e.EES_ID`
+  );
+  const r = rows[0] || {};
+  const disponibles = Number(r.DISPONIBLES ?? r.disponibles ?? 0);
+  const total = Number(r.TOTAL ?? r.total ?? 0);
+  return {
+    disponibles,
+    total,
+    parqueoLleno: disponibles <= 0,
+  };
+}
+
 export async function getById(id) {
   const rows = await executeCursor(
     `BEGIN SP_ESPACIO_GET_BY_ID(:id, :cursor); END;`,

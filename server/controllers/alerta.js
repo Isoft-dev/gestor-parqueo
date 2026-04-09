@@ -42,3 +42,14 @@ export async function update(req, res) {
   }
 }
 
+export async function solicitudAsistencia(req, res) {
+  try {
+    const { MAQ_ID, ALE_MOTIVO } = req.body || {};
+    if (!MAQ_ID) return res.status(400).json({ error: 'MAQ_ID es requerido' });
+    await service.createSolicitudAsistencia({ MAQ_ID, ALE_MOTIVO });
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+

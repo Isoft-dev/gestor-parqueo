@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { API_BASE } from '../config.js';
 
 // ── CONFIG ────────────────────────────────────────────────────
@@ -227,6 +228,7 @@ function openAlertaDetailPopup(row) {
  * Si `filterEntityKeys` está definido, se ocultan las pestañas ME-MS / MC / PA y solo se listan esas entidades.
  */
 export default function CrudDemo({ filterEntityKeys = null }) {
+  const [searchParams] = useSearchParams();
   const filteredEntities = useMemo(
     () => (filterEntityKeys?.length ? collectEntitiesByKeys(filterEntityKeys) : null),
     [filterEntityKeys],
@@ -243,14 +245,23 @@ export default function CrudDemo({ filterEntityKeys = null }) {
 
   useEffect(() => {
     if (entity) load();
-  }, [entity]); // eslint-disable-line react-hooks/exhaustive-deps -- recargar solo al cambiar entidad
+  }, [entity, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setLoading(true); setMsg('');
     try {
       const res = await fetch(`${API_BASE}/${entity.key}`);
       const data = await res.json();
-      setRows(Array.isArray(data) ? data : []);
+      let list = Array.isArray(data) ? data : [];
+      if (entity.key === 'alerta') {
+        const eal = searchParams.get('eal_id');
+        const tal = searchParams.get('tal_id');
+        const maq = searchParams.get('maq_id');
+        if (eal) list = list.filter((r) => String(r.EAL_ID ?? r.eal_id) === eal);
+        if (tal) list = list.filter((r) => String(r.TAL_ID ?? r.tal_id) === tal);
+        if (maq) list = list.filter((r) => String(r.MAQ_ID ?? r.maq_id) === maq);
+      }
+      setRows(list);
     } catch (e) { setMsg('Error: ' + e.message); setRows([]); }
     finally { setLoading(false); }
   }

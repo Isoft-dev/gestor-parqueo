@@ -1,4 +1,4 @@
-import PDFDocument from 'pdfkit';
+import PDFDocument from 'pdfkit/js/pdfkit.js';
 import QRCode from 'qrcode';
 
 export function buildMemCodigo(memId, when = new Date()) {

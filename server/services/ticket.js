@@ -1,7 +1,8 @@
 import oracledb from 'oracledb';
-import PDFDocument from 'pdfkit';
+import PDFDocument from 'pdfkit/js/pdfkit.js';
 import QRCode from 'qrcode';
 import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
+import { applyCashMovementTx } from './cashMachine.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_TICKET_GET_ALL(:cursor); END;`);
@@ -452,7 +453,16 @@ export async function generateEntryTicketPdfByTicketId(ticketId) {
   };
 }
 
-export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, COB_MONTO_RECIBIDO, MAQ_ID }) {
+export async function checkoutByCodigo({
+  TIC_CODIGO,
+  TCO_ID,
+  COB_NIT,
+  USE_CF,
+  COB_MONTO_RECIBIDO,
+  MAQ_ID,
+  BILLETES_INGRESO,
+  COB_PROCESADO_MAQUINA = 1,
+}) {
   const codigo = String(TIC_CODIGO || '').trim();
   if (!codigo) throw new Error('TIC_CODIGO es requerido');
   if (!TCO_ID) throw new Error('Debes seleccionar un tipo de cobro');
@@ -504,6 +514,23 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
     }
     const vuelto = Number((montoRecibido - monto).toFixed(2));
 
+    let ingresoMap = null;
+    if (BILLETES_INGRESO && typeof BILLETES_INGRESO === 'object') {
+      ingresoMap = {};
+      let suma = 0;
+      for (const d of [50, 20, 10, 5]) {
+        const n = Math.floor(
+          Number(BILLETES_INGRESO[d] ?? BILLETES_INGRESO[String(d)] ?? 0),
+        );
+        if (n > 0) ingresoMap[d] = n;
+        suma += n * d;
+      }
+      suma = Math.round(suma * 100) / 100;
+      if (Math.abs(suma - montoRecibido) > 0.05) {
+        throw new Error('La suma de billetes ingresados no coincide con el monto recibido');
+      }
+    }
+
     let cobId;
     if (await cobroIdentityAlwaysTx(conn)) {
       const ins = await conn.execute(
@@ -522,7 +549,7 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
-          COB_PROCESADO_MAQUINA: 1,
+          COB_PROCESADO_MAQUINA: Number(COB_PROCESADO_MAQUINA) ? 1 : 0,
           TAR_ID: tarifa.TAR_ID,
           COB_NIT: cobNit,
           COB_ID_OUT: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
@@ -548,7 +575,7 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
-          COB_PROCESADO_MAQUINA: 1,
+          COB_PROCESADO_MAQUINA: Number(COB_PROCESADO_MAQUINA) ? 1 : 0,
           TAR_ID: tarifa.TAR_ID,
           COB_NIT: cobNit,
         }
@@ -595,6 +622,19 @@ export async function checkoutByCodigo({ TIC_CODIGO, TCO_ID, COB_NIT, USE_CF, CO
         }
       );
     }
+
+    if (Number(COB_PROCESADO_MAQUINA)) {
+      try {
+        await applyCashMovementTx(conn, {
+          maqId: MAQ_ID,
+          vuelto,
+          ingresoPorValor: ingresoMap,
+        });
+      } catch (cashErr) {
+        throw cashErr;
+      }
+    }
+
     await conn.commit();
 
     return {
@@ -845,4 +885,60 @@ export async function update(id, data) {
     }
   );
   return getById(id);
+}
+
+async function findEstadoTicketExtraviadoTx(conn) {
+  const r = await conn.execute(
+    `SELECT ETI_ID FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%extrav%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? null;
+}
+
+/** Protocolo ticket extraviado: marca estado y devuelve cotización vigente. */
+export async function prepararTicketExtraviadoPorPlaca(vehPlaca) {
+  const placa = String(vehPlaca || '').trim().toUpperCase();
+  if (!placa) throw new Error('VEH_PLACA es requerido');
+  let conn;
+  try {
+    conn = await getConnection();
+    const etiEx = await findEstadoTicketExtraviadoTx(conn);
+    if (!etiEx) {
+      throw new Error(
+        'No existe estado de ticket «extraviado» en PAR_ESTADO_TICKET (crea un registro con ETI_ESTADO que contenga «extraviado»).'
+      );
+    }
+    const v = await conn.execute(
+      `SELECT VEH_ID FROM PAR_VEHICULO WHERE UPPER(TRIM(VEH_PLACA)) = :p AND CLI_ID IS NULL`,
+      { p: placa }
+    );
+    const vehId = v.rows?.[0]?.VEH_ID;
+    if (!vehId) throw new Error('No hay vehículo esporádico (sin CLI_ID) con esa placa');
+    const t = await conn.execute(
+      `SELECT TIC_ID, TIC_CODIGO FROM PAR_TICKET
+        WHERE VEH_ID = :v AND COB_ID IS NULL
+        ORDER BY TIC_ID DESC`,
+      { v: vehId }
+    );
+    const tic = t.rows?.[0];
+    if (!tic) throw new Error('No hay ticket pendiente de cobro para esa placa');
+    await conn.execute(
+      `UPDATE PAR_TICKET SET ETI_ID = :eti WHERE TIC_ID = :tic`,
+      { eti: etiEx, tic: tic.TIC_ID }
+    );
+    await conn.commit();
+    return quoteByCodigo(String(tic.TIC_CODIGO));
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
+  } finally {
+    if (conn) await conn.close();
+  }
 }
