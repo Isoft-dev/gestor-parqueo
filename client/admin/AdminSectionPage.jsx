@@ -1,5 +1,6 @@
 import CrudDemo from '../components/CrudDemo.jsx';
 import MonthlyPaymentsPanel from './MonthlyPaymentsPanel.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function AdminSectionPage({
   title,
@@ -8,6 +9,8 @@ export default function AdminSectionPage({
   footnote,
   sectionPath,
 }) {
+  const { user } = useAuth();
+  const sessionUserId = user?.USU_ID ?? null;
   return (
     <div className="admin-page">
       <header className="admin-page-header">
@@ -17,7 +20,12 @@ export default function AdminSectionPage({
       </header>
       {sectionPath === 'clientes-mensuales' ? <MonthlyPaymentsPanel /> : null}
       <div className="admin-crud-embed">
-        <CrudDemo key={sectionPath} filterEntityKeys={entityKeys} />
+        <CrudDemo
+          key={sectionPath}
+          filterEntityKeys={entityKeys}
+          sessionUserId={sessionUserId}
+          sectionPath={sectionPath}
+        />
       </div>
     </div>
   );

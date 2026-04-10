@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { runDailyMembershipJobs } from '../services/jobMembershipTasks.js';
 import { isOracleConfigured } from '../config.js';
+import { insertSystemAlerta } from '../utils/systemAlert.js';
 
 export function startDailyJobs() {
   if (!isOracleConfigured()) {
@@ -16,6 +17,10 @@ export function startDailyJobs() {
         console.log('[cron] Membresías:', JSON.stringify(r));
       } catch (e) {
         console.error('[cron] Error jobs membresía:', e?.message || e);
+        await insertSystemAlerta({
+          motivo: 'Error proceso automático diario (membresías)',
+          descripcion: String(e?.stack || e?.message || e).slice(0, 3500),
+        });
       }
     },
     { timezone: process.env.CRON_TZ || undefined },

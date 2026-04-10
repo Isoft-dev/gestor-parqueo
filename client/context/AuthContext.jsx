@@ -3,6 +3,14 @@ import { API_BASE } from '../config.js';
 
 const STORAGE_KEY = 'parqueo_admin_session';
 
+/** Acceso al panel /admin: rol tipo administrador (p. ej. «Administrador» en BD). */
+export function isAdminPanelUser(user) {
+  if (!user) return false;
+  const t = String(user.ROL_TIPO ?? user.rol_tipo ?? '').toLowerCase();
+  if (!t) return false;
+  return t.includes('admin');
+}
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {

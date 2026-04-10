@@ -7,13 +7,16 @@ import AdminOperationsPage from './admin/AdminOperationsPage.jsx';
 import LoginPage from './admin/LoginPage.jsx';
 import { ADMIN_NAV_ROUTES } from './admin/adminNavConfig.js';
 import TicketLoaderPage from './sporadic/TicketLoaderPage.jsx';
-import { useAuth } from './context/AuthContext.jsx';
+import { useAuth, isAdminPanelUser } from './context/AuthContext.jsx';
 
 function RequireAdmin({ children }) {
   const { user } = useAuth();
   const location = useLocation();
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  if (!isAdminPanelUser(user)) {
+    return <Navigate to="/" replace />;
   }
   return children;
 }
