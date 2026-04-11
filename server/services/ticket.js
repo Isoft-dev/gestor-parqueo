@@ -4,6 +4,14 @@ import QRCode from 'qrcode';
 import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
 import { applyCashMovementTx } from './cashMachine.js';
 import { occupySporadicSlotTx, releaseSporadicSlotTx } from './espacioCapacity.js';
+import {
+  isTipoMaquinaCobro,
+  isTipoMaquinaEntrada,
+  isTipoMaquinaSalida,
+} from '../utils/tipoMaquinaRules.js';
+
+/** Monto mínimo a cobrar (Q) cuando el cálculo por tiempo da 0 (p. ej. dentro de gracia). */
+const MONTO_MINIMO_COBRO_GT = 5;
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_TICKET_GET_ALL(:cursor); END;`);
@@ -90,7 +98,8 @@ export async function quoteByCodigo(codigo) {
   const horas = minsFacturables / 60;
   const horasRedondeadas = Math.ceil(horas);
   const precio = Number(tarifa.TAR_PRECIO || 0);
-  const monto = Number((horasRedondeadas * precio).toFixed(2));
+  const montoBruto = Number((horasRedondeadas * precio).toFixed(2));
+  const monto = Math.max(MONTO_MINIMO_COBRO_GT, montoBruto);
 
   return {
     ticket: {
@@ -112,6 +121,7 @@ export async function quoteByCodigo(codigo) {
       horasCobradas: horasRedondeadas,
     },
     montoTotal: monto,
+    montoMinimoAplicado: monto > montoBruto,
     calculadoEn: ahora.toISOString(),
   };
 }
@@ -313,8 +323,18 @@ export async function generateEntryTicket({
     );
     if (!tipoVehiculo.rows?.length) throw new Error('TVE_ID no válido');
 
-    const maq = await conn.execute(`SELECT MAQ_ID FROM PAR_MAQUINA WHERE MAQ_ID = :id`, { id: MAQ_ID });
+    const maq = await conn.execute(
+      `SELECT m.MAQ_ID, tm.TMA_TIPO
+         FROM PAR_MAQUINA m
+         JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
+        WHERE m.MAQ_ID = :id`,
+      { id: MAQ_ID }
+    );
     if (!maq.rows?.length) throw new Error('MAQ_ID no válido');
+    const tmaEntrada = maq.rows[0]?.TMA_TIPO;
+    if (!tmaEntrada || !isTipoMaquinaEntrada(tmaEntrada)) {
+      throw new Error('La generación de ticket requiere una máquina de tipo entrada');
+    }
 
     await occupySporadicSlotTx(conn);
 
@@ -512,7 +532,21 @@ export async function checkoutByCodigo({
     const horas = minsFacturables / 60;
     const horasCobradas = Math.ceil(horas);
     const precio = Number(tarifa.TAR_PRECIO || 0);
-    const monto = Number((horasCobradas * precio).toFixed(2));
+    const montoBruto = Number((horasCobradas * precio).toFixed(2));
+    const monto = Math.max(MONTO_MINIMO_COBRO_GT, montoBruto);
+
+    const maqTipo = await conn.execute(
+      `SELECT tm.TMA_TIPO
+         FROM PAR_MAQUINA m
+         JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
+        WHERE m.MAQ_ID = :id`,
+      { id: MAQ_ID }
+    );
+    const tmaCobro = maqTipo.rows?.[0]?.TMA_TIPO;
+    if (!tmaCobro || !isTipoMaquinaCobro(tmaCobro)) {
+      throw new Error('El cobro debe registrarse en una máquina de tipo cobro');
+    }
+
     const montoRecibido = Number(COB_MONTO_RECIBIDO);
     if (!Number.isFinite(montoRecibido) || montoRecibido < monto) {
       throw new Error('El monto recibido debe ser mayor o igual al monto total');
@@ -680,8 +714,18 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
       throw new Error('Falta la columna TAR_TIEMPO_GRACIA en PAR_TARIFA');
     }
 
-    const maq = await conn.execute(`SELECT MAQ_ID FROM PAR_MAQUINA WHERE MAQ_ID = :id`, { id: MAQ_ID });
+    const maq = await conn.execute(
+      `SELECT m.MAQ_ID, tm.TMA_TIPO
+         FROM PAR_MAQUINA m
+         JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
+        WHERE m.MAQ_ID = :id`,
+      { id: MAQ_ID }
+    );
     if (!maq.rows?.length) throw new Error('MAQ_ID no válido');
+    const tmaSalida = maq.rows[0]?.TMA_TIPO;
+    if (!tmaSalida || !isTipoMaquinaSalida(tmaSalida)) {
+      throw new Error('La validación de salida debe hacerse en una máquina de tipo salida');
+    }
 
     const tRes = await conn.execute(
       `SELECT t.TIC_ID, t.TIC_CODIGO, t.ETI_ID, et.ETI_ESTADO, c.COB_ID AS COB_ID,

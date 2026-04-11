@@ -60,8 +60,29 @@ async function validateEspacioDisponible(espId) {
   }
 }
 
-/** Impide membresía si el vehículo pertenece a un cliente dado de baja (CLI_ACTIVO ≠ 1). */
-async function validateVehiculoClienteActivo(vehId) {
+function addDaysCalendar(fecha, days) {
+  const d = new Date(fecha);
+  d.setDate(d.getDate() + Number(days));
+  return d;
+}
+
+async function loadDuracionTipoMembresia(tmeId) {
+  const rows = await executeSql(
+    `SELECT TME_DURACION FROM PAR_TIPO_MEMBRESIA WHERE TME_ID = :id`,
+    { id: tmeId }
+  );
+  const n = Number(rows[0]?.TME_DURACION ?? 0);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error('El tipo de membresía no tiene una duración válida (TME_DURACION)');
+  }
+  return n;
+}
+
+/**
+ * Exige vehículo existente, cliente asignado (CLI_ID) y cliente activo.
+ * Si falta cliente: err.code = VEH_SIN_CLIENTE (para UI).
+ */
+async function validateVehiculoParaMembresia(vehId) {
   if (vehId == null || vehId === '') return;
   const rows = await executeSql(
     `SELECT v.VEH_ID, v.CLI_ID, c.CLI_ACTIVO
@@ -72,7 +93,14 @@ async function validateVehiculoClienteActivo(vehId) {
   );
   const row = rows[0];
   if (!row) throw new Error('El vehículo indicado no existe');
-  if (row.CLI_ID == null) return;
+  if (row.CLI_ID == null) {
+    const err = new Error(
+      'Debes asignar un cliente al vehículo antes de registrar la membresía.'
+    );
+    err.code = 'VEH_SIN_CLIENTE';
+    err.VEH_ID = row.VEH_ID;
+    throw err;
+  }
   if (Number(row.CLI_ACTIVO ?? 1) !== 1) {
     throw new Error(
       'No se puede crear la membresía: el cliente vinculado a este vehículo está inactivo. ' +
@@ -116,9 +144,12 @@ export async function create(data) {
   if (!memCodigoEnabled) {
     throw new Error('Falta la columna MEM_CODIGO en PAR_MEMBRESIA. Esta HU requiere persistir ese valor en base de datos.');
   }
-  await validateVehiculoClienteActivo(data.VEH_ID);
+  await validateVehiculoParaMembresia(data.VEH_ID);
   await validateEspacioDisponible(data.ESP_ID);
   const now = new Date();
+  const fechaInicio = data.MEM_FECHA_INICIO ? new Date(data.MEM_FECHA_INICIO) : now;
+  const diasTipo = await loadDuracionTipoMembresia(data.TME_ID);
+  const fechaVencimiento = addDaysCalendar(fechaInicio, diasTipo);
   const useIdentity = (await isMembresiaIdentityAlways()) || !data.MEM_ID;
 
   if (useIdentity) {
@@ -132,11 +163,9 @@ export async function create(data) {
        )`,
       {
         TME_ID: data.TME_ID ?? null,
-        MEM_FECHA_INICIO: data.MEM_FECHA_INICIO ? new Date(data.MEM_FECHA_INICIO) : now,
+        MEM_FECHA_INICIO: fechaInicio,
         EME_ID: data.EME_ID ?? null,
-        MEM_FECHA_VENCIMIENTO: data.MEM_FECHA_VENCIMIENTO
-          ? new Date(data.MEM_FECHA_VENCIMIENTO)
-          : null,
+        MEM_FECHA_VENCIMIENTO: fechaVencimiento,
         MEM_FECHA_ULTIMO_CAMBIO_ESTADO: data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO
           ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
           : now,
@@ -154,7 +183,7 @@ export async function create(data) {
     );
     const memId = rows[0]?.MEM_ID;
     if (!memId) return null;
-    const persisted = await persistMemCodigo(memId, data.MEM_FECHA_INICIO ?? now);
+    const persisted = await persistMemCodigo(memId, fechaInicio);
     try {
       await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
     } catch (e) {
@@ -172,11 +201,9 @@ export async function create(data) {
     {
       MEM_ID: data.MEM_ID ?? null,
       TME_ID: data.TME_ID ?? null,
-      MEM_FECHA_INICIO: data.MEM_FECHA_INICIO ? new Date(data.MEM_FECHA_INICIO) : now,
+      MEM_FECHA_INICIO: fechaInicio,
       EME_ID: data.EME_ID ?? null,
-      MEM_FECHA_VENCIMIENTO: data.MEM_FECHA_VENCIMIENTO
-        ? new Date(data.MEM_FECHA_VENCIMIENTO)
-        : null,
+      MEM_FECHA_VENCIMIENTO: fechaVencimiento,
       MEM_FECHA_ULTIMO_CAMBIO_ESTADO: data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO
         ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
         : now,
@@ -184,7 +211,7 @@ export async function create(data) {
       ESP_ID: data.ESP_ID ?? null,
     }
   );
-  const persisted = await persistMemCodigo(data.MEM_ID, data.MEM_FECHA_INICIO ?? now);
+  const persisted = await persistMemCodigo(data.MEM_ID, fechaInicio);
   try {
     await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
   } catch (e) {
@@ -203,21 +230,31 @@ export async function update(id, data) {
 
   const nextVehId = data.VEH_ID != null ? data.VEH_ID : current.VEH_ID;
   if (String(nextVehId ?? '') !== String(current.VEH_ID ?? '')) {
-    await validateVehiculoClienteActivo(nextVehId);
+    await validateVehiculoParaMembresia(nextVehId);
   }
 
   const willChangeStatus =
     data.EME_ID != null && String(data.EME_ID) !== String(current.EME_ID ?? '');
 
+  const nextTmeId = data.TME_ID != null ? data.TME_ID : current.TME_ID;
+  let memFechaVencimiento;
+  if (String(nextTmeId ?? '') !== String(current.TME_ID ?? '')) {
+    const dias = await loadDuracionTipoMembresia(nextTmeId);
+    const inicio = current.MEM_FECHA_INICIO ? new Date(current.MEM_FECHA_INICIO) : new Date();
+    memFechaVencimiento = addDaysCalendar(inicio, dias);
+  } else {
+    memFechaVencimiento = current.MEM_FECHA_VENCIMIENTO
+      ? new Date(current.MEM_FECHA_VENCIMIENTO)
+      : null;
+  }
+
   await executeProcedure(
     `BEGIN SP_MEMBRESIA_UPDATE(:id, :TME_ID, :EME_ID, :MEM_FECHA_VENCIMIENTO, :MEM_FECHA_ULTIMO_CAMBIO_ESTADO, :VEH_ID, :ESP_ID); END;`,
     {
       id,
-      TME_ID: data.TME_ID ?? current.TME_ID ?? null,
+      TME_ID: nextTmeId ?? null,
       EME_ID: data.EME_ID ?? current.EME_ID ?? null,
-      MEM_FECHA_VENCIMIENTO: data.MEM_FECHA_VENCIMIENTO
-        ? new Date(data.MEM_FECHA_VENCIMIENTO)
-        : (current.MEM_FECHA_VENCIMIENTO ? new Date(current.MEM_FECHA_VENCIMIENTO) : null),
+      MEM_FECHA_VENCIMIENTO: memFechaVencimiento,
       MEM_FECHA_ULTIMO_CAMBIO_ESTADO:
         data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO
           ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
@@ -551,6 +588,20 @@ export async function validateTagAndRegisterEntry(memCodigoRaw) {
   }
   if (!isMembershipActive(membership)) {
     throw new Error('Acceso denegado: membresia no activa');
+  }
+
+  const openEntrada = await executeSql(
+    `SELECT RMM_ID
+       FROM PAR_REGISTRO_MOVIMIENTO_MEMBRESIA
+      WHERE MEM_ID = :memId
+        AND RMM_FECHA_HORA_ENTRADA IS NOT NULL
+        AND RMM_FECHA_HORA_SALIDA IS NULL`,
+    { memId: membership.MEM_ID }
+  );
+  if (openEntrada.length > 0) {
+    throw new Error(
+      'Ya hay un ingreso activo para esta membresía. Registre la salida antes de volver a entrar.'
+    );
   }
 
   const espId = membership.ESP_ID ?? membership.esp_id;
