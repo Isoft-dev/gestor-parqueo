@@ -7,7 +7,7 @@ function businessStatus(err) {
   if (/ya saldado/i.test(msg)) return 409;
   if (/salida bloqueada|solicita asistencia/i.test(msg)) return 403;
   if (/efectivo suficiente|suma de billetes|vuelto/i.test(msg)) return 400;
-  if (/requerid|tipo de cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_COBRO_TIC_ID|FK_PAR_COBRO_TICKET/i.test(msg)) return 400;
+  if (/requerid|tipo de cobro|tipo entrada|tipo salida|tipo cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_COBRO_TIC_ID|FK_PAR_COBRO_TICKET/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict|unico|ORA-00001/i.test(msg)) return 409;
   return 500;
 }

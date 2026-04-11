@@ -40,7 +40,7 @@ const SECTIONS = {
         fields: [{ k:'TMA_ID',l:'ID',req:true },{ k:'TMA_TIPO',l:'Tipo',req:true },{ k:'TMA_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:true,d:true} },
       { key: 'saldo-disponible', label: 'Saldo Disponible', id: 'SDI_ID',
-        fields: [{ k:'SDI_ID',l:'ID',req:true },{ k:'SDI_TIPO',l:'Tipo' },{ k:'SDI_VALOR',l:'Valor',t:'number' }],
+        fields: [{ k:'SDI_ID',l:'ID',req:true },{ k:'SDI_TIPO',l:'Tipo (billete/moneda)',req:true },{ k:'SDI_VALOR',l:'Valor',t:'number' }],
         ops:{c:true,u:true,d:false} },
       { key: 'detalle-saldo', label: 'Detalle Saldo', id: 'DSA_ID',
         fields: [{ k:'DSA_ID',l:'ID',req:true },{ k:'DSA_CANTIDAD',l:'Cantidad',t:'number' },{ k:'DSA_SUBTOTAL',l:'Subtotal',t:'number' },{ k:'DSA_UMBRAL_MINIMO',l:'Umbral mínimo',t:'number' },{ k:'SDI_ID',l:'SDI_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true }],
@@ -96,7 +96,7 @@ const SECTIONS = {
         fields: [{ k:'TME_ID',l:'ID',req:true },{ k:'TME_TIPO',l:'Tipo',req:true },{ k:'TME_DESCRIPCION',l:'Descripción' },{ k:'TME_DURACION',l:'Duración (días)',t:'number',req:true },{ k:'TME_PRECIO',l:'Precio',t:'number',req:true }],
         ops:{c:true,u:true,d:true} },
       { key: 'membresia', label: 'Membresía', id: 'MEM_ID',
-        fields: [{ k:'MEM_ID',l:'ID',req:true },{ k:'TME_ID',l:'TME_ID',req:true },{ k:'MEM_FECHA_INICIO',l:'Inicio',t:'datetime-local',req:true,createOnly:true },{ k:'EME_ID',l:'EME_ID' },{ k:'MEM_FECHA_VENCIMIENTO',l:'Vencimiento',t:'datetime-local',req:true },{ k:'MEM_FECHA_ULTIMO_CAMBIO_ESTADO',l:'Último Cambio',t:'datetime-local' },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'ESP_ID',l:'ESP_ID',req:true }],
+        fields: [{ k:'MEM_ID',l:'ID',req:true },{ k:'TME_ID',l:'TME_ID',req:true },{ k:'MEM_FECHA_INICIO',l:'Inicio',t:'datetime-local',req:true,createOnly:true },{ k:'EME_ID',l:'EME_ID' },{ k:'MEM_FECHA_ULTIMO_CAMBIO_ESTADO',l:'Último Cambio',t:'datetime-local' },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'ESP_ID',l:'ESP_ID',req:true }],
         ops:{c:true,u:true,d:false} },
       { key: 'registro-movimiento-membresia', label: 'Reg. Mov. Membresía', id: 'RMM_ID',
         fields: [{ k:'RMM_ID',l:'ID',req:true },{ k:'RMM_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local' },{ k:'RMM_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'MEM_ID',l:'MEM_ID',req:true }],
@@ -261,6 +261,8 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   const [msg, setMsg]          = useState('');
   const [machineView, setMachineView] = useState({ maqId: null, title: '', rows: [] });
   const [bivFilter, setBivFilter] = useState(emptyBivFilter);
+  /** Modal MEM-2: vehículo sin cliente al crear membresía */
+  const [vehClienteModal, setVehClienteModal] = useState(null);
   const bivQueryKey = searchParams.toString();
 
   useEffect(() => {
@@ -447,10 +449,49 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
       );
       const json = await parseJsonSafe(res);
-      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
-      setMsg(isEdit ? 'Actualizado.' : 'Creado.');
+      if (!res.ok) {
+        if (
+          entity?.key === 'membresia' &&
+          json.code === 'VEH_SIN_CLIENTE' &&
+          json.VEH_ID != null
+        ) {
+          setVehClienteModal({ VEH_ID: json.VEH_ID });
+        }
+        throw new Error(json.error || json.message || res.statusText);
+      }
+      let okMsg = isEdit ? 'Actualizado.' : 'Creado.';
+      if (json.warning) okMsg += ' — ' + json.warning;
+      setMsg(okMsg);
       cancelEdit(); load();
     } catch (err) { setMsg('Error: ' + err.message); }
+  }
+
+  async function assignClienteAVehiculoModal() {
+    const vehId = vehClienteModal?.VEH_ID;
+    if (vehId == null) return;
+    const cliRaw = window.prompt('Ingrese el CLI_ID del cliente a vincular a este vehículo:');
+    if (cliRaw == null) return;
+    const cliId = Number(String(cliRaw).trim());
+    if (!cliId || Number.isNaN(cliId)) {
+      setMsg('Error: CLI_ID no válido');
+      return;
+    }
+    try {
+      const r = await fetch(`${API_BASE}/vehiculo/${vehId}`);
+      const v = await parseJsonSafe(r);
+      if (!r.ok) throw new Error(v.error || v.message || 'No se pudo cargar el vehículo');
+      const res = await fetch(`${API_BASE}/vehiculo/${vehId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...v, CLI_ID: cliId }),
+      });
+      const j = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(j.error || j.message || res.statusText);
+      setVehClienteModal(null);
+      setMsg('Cliente asignado al vehículo. Puede guardar la membresía de nuevo.');
+    } catch (e) {
+      setMsg('Error: ' + e.message);
+    }
   }
 
   async function del(id) {
@@ -509,6 +550,12 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     const id = row?.MEM_ID ?? row?.[entity.id];
     if (!id) return;
     window.open(`${API_BASE}/membresia/${id}/tag.pdf`, '_blank');
+  }
+
+  function downloadTicketEntradaPdf(row) {
+    const id = row?.TIC_ID ?? row?.[entity.id];
+    if (!id) return;
+    window.open(`${API_BASE}/ticket/${id}/entrada.pdf`, '_blank');
   }
 
   const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
@@ -670,6 +717,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                     </button>
                   </div>
                   <div className="crudx-form-grid">
+                    {entity.key === 'membresia' && isNewRecord ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        El vencimiento se calcula automáticamente según el tipo de membresía (duración en días) y la fecha de inicio.
+                      </p>
+                    ) : null}
                     {visibleFormFields.map((f) => {
                       const fieldId = `crud-${entity.key}-${String(f.k).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
                       const lbl = `${getDbColumnLabel(f.k, CRUD_COLUMN_LABELS)}${f.req ? ' *' : ''}`;
@@ -752,7 +804,9 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         {Object.keys(rows[0]).map((c) => (
                           <th key={c}>{getDbColumnLabel(c, CRUD_COLUMN_LABELS)}</th>
                         ))}
-                        {(entity.ops.u || entity.ops.d || entity.key === 'membresia') && <th>Acc.</th>}
+                        {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
+                          <th>Acc.</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
@@ -790,7 +844,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                               </td>
                             );
                           })}
-                          {(entity.ops.u || entity.ops.d || entity.key === 'membresia') && (
+                          {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
                             <td
                               className={
                                 entity.key === 'cliente' || entity.key === 'usuario'
@@ -800,6 +854,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                             >
                               {entity.ops.u && <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">Editar</button>}
                               {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
+                              {entity.key === 'ticket' && (
+                                <button
+                                  type="button"
+                                  onClick={() => downloadTicketEntradaPdf(row)}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  PDF entrada
+                                </button>
+                              )}
                               {entity.key === 'cliente' && Number(row.CLI_ACTIVO ?? 1) === 1 && (
                                 <button
                                   type="button"
@@ -901,6 +964,51 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
             </>
           )}
       </div>
+
+      {vehClienteModal != null ? (
+        <div
+          className="crudx-modal-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="veh-cli-modal-title"
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 10,
+              padding: '20px 22px',
+              maxWidth: 420,
+              boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+            }}
+          >
+            <h2 id="veh-cli-modal-title" style={{ fontSize: '1.05rem', margin: '0 0 10px' }}>
+              Vehículo sin cliente
+            </h2>
+            <p style={{ margin: '0 0 14px', lineHeight: 1.45, color: '#334155' }}>
+              Asigne un cliente al vehículo (VEH_ID {vehClienteModal.VEH_ID}) antes de crear la membresía, o cancele y
+              edite el vehículo en la entidad Vehículo.
+            </p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <button type="button" className="crudx-btn-secondary" onClick={() => setVehClienteModal(null)}>
+                Cancelar
+              </button>
+              <button type="button" className="crudx-btn-primary" onClick={assignClienteAVehiculoModal}>
+                Asignar cliente
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
