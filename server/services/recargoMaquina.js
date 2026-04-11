@@ -1,4 +1,5 @@
 import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
+import { isTipoMaquinaCobro } from '../utils/tipoMaquinaRules.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_RECARGO_MAQUINA_GET_ALL(:cursor); END;`);
@@ -24,6 +25,18 @@ async function getNextIdTx(conn, tableName, columnName) {
 }
 
 export async function create(data) {
+  const maqTipo = await executeSql(
+    `SELECT tm.TMA_TIPO
+       FROM PAR_MAQUINA m
+       JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
+      WHERE m.MAQ_ID = :maqId`,
+    { maqId: data.MAQ_ID ?? null }
+  );
+  const tma = maqTipo[0]?.TMA_TIPO;
+  if (!tma || !isTipoMaquinaCobro(tma)) {
+    throw new Error('La recarga de billetes aplica solo a máquinas de tipo cobro');
+  }
+
   const detalles = Array.isArray(data.RECARGA_DETALLE_SALDO) ? data.RECARGA_DETALLE_SALDO : [];
   if (!detalles.length) {
     if ((await isIdentityAlways()) || !data.RMA_ID) {
