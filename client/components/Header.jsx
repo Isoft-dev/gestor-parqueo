@@ -14,7 +14,7 @@ export default function Header({ tema, onToggleTema }) {
           title={tema === 'dark' ? 'Modo claro' : 'Modo oscuro'}
           aria-label={tema === 'dark' ? 'Modo claro' : 'Modo oscuro'}
         >
-          {tema === 'dark' ? '☀️' : '🌙'}
+          {tema === 'dark' ? 'Claro' : 'Oscuro'}
         </button>
       </div>
       <p className="page-desc">
