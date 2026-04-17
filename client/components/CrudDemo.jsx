@@ -1,501 +1,1186 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { API_BASE } from '../config.js';
+import { buildLabelMapFromCrudFields, getDbColumnLabel } from '../utils/dbColumnLabel.js';
 
-const toArr = (data) => (Array.isArray(data) ? data : []);
+// ── CONFIG ────────────────────────────────────────────────────
+// ops: c=create, u=update, d=delete
+// updateFields: si existe, el formulario de edición solo muestra esos campos
+const SECTIONS = {
+  'me-ms': {
+    label: 'ME-MS — Entrada/Salida',
+    entities: [
+      { key: 'estado-ticket', label: 'Estado Ticket', id: 'ETI_ID',
+        fields: [{ k:'ETI_ID',l:'ID',req:true },{ k:'ETI_ESTADO',l:'Estado',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tarifa', label: 'Tarifa', id: 'TAR_ID',
+        fields: [{ k:'TAR_ID',l:'ID',req:true },{ k:'TAR_TIPO',l:'Tipo',req:true },{ k:'TAR_PRECIO',l:'Precio',t:'number',req:true },{ k:'TAR_TIEMPO_GRACIA',l:'Tiempo Gracia (min)',t:'number',req:true }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'ticket', label: 'Ticket', id: 'TIC_ID',
+        fields: [{ k:'TIC_ID',l:'ID',req:true },{ k:'TIC_CODIGO',l:'Código',req:true },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'TIC_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local',req:true },{ k:'TIC_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'ETI_ID',l:'ETI_ID',req:true }],
+        ops:{c:true,u:true,d:false}, updateFields:['TIC_FECHA_HORA_SALIDA','ETI_ID'] },
+      { key: 'tipo-cobro', label: 'Tipo Cobro', id: 'TCO_ID',
+        fields: [{ k:'TCO_ID',l:'ID',req:true },{ k:'TCO_TIPO',l:'Tipo',req:true },{ k:'TCO_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'cobro', label: 'Cobro', id: 'COB_ID',
+        fields: [{ k:'COB_ID',l:'ID',req:true },{ k:'TIC_ID',l:'TIC_ID',req:true,t:'number' },{ k:'COB_NIT',l:'NIT / CF' },{ k:'COB_HORAS_TOTALES',l:'Horas',t:'number',req:true },{ k:'TCO_ID',l:'TCO_ID',req:true,t:'number' },{ k:'COB_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'COB_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'COB_VUELTO',l:'Vuelto',t:'number' },{ k:'COB_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'COB_PROCESADO_MAQUINA',l:'Proc. Máq.',t:'checkbox' },{ k:'TAR_ID',l:'TAR_ID',req:true,t:'number' }],
+        ops:{c:true,u:true,d:false}, updateFields:['COB_PROCESADO_MAQUINA'] },
+      { key: 'detalle-maquina-ticket', label: 'Det. Máq./Ticket', id: 'DMT_ID',
+        fields: [{ k:'DMT_ID',l:'ID',req:true },{ k:'DMT_TRANSACCION',l:'Transacción' },{ k:'TIC_ID',l:'TIC_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'DMT_HORA_TRANSACCION',l:'Hora',t:'datetime-local' }],
+        ops:{c:true,u:false,d:false} },
+    ],
+  },
+  'mc': {
+    label: 'MC — Máquina Cobro',
+    entities: [
+      { key: 'estado-maquina', label: 'Estado Máquina', id: 'EMA_ID',
+        fields: [{ k:'EMA_ID',l:'ID',req:true },{ k:'EMA_ESTADO',l:'Estado',req:true },{ k:'EMA_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'tipo-maquina', label: 'Tipo Máquina', id: 'TMA_ID',
+        fields: [{ k:'TMA_ID',l:'ID',req:true },{ k:'TMA_TIPO',l:'Tipo',req:true },{ k:'TMA_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'saldo-disponible', label: 'Saldo Disponible', id: 'SDI_ID',
+        fields: [{ k:'SDI_ID',l:'ID',req:true },{ k:'SDI_TIPO',l:'Tipo (billete/moneda)',req:true },{ k:'SDI_VALOR',l:'Valor',t:'number' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'detalle-saldo', label: 'Detalle Saldo', id: 'DSA_ID',
+        fields: [{ k:'DSA_ID',l:'ID',req:true },{ k:'DSA_CANTIDAD',l:'Cantidad',t:'number' },{ k:'DSA_SUBTOTAL',l:'Subtotal',t:'number' },{ k:'DSA_UMBRAL_MINIMO',l:'Umbral mínimo',t:'number' },{ k:'SDI_ID',l:'SDI_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true }],
+        ops:{c:true,u:true,d:false}, updateFields:['DSA_UMBRAL_MINIMO'] },
+      { key: 'maquina', label: 'Máquina', id: 'MAQ_ID',
+        fields: [{ k:'MAQ_ID',l:'ID',req:true },{ k:'MAQ_CODIGO',l:'Código',req:true },{ k:'TMA_ID',l:'TMA_ID',req:true },{ k:'EMA_ID',l:'EMA_ID',req:true },{ k:'MAQ_FECHA_ULTIMA_RECARGA',l:'Última Recarga',t:'datetime-local' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'recargo-maquina', label: 'Recargo Máquina', id: 'RMA_ID',
+        fields: [{ k:'RMA_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'RMA_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'RMA_DESCRIPCION',l:'Descripción' },{ k:'RECARGA_DETALLE_SALDO',l:'Detalle billetes (JSON opcional)',help:'Arreglo JSON: [{ "SDI_ID": n, "DSA_CANTIDAD": cantidad }, …]. Si lo dejas vacío, solo se registra la recarga sin repartir billetes.' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'registro-mantenimiento', label: 'Reg. Mantenimiento', id: 'REM_ID',
+        fields: [{ k:'REM_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'REM_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'REM_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tipo-alerta', label: 'Tipo Alerta', id: 'TAL_ID',
+        fields: [{ k:'TAL_ID',l:'ID',req:true },{ k:'TAL_TIPO',l:'Tipo',req:true },{ k:'TAL_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'estado-alerta', label: 'Estado Alerta', id: 'EAL_ID',
+        fields: [{ k:'EAL_ID',l:'ID',req:true },{ k:'EAL_ESTADO',l:'Estado',req:true },{ k:'EAL_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'alerta', label: 'Alerta', id: 'ALE_ID',
+        fields: [{ k:'ALE_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID' },{ k:'ALE_MOTIVO',l:'Motivo',req:true },{ k:'ALE_DESCRIPCION',l:'Descripción' },{ k:'ALE_FECHA_HORA_GENERACION',l:'Generación',t:'datetime-local' },{ k:'EAL_ID',l:'EAL_ID',req:true,t:'number' },{ k:'TAL_ID',l:'TAL_ID',req:true,t:'number' },{ k:'ALE_FECHA_ATENCION',l:'Atención',t:'datetime-local' }],
+        ops:{c:true,u:true,d:false}, updateFields:['EAL_ID','ALE_FECHA_ATENCION'] },
+    ],
+  },
+  'pa': {
+    label: 'PA — Parqueo General',
+    entities: [
+      { key: 'rol', label: 'Rol', id: 'ROL_ID',
+        fields: [{ k:'ROL_ID',l:'ID',req:true },{ k:'ROL_TIPO',l:'Tipo',req:true },{ k:'ROL_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true}, updateFields:['ROL_DESCRIPCION'] },
+      { key: 'usuario', label: 'Usuario', id: 'USU_ID',
+        fields: [{ k:'USU_ID',l:'ID',req:true },{ k:'USU_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'USU_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'USU_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'USU_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'USU_CORREO',l:'Correo',req:true },{ k:'USU_PASSWORD',l:'Contraseña',t:'password',req:true,createOnly:true },{ k:'USU_TELEFONO',l:'Teléfono' },{ k:'ROL_ID',l:'ROL_ID',req:true },{ k:'USU_ACTIVO',l:'Activo',t:'checkbox' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'estado-espacio', label: 'Estado Espacio', id: 'EES_ID',
+        fields: [{ k:'EES_ID',l:'ID',req:true },{ k:'EES_ESTADO',l:'Estado',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'espacio', label: 'Espacio', id: 'ESP_ID',
+        fields: [{ k:'ESP_ID',l:'ID',req:true },{ k:'ESP_CODIGO',l:'Código',req:true },{ k:'EES_ID',l:'EES_ID' },{ k:'ESP_UBICACION',l:'Ubicación' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'cliente', label: 'Cliente', id: 'CLI_ID',
+        fields: [{ k:'CLI_ID',l:'ID',req:true },{ k:'CLI_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'CLI_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'CLI_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'CLI_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'CLI_DPI',l:'DPI',req:true },{ k:'CLI_NIT',l:'NIT' },{ k:'CLI_CORREO',l:'Correo' },{ k:'CLI_TELEFONO',l:'Teléfono' },{ k:'CLI_ZONA',l:'Zona' },{ k:'CLI_CALLE',l:'Calle' },{ k:'CLI_NUMERO',l:'Número' },{ k:'CLI_COLONIA',l:'Colonia' },{ k:'CLI_CIUDAD',l:'Ciudad' },{ k:'CLI_CODIGO_POSTAL',l:'Cód. Postal' },{ k:'CLI_ACTIVO',l:'Activo',t:'checkbox' }],
+        ops:{c:true,u:true,d:false} },
+      { key: 'tipo-vehiculo', label: 'Tipo Vehículo', id: 'TVE_ID',
+        fields: [{ k:'TVE_ID',l:'ID',req:true },{ k:'TVE_TIPO',l:'Tipo',req:true },{ k:'TVE_MARCA',l:'Marca' },{ k:'TVE_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'vehiculo', label: 'Vehículo', id: 'VEH_ID',
+        fields: [
+          { k:'VEH_ID',l:'ID',req:true },
+          { k:'VEH_PLACA',l:'Placa',req:true },
+          { k:'VEH_MODELO',l:'Modelo' },
+          { k:'VEH_COLOR',l:'Color' },
+          { k:'TVE_ID',l:'Tipo de vehículo',req:true,t:'select',catalog:'tipo-vehiculo',valueKey:'TVE_ID',labelKey:'TVE_TIPO' },
+          { k:'CLI_ID',l:'CLI_ID' },
+        ],
+        ops:{c:true,u:true,d:false} },
+      { key: 'estado-membresia', label: 'Estado Membresía', id: 'EME_ID',
+        fields: [{ k:'EME_ID',l:'ID',req:true },{ k:'EME_ESTADO',l:'Estado',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tipo-membresia', label: 'Tipo Membresía', id: 'TME_ID',
+        fields: [{ k:'TME_ID',l:'ID',req:true },{ k:'TME_TIPO',l:'Tipo',req:true },{ k:'TME_DESCRIPCION',l:'Descripción' },{ k:'TME_DURACION',l:'Duración (días)',t:'number',req:true },{ k:'TME_PRECIO',l:'Precio',t:'number',req:true }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'membresia', label: 'Membresía', id: 'MEM_ID',
+        fields: [
+          { k:'MEM_ID',l:'ID',req:true },
+          { k:'TME_ID',l:'Tipo de membresía',req:true,t:'select',catalog:'tipo-membresia',valueKey:'TME_ID',labelKey:'TME_TIPO' },
+          { k:'MEM_FECHA_INICIO',l:'Inicio',t:'datetime-local',req:true,createOnly:true },
+          { k:'EME_ID',l:'Estado membresía',t:'select',catalog:'estado-membresia',valueKey:'EME_ID',labelKey:'EME_ESTADO' },
+          { k:'MEM_FECHA_ULTIMO_CAMBIO_ESTADO',l:'Último Cambio',t:'datetime-local' },
+          { k:'VEH_ID',l:'VEH_ID',req:true },
+          { k:'ESP_ID',l:'ESP_ID',req:true },
+        ],
+        ops:{c:true,u:true,d:false} },
+      { key: 'registro-movimiento-membresia', label: 'Reg. Mov. Membresía', id: 'RMM_ID',
+        fields: [{ k:'RMM_ID',l:'ID',req:true },{ k:'RMM_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local' },{ k:'RMM_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'MEM_ID',l:'MEM_ID',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'tipo-notificacion', label: 'Tipo Notificación', id: 'TNO_ID',
+        fields: [{ k:'TNO_ID',l:'ID',req:true },{ k:'TNO_TIPO',l:'Tipo',req:true },{ k:'TNO_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'notificacion', label: 'Notificación', id: 'NOT_ID',
+        fields: [{ k:'NOT_ID',l:'ID',req:true },{ k:'TNO_ID',l:'TNO_ID',req:true },{ k:'MEM_ID',l:'MEM_ID',req:true },{ k:'NOT_ULTIMA_FECHA_ENVIO',l:'Último Envío',t:'datetime-local',req:true },{ k:'NOT_PROXIMA_FECHA_ENVIO',l:'Próximo Envío',t:'datetime-local',req:true },{ k:'NOT_EXITO',l:'Éxito',t:'checkbox' }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'incidente', label: 'Incidente', id: 'INC_ID',
+        fields: [{ k:'INC_ID',l:'ID',req:true },{ k:'INC_TIPO',l:'Tipo',req:true },{ k:'INC_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'bitacora-incidente-vehiculo', label: 'Bitácora Incidente', id: 'BIV_ID',
+        fields: [{ k:'BIV_ID',l:'ID',req:true },{ k:'BIV_DESCRIPCION',l:'Descripción',req:true },{ k:'BIV_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'INC_ID',l:'INC_ID',req:true },{ k:'BIV_RESUELTO',l:'Resuelto',t:'checkbox' },{ k:'BIV_FECHA_RESOLUCION',l:'Fecha Resolución',t:'datetime-local' },{ k:'USU_ID',l:'USU_ID' }],
+        ops:{c:true,u:true,d:false}, updateFields:['BIV_RESUELTO','BIV_FECHA_RESOLUCION'] },
+      { key: 'tipo-pago', label: 'Tipo de Pago', id: 'TPA_ID',
+        fields: [{ k:'TPA_ID',l:'ID',req:true },{ k:'TPA_TIPO',l:'Tipo',req:true },{ k:'TPA_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'pago', label: 'Pago', id: 'PAG_ID',
+        fields: [{ k:'PAG_ID',l:'ID',req:true },{ k:'TPA_ID',l:'TPA_ID',req:true },{ k:'PAG_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'PAG_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'PAG_VUELTO',l:'Vuelto',t:'number' },{ k:'PAG_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true }],
+        ops:{c:true,u:false,d:false} },
+      { key: 'detalle-pago-membresia', label: 'Det. Pago Membresía', id: 'DPM_ID',
+        fields: [{ k:'DPM_ID',l:'ID',req:true },{ k:'MEM_ID',l:'MEM_ID',req:true },{ k:'PAG_ID',l:'PAG_ID',req:true },{ k:'DPM_MES_CANCELADO',l:'Mes Cancelado',t:'number',req:true }],
+        ops:{c:true,u:false,d:false} },
+    ],
+  },
+};
 
-export default function CrudDemo() {
-  const [clientes, setClientes] = useState([]);
-  const [espacios, setEspacios] = useState([]);
-  const [estadoEspacio, setEstadoEspacio] = useState([]);
-  const [estadoMaquina, setEstadoMaquina] = useState([]);
-  const [tipoMaquina, setTipoMaquina] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [usuarios, setUsuarios] = useState([]);
+/** Entidades en el orden indicado; cada `key` aparece como máximo una vez. */
+function collectEntitiesByKeys(keys) {
+  const byKey = new Map();
+  for (const s of Object.values(SECTIONS)) {
+    for (const e of s.entities) {
+      if (!byKey.has(e.key)) byKey.set(e.key, e);
+    }
+  }
+  return keys.map((k) => byKey.get(k)).filter(Boolean);
+}
 
-  const [loading, setLoading] = useState({
-    clientes: true, espacios: true, estadoEspacio: true, estadoMaquina: true,
-    tipoMaquina: true, roles: true, usuarios: true,
+/** Mapa columna API → etiqueta de formulario (SECTIONS), con fallback en `getDbColumnLabel`. */
+const CRUD_COLUMN_LABELS = buildLabelMapFromCrudFields(SECTIONS);
+
+// ── HELPERS ───────────────────────────────────────────────────
+function toInput(v, t) {
+  if (!v) return '';
+  try { const d = new Date(v); if (isNaN(d)) return ''; return t === 'date' ? d.toISOString().slice(0,10) : d.toISOString().slice(0,16); } catch { return ''; }
+}
+function emptyForm(fields) {
+  return Object.fromEntries(
+    fields.map((f) => [f.k, f.t === 'checkbox' ? 0 : '']),
+  );
+}
+function preparePayload(fields, form) {
+  const out = {};
+  fields.forEach(f => {
+    const v = form[f.k];
+    if (f.t === 'checkbox') out[f.k] = v ? 1 : 0;
+    else if (f.t === 'number') out[f.k] = v !== '' && v != null ? Number(v) : null;
+    else if (f.t === 'datetime-local' || f.t === 'date') out[f.k] = v ? new Date(v).toISOString() : null;
+    else out[f.k] = v || null;
   });
-  const [error, setError] = useState('');
+  return out;
+}
 
-  const [editCliente, setEditCliente] = useState(null);
-  const [editEspacio, setEditEspacio] = useState(null);
-  const [editEstadoMaquina, setEditEstadoMaquina] = useState(null);
-  const [editTipoMaquina, setEditTipoMaquina] = useState(null);
-  const [editRol, setEditRol] = useState(null);
-  const [editUsuario, setEditUsuario] = useState(null);
+async function parseJsonSafe(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try { return JSON.parse(text); }
+  catch { return { message: text }; }
+}
 
-  const emptyCliente = {
-    CLI_ID: '', CLI_PRIMER_NOMBRE: '', CLI_SEGUNDO_NOMBRE: '',
-    CLI_PRIMER_APELLIDO: '', CLI_SEGUNDO_APELLIDO: '', CLI_DPI: '', CLI_NIT: '',
-    CLI_CORREO: '', CLI_TELEFONO: '', CLI_ZONA: '', CLI_CALLE: '', CLI_NUMERO: '',
-    CLI_COLONIA: '', CLI_CIUDAD: '', CLI_CODIGO_POSTAL: '', CLI_ACTIVO: 1,
+/** Tono de alerta en toolbar: errores de API y restricciones (p. ej. FK al eliminar). */
+function isCrudErrorMessage(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/^Error(:|\s)/i.test(t)) return true;
+  if (/^No se puede\b/i.test(t)) return true;
+  return false;
+}
+
+/** Texto corto y claro bajo el título de cada lista del panel admin (`sectionPath` + entidad). */
+function getAdminListContextHint(sectionPath, entityKey) {
+  if (!sectionPath || !entityKey) return null;
+
+  const HINTS = {
+    'clientes-mensuales': {
+      cliente:
+        'Clientes dados de alta para el esquema mensual. Desde aquí actualizas datos de contacto y dirección.',
+      membresia:
+        'Contratos mensuales: unen un vehículo con un espacio fijo y el tipo de plan elegido.',
+      vehiculo:
+        'Solo se muestran vehículos de clientes que ya tienen al menos una membresía (tu flota mensual).',
+      'tipo-vehiculo': 'Catálogo de categorías de vehículo (sedán, SUV, etc.) que asignas a cada placa.',
+      'tipo-membresia': 'Planes disponibles: duración, precio y nombre comercial para nuevas membresías.',
+      'estado-membresia': 'Estados posibles del contrato (activa, vencida, suspendida…).',
+      'registro-movimiento-membresia':
+        'Movimientos de entrada y salida registrados contra cada membresía.',
+    },
+    'tickets-vehiculos': {
+      'estado-ticket':
+        'Define en qué etapa va cada ticket (por ejemplo activo o ya pagado).',
+      ticket:
+        'Tickets de visitantes sin plan mensual. Consejo: en la barra del navegador puedes añadir ?q= y escribir parte del código o de la placa para acotar la lista.',
+      vehiculo:
+        'Vehículos de visita o factura puntual: ves placas sin cliente, o con cliente pero sin ninguna membresía (típico tras pagar con NIT en caja).',
+      cobro: 'Historial de cobros al salir: montos, NIT o consumidor final y máquina donde se pagó.',
+      'tipo-cobro': 'Tipos de cobro que el cajero elige al cerrar un ticket (efectivo, tarjeta, etc.).',
+      'detalle-maquina-ticket':
+        'Línea de tiempo de cada paso del ticket en las máquinas (entrada, cobro o salida).',
+    },
+    usuarios: {
+      usuario: 'Cuentas de quienes usan el sistema o el panel administrativo.',
+      rol: 'Perfiles que agrupan permisos (por ejemplo, administrador u operador).',
+    },
+    maquinas: {
+      maquina: 'Equipos de cabina: entrada, cobro o salida, con su código interno y estado.',
+      'tipo-maquina': 'Clasifica cada equipo según su función en el parqueo.',
+      'estado-maquina': 'Indica si la máquina está en servicio, en revisión o fuera de línea.',
+      'detalle-maquina-ticket':
+        'Auditoría de qué máquina atendió cada movimiento del ticket.',
+      'saldo-disponible':
+        'Billetes o monedas que la caja de una máquina puede recibir o devolver.',
+      'detalle-saldo': 'Cantidad física por cada denominación dentro de una máquina.',
+      'recargo-maquina': 'Registro de recargas de efectivo hechas en caja.',
+      'registro-mantenimiento': 'Intervenciones técnicas o preventivas sobre cada equipo.',
+    },
+    tarifas: {
+      tarifa: 'Precio por tiempo, tipo de tarifa y minutos de gracia que aplican al cobrar estacionamiento.',
+      'tipo-cobro': 'Catálogo reutilizable al registrar un cobro (nombre y descripción).',
+      'tipo-pago': 'Medios de pago para otros procesos del sistema (membresías, mensualidades, etc.).',
+    },
+    'bitacora-incidentes': {
+      'bitacora-incidente-vehiculo':
+        'Seguimiento de novedades por vehículo. Arriba puedes filtrar por incidente, fechas o si ya quedó resuelto.',
+      incidente: 'Tipos de suceso que luego enlazas en la bitácora (choque, avería, etc.).',
+    },
+    alertas: {
+      'tipo-alerta': 'Motivos por los que el sistema genera alertas (saldo bajo, asistencia, etc.).',
+      'estado-alerta': 'Etapas de atención de una alerta (pendiente, en curso, cerrada…).',
+      alerta: 'Listado de alertas generadas; revisa prioridad y máquina asociada.',
+    },
   };
-  const [formCliente, setFormCliente] = useState(emptyCliente);
-  const [formEspacio, setFormEspacio] = useState({
-    ESP_ID: '', ESP_CODIGO: '', EES_ID: '', ESP_UBICACION: '',
-  });
-  const [formEstadoEspacio, setFormEstadoEspacio] = useState({ EES_ID: '', EES_ESTADO: '' });
-  const [formEstadoMaquina, setFormEstadoMaquina] = useState({
-    EMA_ID: '', EMA_ESTADO: '', EMA_DESCRIPCION: '',
-  });
-  const [formTipoMaquina, setFormTipoMaquina] = useState({
-    TMA_ID: '', TMA_TIPO: '', TMA_DESCRIPCION: '',
-  });
-  const [formRol, setFormRol] = useState({
-    ROL_ID: '', ROL_TIPO: '', ROL_DESCRIPCION: '',
-  });
-  const [formUsuario, setFormUsuario] = useState({
-    USU_ID: '', USU_PRIMER_NOMBRE: '', USU_SEGUNDO_NOMBRE: '',
-    USU_PRIMER_APELLIDO: '', USU_SEGUNDO_APELLIDO: '', USU_CORREO: '',
-    USU_PASSWORD: '', USU_TELEFONO: '', ROL_ID: '', USU_ACTIVO: 1,
-  });
 
-  const api = (path, opt = {}) =>
-    fetch(`${API_BASE}${path}`, { ...opt, headers: { 'Content-Type': 'application/json', ...opt.headers } });
+  const specific = HINTS[sectionPath]?.[entityKey];
+  if (specific) return specific;
+  return 'Consulta o edita los registros de esta lista. Usa «+ Nuevo» para altas y «Editar» en cada fila cuando aplique.';
+}
 
-  const fetchAll = (key, path) => async () => {
-    setLoading((l) => ({ ...l, [key]: true }));
-    setError('');
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatCellForPopup(v) {
+  if (v == null) return '—';
+  if (typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v)) {
     try {
-      const res = await api(path);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      return toArr(data);
-    } catch (e) {
-      setError((err) => (err ? err + ' | ' : '') + `${key}: ${e.message}`);
-      return [];
-    } finally {
-      setLoading((l) => ({ ...l, [key]: false }));
+      return new Date(v).toLocaleString('es-GT');
+    } catch {
+      /* keep */
     }
-  };
+  }
+  return String(v);
+}
 
-  const fetchClientes = fetchAll('clientes', '/cliente');
-  const fetchEspacios = fetchAll('espacios', '/espacio');
-  const fetchEstadoEspacio = fetchAll('estadoEspacio', '/estado-espacio');
-  const fetchEstadoMaquina = fetchAll('estadoMaquina', '/estado-maquina');
-  const fetchTipoMaquina = fetchAll('tipoMaquina', '/tipo-maquina');
-  const fetchRoles = fetchAll('roles', '/rol');
-  const fetchUsuarios = fetchAll('usuarios', '/usuario');
+/** Abre una ventana de navegador pequeña con todos los campos de la fila (descripción sin truncar). */
+function openAlertaDetailPopup(row) {
+  const features =
+    'width=540,height=440,left=140,top=90,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no';
+  const name = `alertaDetalle_${row?.ALE_ID ?? Date.now()}`;
+  const w = window.open('about:blank', name, features);
+  if (!w) {
+    window.alert('No se pudo abrir la ventana. Permite ventanas emergentes para este sitio.');
+    return;
+  }
+  try {
+    w.opener = null;
+  } catch {
+    /* ignore */
+  }
 
-  useEffect(() => {
-    (async () => {
-      setClientes(await fetchClientes());
-      setEspacios(await fetchEspacios());
-      setEstadoEspacio(await fetchEstadoEspacio());
-      setEstadoMaquina(await fetchEstadoMaquina());
-      setTipoMaquina(await fetchTipoMaquina());
-      setRoles(await fetchRoles());
-      setUsuarios(await fetchUsuarios());
-    })();
-  }, []);
+  const title = `Alerta ${row?.ALE_ID ?? ''}`.trim() || 'Detalle de alerta';
+  const bodyRows = Object.entries(row)
+    .map(([k, v]) => {
+      const display = formatCellForPopup(v);
+      const label = getDbColumnLabel(k, CRUD_COLUMN_LABELS);
+      return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(display)}</dd>`;
+    })
+    .join('');
 
-  const handleSaveCliente = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = {
-      ...formCliente,
-      CLI_ACTIVO: formCliente.CLI_ACTIVO ? 1 : 0,
-    };
-    try {
-      if (editCliente != null) {
-        const res = await api(`/cliente/${editCliente.CLI_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/cliente', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditCliente(null);
-      setFormCliente(emptyCliente);
-      setClientes(await fetchClientes());
-    } catch (e) {
-      setError('Cliente: ' + e.message);
-    }
-  };
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>
+  body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; padding: 16px 18px; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f8fafc; }
+  h1 { font-size: 1.05rem; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0; }
+  dl { margin: 0; }
+  dt { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin-top: 12px; }
+  dt:first-of-type { margin-top: 0; }
+  dd { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; color: #1e293b; }
+</style></head><body>
+<h1>${escapeHtml(title)}</h1>
+<dl>${bodyRows}</dl>
+</body></html>`);
+  w.document.close();
+}
 
-  const handleSaveEspacio = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = {
-      ...formEspacio,
-      EES_ID: formEspacio.EES_ID || null,
-    };
-    try {
-      if (editEspacio != null) {
-        const res = await api(`/espacio/${editEspacio.ESP_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/espacio', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditEspacio(null);
-      setFormEspacio({ ESP_ID: '', ESP_CODIGO: '', EES_ID: '', ESP_UBICACION: '' });
-      setEspacios(await fetchEspacios());
-    } catch (e) {
-      setError('Espacio: ' + e.message);
-    }
-  };
+// ── COMPONENT ─────────────────────────────────────────────────
+/**
+ * @param {{ filterEntityKeys?: string[]; sessionUserId?: string | number | null }} props
+ * Si `filterEntityKeys` está definido, se ocultan las pestañas ME-MS / MC / PA y solo se listan esas entidades.
+ * `sessionUserId`: USU_ID del admin logueado (bitácora: marca quién resolvió el incidente).
+ * `sectionPath`: ruta del módulo en `/admin` (muestra textos de ayuda acordes a cada lista).
+ */
+const emptyBivFilter = { inc: '', resuelto: '', desde: '', hasta: '' };
 
-  const handleSaveEstadoEspacio = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      const res = await api('/estado-espacio', { method: 'POST', body: JSON.stringify(formEstadoEspacio) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      setFormEstadoEspacio({ EES_ID: '', EES_ESTADO: '' });
-      setEstadoEspacio(await fetchEstadoEspacio());
-    } catch (e) {
-      setError('Estado espacio: ' + e.message);
-    }
-  };
-
-  const handleSaveEstadoMaquina = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = { ...formEstadoMaquina };
-    try {
-      if (editEstadoMaquina != null) {
-        const res = await api(`/estado-maquina/${editEstadoMaquina.EMA_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/estado-maquina', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditEstadoMaquina(null);
-      setFormEstadoMaquina({ EMA_ID: '', EMA_ESTADO: '', EMA_DESCRIPCION: '' });
-      setEstadoMaquina(await fetchEstadoMaquina());
-    } catch (e) {
-      setError('Estado máquina: ' + e.message);
-    }
-  };
-
-  const handleSaveTipoMaquina = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = { ...formTipoMaquina };
-    try {
-      if (editTipoMaquina != null) {
-        const res = await api(`/tipo-maquina/${editTipoMaquina.TMA_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/tipo-maquina', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditTipoMaquina(null);
-      setFormTipoMaquina({ TMA_ID: '', TMA_TIPO: '', TMA_DESCRIPCION: '' });
-      setTipoMaquina(await fetchTipoMaquina());
-    } catch (e) {
-      setError('Tipo máquina: ' + e.message);
-    }
-  };
-
-  const handleSaveRol = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = { ...formRol };
-    try {
-      if (editRol != null) {
-        const res = await api(`/rol/${editRol.ROL_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/rol', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditRol(null);
-      setFormRol({ ROL_ID: '', ROL_TIPO: '', ROL_DESCRIPCION: '' });
-      setRoles(await fetchRoles());
-    } catch (e) {
-      setError('Rol: ' + e.message);
-    }
-  };
-
-  const handleSaveUsuario = async (e) => {
-    e.preventDefault();
-    setError('');
-    const payload = {
-      ...formUsuario,
-      USU_ACTIVO: formUsuario.USU_ACTIVO ? 1 : 0,
-    };
-    try {
-      if (editUsuario != null) {
-        const res = await api(`/usuario/${editUsuario.USU_ID}`, { method: 'PUT', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      } else {
-        const res = await api('/usuario', { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      }
-      setEditUsuario(null);
-      setFormUsuario({
-        USU_ID: '', USU_PRIMER_NOMBRE: '', USU_SEGUNDO_NOMBRE: '',
-        USU_PRIMER_APELLIDO: '', USU_SEGUNDO_APELLIDO: '', USU_CORREO: '',
-        USU_PASSWORD: '', USU_TELEFONO: '', ROL_ID: '', USU_ACTIVO: 1,
-      });
-      setUsuarios(await fetchUsuarios());
-    } catch (e) {
-      setError('Usuario: ' + e.message);
-    }
-  };
-
-  const handleDelete = (path, id, fetchList, setListState) => async () => {
-    if (!confirm('¿Eliminar?')) return;
-    setError('');
-    try {
-      const res = await api(`${path}/${id}`, { method: 'DELETE' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || res.statusText);
-      const list = await fetchList();
-      setListState(list);
-    } catch (e) {
-      setError('Eliminar: ' + e.message);
-    }
-  };
-
-  const listItem = (item, onEdit, onDelete, label) => (
-    <li key={item.id ?? item.CLI_ID ?? item.ESP_ID ?? item.EES_ID ?? item.EMA_ID ?? item.TMA_ID ?? item.ROL_ID ?? item.USU_ID} className="crud-list-item">
-      <span>{label}</span>
-      <div className="crud-list-actions">
-        <button type="button" className="btn-editar" onClick={() => onEdit(item)}>Editar</button>
-        {onDelete && (
-          <button type="button" className="btn-eliminar" onClick={onDelete}>Eliminar</button>
-        )}
-      </div>
-    </li>
+export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null, sectionPath = '' }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filteredEntities = useMemo(
+    () => (filterEntityKeys?.length ? collectEntitiesByKeys(filterEntityKeys) : null),
+    [filterEntityKeys],
   );
 
+  const [section, setSection] = useState('me-ms');
+  const [entity, setEntity]   = useState(null);
+  const [rows, setRows]        = useState([]);
+  const [loading, setLoading]  = useState(false);
+  const [form, setForm]        = useState({});
+  const [editId, setEditId]    = useState(null);
+  const [msg, setMsg]          = useState('');
+  const [machineView, setMachineView] = useState({ maqId: null, title: '', rows: [] });
+  const [bivFilter, setBivFilter] = useState(emptyBivFilter);
+  /** Modal MEM-2: vehículo sin cliente al crear membresía */
+  const [vehClienteModal, setVehClienteModal] = useState(null);
+  /** Catálogos para campos `t: 'select'` (clave = segmento API, p. ej. tipo-vehiculo). */
+  const [catalogOptions, setCatalogOptions] = useState({});
+  const bivQueryKey = searchParams.toString();
+
+  useEffect(() => {
+    if (!entity) return;
+    const cats = [
+      ...new Set(
+        entity.fields.filter((f) => f.t === 'select' && f.catalog).map((f) => f.catalog),
+      ),
+    ];
+    if (!cats.length) return;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      await Promise.all(
+        cats.map(async (cat) => {
+          try {
+            const res = await fetch(`${API_BASE}/${cat}`, { cache: 'no-store' });
+            const data = await res.json();
+            updates[cat] = Array.isArray(data) ? data : [];
+          } catch {
+            updates[cat] = [];
+          }
+        }),
+      );
+      if (!cancelled) {
+        setCatalogOptions((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entity?.key]);
+
+  useEffect(() => {
+    if (entity?.key !== 'bitacora-incidente-vehiculo') return;
+    const r = searchParams.get('biv_resuelto');
+    setBivFilter({
+      inc: searchParams.get('inc_id') || '',
+      resuelto: r === '0' || r === '1' ? r : '',
+      desde: (searchParams.get('biv_desde') || '').slice(0, 10),
+      hasta: (searchParams.get('biv_hasta') || '').slice(0, 10),
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
+    if (entity) load();
+  }, [entity, searchParams, sectionPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function load() {
+    setLoading(true); setMsg('');
+    try {
+      let listUrl = `${API_BASE}/${entity.key}`;
+      if (entity.key === 'vehiculo' && sectionPath === 'tickets-vehiculos') {
+        listUrl += '?esporadico=1';
+      }
+      if (entity.key === 'vehiculo' && sectionPath === 'clientes-mensuales') {
+        listUrl += '?con_membresia_cliente=1';
+      }
+      const res = await fetch(listUrl, { cache: 'no-store' });
+      const data = await res.json();
+      let list = Array.isArray(data) ? data : [];
+      if (entity.key === 'alerta') {
+        const eal = searchParams.get('eal_id');
+        const tal = searchParams.get('tal_id');
+        const maq = searchParams.get('maq_id');
+        if (eal) list = list.filter((r) => String(r.EAL_ID ?? r.eal_id) === eal);
+        if (tal) list = list.filter((r) => String(r.TAL_ID ?? r.tal_id) === tal);
+        if (maq) list = list.filter((r) => String(r.MAQ_ID ?? r.maq_id) === maq);
+      }
+      if (entity.key === 'bitacora-incidente-vehiculo') {
+        const inc = searchParams.get('inc_id');
+        const resu = searchParams.get('biv_resuelto');
+        const desde = searchParams.get('biv_desde');
+        const hasta = searchParams.get('biv_hasta');
+        if (inc) list = list.filter((r) => String(r.INC_ID ?? r.inc_id) === inc);
+        if (resu === '0' || resu === '1') {
+          const want = resu === '1';
+          list = list.filter((r) => {
+            const v = r.BIV_RESUELTO ?? r.biv_resuelto;
+            const ok = v === 1 || v === true || v === '1';
+            return want ? ok : !ok;
+          });
+        }
+        if (desde) {
+          const d0 = new Date(desde);
+          if (!Number.isNaN(d0.getTime())) {
+            list = list.filter((r) => {
+              const fh = r.BIV_FECHA_HORA ?? r.biv_fecha_hora;
+              if (!fh) return false;
+              return new Date(fh) >= d0;
+            });
+          }
+        }
+        if (hasta) {
+          const d1 = new Date(hasta);
+          if (!Number.isNaN(d1.getTime())) {
+            d1.setHours(23, 59, 59, 999);
+            list = list.filter((r) => {
+              const fh = r.BIV_FECHA_HORA ?? r.biv_fecha_hora;
+              if (!fh) return false;
+              return new Date(fh) <= d1;
+            });
+          }
+        }
+      }
+      if (entity.key === 'ticket') {
+        const q = (searchParams.get('q') || '').trim().toUpperCase();
+        if (q) {
+          list = list.filter((r) => {
+            const cod = String(r.TIC_CODIGO ?? '').toUpperCase();
+            const placa = String(r.VEH_PLACA ?? '').toUpperCase();
+            return cod.includes(q) || placa.includes(q);
+          });
+        }
+      }
+      if (entity.key === 'vehiculo') {
+        const q = (searchParams.get('q') || '').trim().toUpperCase();
+        if (q) {
+          list = list.filter((r) => String(r.VEH_PLACA ?? '').toUpperCase().includes(q));
+        }
+      }
+      setRows(list);
+    } catch (e) { setMsg('Error: ' + e.message); setRows([]); }
+    finally { setLoading(false); }
+  }
+
+  function selectSection(s) {
+    if (section === s) return;
+    setSection(s);
+    setEntity(null);
+    setRows([]);
+    setEditId(null);
+    setMsg('');
+    setMachineView({ maqId: null, title: '', rows: [] });
+  }
+
+  function selectEntity(e) {
+    if (entity?.key === e.key) return;
+    setRows([]);
+    setMachineView({ maqId: null, title: '', rows: [] });
+    setEntity(e);
+    setEditId(null);
+    setForm(emptyForm(e.fields));
+    setMsg('');
+  }
+
+  function startEdit(row) {
+    const fields = entity.updateFields
+      ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+      : entity.fields;
+    const f = {};
+    fields.forEach((fd) => {
+      const v = row[fd.k];
+      if (fd.t === 'checkbox') f[fd.k] = v == 1 ? 1 : 0;
+      else if (fd.t === 'datetime-local' || fd.t === 'date') f[fd.k] = toInput(v, fd.t);
+      else if (fd.t === 'select') f[fd.k] = v != null && v !== '' ? String(v) : '';
+      else f[fd.k] = v ?? '';
+    });
+    setForm(f); setEditId(row[entity.id]);
+  }
+
+  function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); }
+
+  function applyBivFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    ['inc_id', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
+    if (bivFilter.inc.trim()) p.set('inc_id', bivFilter.inc.trim());
+    if (bivFilter.resuelto === '0' || bivFilter.resuelto === '1') p.set('biv_resuelto', bivFilter.resuelto);
+    if (bivFilter.desde.trim()) p.set('biv_desde', bivFilter.desde.trim());
+    if (bivFilter.hasta.trim()) p.set('biv_hasta', bivFilter.hasta.trim());
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearBivFilters() {
+    const p = new URLSearchParams(searchParams);
+    ['inc_id', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
+    setSearchParams(p, { replace: true });
+    setBivFilter(emptyBivFilter);
+  }
+
+  async function showMachineData(maqId, endpoint, title) {
+    try {
+      setMsg('');
+      const res = await fetch(`${API_BASE}${endpoint}`);
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMachineView({
+        maqId,
+        title,
+        rows: Array.isArray(json) ? json : [],
+      });
+    } catch (err) {
+      setMsg('Error: ' + err.message);
+    }
+  }
+
+  async function save(e) {
+    e.preventDefault(); setMsg('');
+    const isEdit = editId != null && editId !== '__new__';
+    const fieldsToUse =
+      isEdit && entity.updateFields
+        ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+        : entity.fields.filter(f => !(isEdit && f.createOnly));
+    const payload = preparePayload(fieldsToUse, form);
+    if (!isEdit && entity?.key === 'alerta') delete payload.ALE_ID;
+    if (
+      entity.key === 'bitacora-incidente-vehiculo' &&
+      isEdit &&
+      sessionUserId != null &&
+      String(sessionUserId).trim() !== ''
+    ) {
+      const resuelto = Number(payload.BIV_RESUELTO) === 1 || payload.BIV_RESUELTO === true;
+      if (resuelto) payload.USU_ID = sessionUserId;
+    }
+    try {
+      const res = await fetch(
+        `${API_BASE}/${entity.key}${isEdit ? '/' + editId : ''}`,
+        { method: isEdit ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+      );
+      const json = await parseJsonSafe(res);
+      if (!res.ok) {
+        if (
+          entity?.key === 'membresia' &&
+          json.code === 'VEH_SIN_CLIENTE' &&
+          json.VEH_ID != null
+        ) {
+          setVehClienteModal({ VEH_ID: json.VEH_ID });
+        }
+        throw new Error(json.error || json.message || res.statusText);
+      }
+      let okMsg = isEdit ? 'Actualizado.' : 'Creado.';
+      if (json.warning) okMsg += ' — ' + json.warning;
+      setMsg(okMsg);
+      cancelEdit(); load();
+    } catch (err) { setMsg('Error: ' + err.message); }
+  }
+
+  async function assignClienteAVehiculoModal() {
+    const vehId = vehClienteModal?.VEH_ID;
+    if (vehId == null) return;
+    const cliRaw = window.prompt('Ingrese el CLI_ID del cliente a vincular a este vehículo:');
+    if (cliRaw == null) return;
+    const cliId = Number(String(cliRaw).trim());
+    if (!cliId || Number.isNaN(cliId)) {
+      setMsg('Error: CLI_ID no válido');
+      return;
+    }
+    try {
+      const r = await fetch(`${API_BASE}/vehiculo/${vehId}`);
+      const v = await parseJsonSafe(r);
+      if (!r.ok) throw new Error(v.error || v.message || 'No se pudo cargar el vehículo');
+      const res = await fetch(`${API_BASE}/vehiculo/${vehId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...v, CLI_ID: cliId }),
+      });
+      const j = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(j.error || j.message || res.statusText);
+      setVehClienteModal(null);
+      setMsg('Cliente asignado al vehículo. Puede guardar la membresía de nuevo.');
+    } catch (e) {
+      setMsg('Error: ' + e.message);
+    }
+  }
+
+  async function del(id) {
+    const pkLabel = getDbColumnLabel(entity.id, CRUD_COLUMN_LABELS);
+    if (!confirm(`¿Eliminar ${entity.label} (${pkLabel}: ${id})?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/${entity.key}/${id}`, { method: 'DELETE' });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMsg('Eliminado.'); load();
+    } catch (err) {
+      const txt = String(err.message || '');
+      if (/ORA-20001|ORA-02292/i.test(txt)) {
+        setMsg('No se puede eliminar porque este registro está siendo usado por otro.');
+      } else {
+        setMsg('Error: ' + txt);
+      }
+    }
+  }
+
+  async function deactivateCliente(row) {
+    try {
+      const payload = { ...row, CLI_ACTIVO: 0 };
+      const res = await fetch(`${API_BASE}/cliente/${row.CLI_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMsg('Cliente desactivado.');
+      load();
+    } catch (err) {
+      setMsg('Error: ' + err.message);
+    }
+  }
+
+  async function deactivateUsuario(row) {
+    try {
+      const payload = { ...row, USU_ACTIVO: 0 };
+      const res = await fetch(`${API_BASE}/usuario/${row.USU_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setMsg('Usuario desactivado.');
+      load();
+    } catch (err) {
+      setMsg('Error: ' + err.message);
+    }
+  }
+
+  function downloadTag(row) {
+    const id = row?.MEM_ID ?? row?.[entity.id];
+    if (!id) return;
+    window.open(`${API_BASE}/membresia/${id}/tag.pdf`, '_blank');
+  }
+
+  function downloadTicketEntradaPdf(row) {
+    const id = row?.TIC_ID ?? row?.[entity.id];
+    if (!id) return;
+    window.open(`${API_BASE}/ticket/${id}/entrada.pdf`, '_blank');
+  }
+
+  const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
+  const isNewRecord = editId === '__new__';
+  const formFields = entity
+    ? !isNewRecord && editId && entity.updateFields
+        ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+        : entity.fields.filter(f => !(editId && !isNewRecord && f.createOnly))
+    : [];
+
+  const visibleFormFields = formFields;
+
+  const listContextHint = useMemo(() => {
+    if (!sectionPath || !entity?.key) return null;
+    return getAdminListContextHint(sectionPath, entity.key);
+  }, [sectionPath, entity?.key]);
+
   return (
-    <div className="crud-demo">
-      <h2 className="crud-title">Gestión de Datos (CRUD)</h2>
-      {error && <div className="crud-error">{error}</div>}
+    <div className="crudx-shell">
 
-      {/* Clientes */}
-      <section className="crud-section">
-        <h3>Clientes</h3>
-        {loading.clientes ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {clientes.length === 0 ? <li className="crud-list-empty">No hay clientes.</li> : clientes.map((c) =>
-              listItem(c, (x) => {
-                setEditCliente(x);
-                setFormCliente({
-                  CLI_ID: x.CLI_ID ?? '', CLI_PRIMER_NOMBRE: x.CLI_PRIMER_NOMBRE ?? '', CLI_SEGUNDO_NOMBRE: x.CLI_SEGUNDO_NOMBRE ?? '',
-                  CLI_PRIMER_APELLIDO: x.CLI_PRIMER_APELLIDO ?? '', CLI_SEGUNDO_APELLIDO: x.CLI_SEGUNDO_APELLIDO ?? '', CLI_DPI: x.CLI_DPI ?? '', CLI_NIT: x.CLI_NIT ?? '',
-                  CLI_CORREO: x.CLI_CORREO ?? '', CLI_TELEFONO: x.CLI_TELEFONO ?? '', CLI_ZONA: x.CLI_ZONA ?? '', CLI_CALLE: x.CLI_CALLE ?? '', CLI_NUMERO: x.CLI_NUMERO ?? '',
-                  CLI_COLONIA: x.CLI_COLONIA ?? '', CLI_CIUDAD: x.CLI_CIUDAD ?? '', CLI_CODIGO_POSTAL: x.CLI_CODIGO_POSTAL ?? '', CLI_ACTIVO: x.CLI_ACTIVO ?? 1,
-                });
-              }, null,
-                `ID: ${c.CLI_ID} — ${c.CLI_PRIMER_NOMBRE} ${c.CLI_PRIMER_APELLIDO} — DPI: ${c.CLI_DPI} — ${c.CLI_CORREO ?? '-'} — Tel: ${c.CLI_TELEFONO ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editCliente ? 'Editar cliente' : 'Agregar cliente'}</h4>
-          <form onSubmit={handleSaveCliente} className="crud-form crud-form-cliente">
-            <input placeholder="ID" value={formCliente.CLI_ID} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_ID: e.target.value }))} disabled={editCliente != null} />
-            <input placeholder="Primer nombre" value={formCliente.CLI_PRIMER_NOMBRE} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_PRIMER_NOMBRE: e.target.value }))} required />
-            <input placeholder="Segundo nombre" value={formCliente.CLI_SEGUNDO_NOMBRE} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_SEGUNDO_NOMBRE: e.target.value }))} />
-            <input placeholder="Primer apellido" value={formCliente.CLI_PRIMER_APELLIDO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_PRIMER_APELLIDO: e.target.value }))} required />
-            <input placeholder="Segundo apellido" value={formCliente.CLI_SEGUNDO_APELLIDO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_SEGUNDO_APELLIDO: e.target.value }))} />
-            <input placeholder="DPI" value={formCliente.CLI_DPI} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_DPI: e.target.value }))} required />
-            <input placeholder="NIT" value={formCliente.CLI_NIT} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_NIT: e.target.value }))} />
-            <input placeholder="Correo" type="email" value={formCliente.CLI_CORREO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CORREO: e.target.value }))} />
-            <input placeholder="Teléfono" value={formCliente.CLI_TELEFONO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_TELEFONO: e.target.value }))} />
-            <input placeholder="Zona" value={formCliente.CLI_ZONA} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_ZONA: e.target.value }))} />
-            <input placeholder="Calle" value={formCliente.CLI_CALLE} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CALLE: e.target.value }))} />
-            <input placeholder="Número" value={formCliente.CLI_NUMERO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_NUMERO: e.target.value }))} />
-            <input placeholder="Colonia" value={formCliente.CLI_COLONIA} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_COLONIA: e.target.value }))} />
-            <input placeholder="Ciudad" value={formCliente.CLI_CIUDAD} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CIUDAD: e.target.value }))} />
-            <input placeholder="Código postal" value={formCliente.CLI_CODIGO_POSTAL} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_CODIGO_POSTAL: e.target.value }))} />
-            <label className="crud-checkbox"><input type="checkbox" checked={!!formCliente.CLI_ACTIVO} onChange={(e) => setFormCliente((f) => ({ ...f, CLI_ACTIVO: e.target.checked ? 1 : 0 }))} /> Activo</label>
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editCliente && <button type="button" onClick={() => { setEditCliente(null); setFormCliente(emptyCliente); }}>Cancelar</button>}
+      {/* Tabs (demo completo; oculto en módulos del panel admin) */}
+      {!filteredEntities && (
+        <div className="crudx-tabs">
+          {Object.entries(SECTIONS).map(([k, s]) => (
+            <button
+              key={k}
+              onClick={() => selectSection(k)}
+              className={`crudx-tab-btn${section === k ? ' crudx-tab-btn--active' : ''}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="crudx-main">
+        <div className="crudx-entity-chips">
+          {sectionEntities.map(e => (
+            <button
+              key={e.key}
+              onClick={() => selectEntity(e)}
+              className={`crudx-chip${entity?.key === e.key ? ' crudx-chip--active' : ''}`}
+            >
+              {e.label}
+            </button>
+          ))}
+        </div>
+          {!entity && <p className="crudx-empty">Selecciona una entidad</p>}
+
+          {entity && (
+            <>
+              <div className="crudx-toolbar">
+                <strong>{entity.label}</strong>
+                {!loading && rows.length > 0 ? (
+                  <span className="crudx-msg" style={{ fontWeight: 500, color: '#475569' }}>
+                    {rows.length} registro{rows.length === 1 ? '' : 's'}
+                  </span>
+                ) : null}
+                {entity.ops.c && !editId && (
+                  <button onClick={() => { setEditId('__new__'); setForm(emptyForm(entity.fields)); }}
+                    className="crudx-btn-secondary">
+                    + Nuevo
+                  </button>
+                )}
+                {msg && (
+                  <span
+                    className={
+                      isCrudErrorMessage(msg) ? 'crudx-msg crudx-msg--error' : 'crudx-msg crudx-msg--ok'
+                    }
+                  >
+                    {msg}
+                  </span>
+                )}
+              </div>
+
+              {listContextHint ? (
+                <p className="crudx-context-hint" role="note">
+                  {listContextHint}
+                </p>
+              ) : null}
+
+              {entity.key === 'bitacora-incidente-vehiculo' ? (
+                <form className="crudx-biv-filters" onSubmit={applyBivFilters}>
+                  <span className="crudx-biv-filters-title">Filtros</span>
+                  <label className="crudx-biv-filters-field">
+                    <span>Incidente (ID)</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={bivFilter.inc}
+                      onChange={(e) => setBivFilter((f) => ({ ...f, inc: e.target.value }))}
+                      placeholder="Ej. 1"
+                    />
+                  </label>
+                  <label className="crudx-biv-filters-field">
+                    <span>Estado</span>
+                    <select
+                      value={bivFilter.resuelto}
+                      onChange={(e) => setBivFilter((f) => ({ ...f, resuelto: e.target.value }))}
+                    >
+                      <option value="">Todos</option>
+                      <option value="0">Pendientes</option>
+                      <option value="1">Resueltos</option>
+                    </select>
+                  </label>
+                  <label className="crudx-biv-filters-field">
+                    <span>Desde</span>
+                    <input
+                      type="date"
+                      value={bivFilter.desde}
+                      onChange={(e) => setBivFilter((f) => ({ ...f, desde: e.target.value }))}
+                    />
+                  </label>
+                  <label className="crudx-biv-filters-field">
+                    <span>Hasta</span>
+                    <input
+                      type="date"
+                      value={bivFilter.hasta}
+                      onChange={(e) => setBivFilter((f) => ({ ...f, hasta: e.target.value }))}
+                    />
+                  </label>
+                  <div className="crudx-biv-filters-actions">
+                    <button type="submit" className="crudx-btn-primary crudx-btn-xs">
+                      Aplicar filtros
+                    </button>
+                    <button type="button" className="crudx-btn-secondary crudx-btn-xs" onClick={clearBivFilters}>
+                      Limpiar
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
+              {/* Form */}
+              {editId && (
+                <form onSubmit={save} className="crudx-form-panel">
+                  <div className="crudx-form-head crudx-form-head--with-close">
+                    <div>
+                      <strong>
+                        {isNewRecord ? `Nuevo: ${entity.label}` : `Editar: ${entity.label}`}
+                      </strong>
+                      {!isNewRecord ? (
+                        <div className="crudx-form-note" style={{ marginTop: 6, marginBottom: 0 }}>
+                          {getDbColumnLabel(entity.id, CRUD_COLUMN_LABELS)}:{' '}
+                          <span style={{ fontWeight: 600, color: 'var(--color-text, #0f172a)' }}>{editId}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="crudx-form-close"
+                      onClick={cancelEdit}
+                      aria-label="Cerrar panel de edición"
+                      title="Cerrar"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="crudx-form-grid">
+                    {entity.key === 'membresia' && isNewRecord ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        El vencimiento se calcula automáticamente según el tipo de membresía (duración en días) y la fecha de inicio.
+                      </p>
+                    ) : null}
+                    {visibleFormFields.map((f) => {
+                      const fieldId = `crud-${entity.key}-${String(f.k).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                      const lbl = `${getDbColumnLabel(f.k, CRUD_COLUMN_LABELS)}${f.req ? ' *' : ''}`;
+                      return (
+                        <div
+                          key={f.k}
+                          className={`crudx-field${
+                            f.t === 'checkbox'
+                              ? ' crudx-field--checkbox'
+                              : f.t === 'select'
+                                ? ' crudx-field--select'
+                                : ''
+                          }`}
+                        >
+                          {f.t === 'checkbox' ? (
+                            <label htmlFor={fieldId} className="crudx-checkbox-inline">
+                              <input
+                                id={fieldId}
+                                type="checkbox"
+                                checked={!!form[f.k]}
+                                onChange={(ev) =>
+                                  setForm((p) => ({ ...p, [f.k]: ev.target.checked ? 1 : 0 }))
+                                }
+                                aria-label={lbl}
+                              />
+                              <span>{lbl}</span>
+                            </label>
+                          ) : f.t === 'select' ? (
+                            <>
+                              <label htmlFor={fieldId}>{lbl}</label>
+                              <select
+                                id={fieldId}
+                                className="crudx-select"
+                                value={form[f.k] ?? ''}
+                                required={!!f.req && !(isNewRecord && f.k === entity?.id)}
+                                disabled={
+                                  (f.k === entity.id && editId !== '__new__') ||
+                                  (isNewRecord && f.k === entity?.id)
+                                }
+                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
+                                aria-label={lbl}
+                                title={lbl}
+                              >
+                                {f.req ? (
+                                  <option value="" disabled>
+                                    Seleccione…
+                                  </option>
+                                ) : (
+                                  <option value="">—</option>
+                                )}
+                                {(catalogOptions[f.catalog] || []).map((row) => {
+                                  const val =
+                                    row[f.valueKey] != null ? String(row[f.valueKey]) : '';
+                                  if (val === '') return null;
+                                  const lab =
+                                    row[f.labelKey] != null
+                                      ? String(row[f.labelKey])
+                                      : val;
+                                  return (
+                                    <option key={`${f.k}-${val}`} value={val}>
+                                      {lab}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              {f.help ? (
+                                <p
+                                  className="crudx-form-note"
+                                  style={{ margin: '4px 0 0', fontSize: 11, lineHeight: 1.4 }}
+                                >
+                                  {f.help}
+                                </p>
+                              ) : null}
+                            </>
+                          ) : (
+                            <>
+                              <label htmlFor={fieldId}>{lbl}</label>
+                              <input
+                                id={fieldId}
+                                type={f.t === 'password' && editId !== '__new__' ? 'text' : (f.t || 'text')}
+                                value={form[f.k] ?? ''}
+                                placeholder={
+                                  isNewRecord && f.k === entity?.id
+                                    ? 'Se genera automáticamente al guardar'
+                                    : undefined
+                                }
+                                required={!!f.req && !(isNewRecord && f.k === entity?.id)}
+                                disabled={
+                                  (f.k === entity.id && editId !== '__new__') ||
+                                  (isNewRecord && f.k === entity?.id)
+                                }
+                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
+                                aria-label={lbl}
+                                title={lbl}
+                              />
+                              {f.help ? (
+                                <p
+                                  className="crudx-form-note"
+                                  style={{ margin: '4px 0 0', fontSize: 11, lineHeight: 1.4 }}
+                                >
+                                  {f.help}
+                                </p>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="crudx-form-actions">
+                    <button type="submit" className="crudx-btn-primary">Guardar</button>
+                    <button type="button" onClick={cancelEdit} className="crudx-btn-secondary">Cancelar</button>
+                  </div>
+                </form>
+              )}
+
+              {/* Table */}
+              {loading ? (
+                <div className="ops-loader-wrap">
+                  <span className="ops-loader" aria-hidden="true" />
+                  <span>Cargando registros...</span>
+                </div>
+              ) : rows.length === 0 ? (
+                <p className="crudx-empty">Sin registros en esta entidad.</p>
+              ) : (
+                <div
+                  className="crudx-table-scroll"
+                  title="Si hay muchas filas, usa el scroll dentro de este cuadro para verlas todas."
+                >
+                  <table className="crudx-table">
+                    <thead>
+                      <tr>
+                        {Object.keys(rows[0]).map((c) => (
+                          <th key={c}>{getDbColumnLabel(c, CRUD_COLUMN_LABELS)}</th>
+                        ))}
+                        {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
+                          <th>Acc.</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, i) => (
+                        <tr key={i}>
+                          {Object.entries(row).map(([c, v]) => {
+                            if (entity?.key === 'alerta' && c === 'ALE_DESCRIPCION') {
+                              const text = v == null ? '—' : String(v);
+                              const hasTip = text !== '—' && text.length > 0;
+                              return (
+                                <td key={c} className="crudx-cell-alert-desc">
+                                  <div className="crudx-cell-alert-desc-wrap">
+                                    <span className="crudx-cell-alert-desc-text" title={hasTip ? text : undefined}>
+                                      {text}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="crudx-btn-secondary crudx-btn-xs"
+                                      onClick={() => openAlertaDetailPopup(row)}
+                                      aria-label="Abrir detalle completo de la alerta en una ventana pequeña"
+                                      title="Ver todos los campos (sin truncar) en ventana pequeña"
+                                    >
+                                      Detalle
+                                    </button>
+                                  </div>
+                                </td>
+                              );
+                            }
+                            return (
+                              <td key={c} className="crudx-cell-ellipsis">
+                                {v == null ? '—'
+                                  : c === 'USU_PASSWORD' ? '••••'
+                                  : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
+                                  : String(v)}
+                              </td>
+                            );
+                          })}
+                          {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
+                            <td
+                              className={
+                                entity.key === 'cliente' || entity.key === 'usuario'
+                                  ? 'crudx-actions-cell crudx-actions-cell--inline'
+                                  : 'crudx-actions-cell'
+                              }
+                            >
+                              {entity.ops.u && <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">Editar</button>}
+                              {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
+                              {entity.key === 'ticket' && (
+                                <button
+                                  type="button"
+                                  onClick={() => downloadTicketEntradaPdf(row)}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  PDF entrada
+                                </button>
+                              )}
+                              {entity.key === 'cliente' && Number(row.CLI_ACTIVO ?? 1) === 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => deactivateCliente(row)}
+                                  className="crudx-btn-danger crudx-btn-xs"
+                                >
+                                  Desactivar
+                                </button>
+                              )}
+                              {entity.key === 'usuario' && Number(row.USU_ACTIVO ?? 1) === 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => deactivateUsuario(row)}
+                                  className="crudx-btn-danger crudx-btn-xs"
+                                >
+                                  Desactivar
+                                </button>
+                              )}
+                              {entity.key === 'membresia' && (
+                                <button
+                                  onClick={() => downloadTag(row)}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  Descargar Tag
+                                </button>
+                              )}
+                              {entity.key === 'maquina' && (
+                                <>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/maquina/${row.MAQ_ID}/transacciones`, `Transacciones (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Transacciones
+                                  </button>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/registro-mantenimiento/maquina/${row.MAQ_ID}`, `Mantenimientos (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Mantenimientos
+                                  </button>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/recargo-maquina/maquina/${row.MAQ_ID}`, `Recargas (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Recargas
+                                  </button>
+                                  <button
+                                    onClick={() => showMachineData(row.MAQ_ID, `/detalle-saldo/maquina/${row.MAQ_ID}`, `Saldo y umbral (MAQ_ID ${row.MAQ_ID})`)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Saldo
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {entity?.key === 'maquina' && machineView.maqId != null && (
+                <div style={{ marginTop: 12 }} className="crudx-machine-box">
+                  <div className="crudx-machine-head">
+                    <strong>{machineView.title}</strong>
+                    <button className="crudx-btn-secondary crudx-btn-xs" onClick={() => setMachineView({ maqId: null, title: '', rows: [] })}>Cerrar</button>
+                  </div>
+                  {machineView.rows.length === 0 ? (
+                    <p className="crudx-empty">Sin registros para esta máquina.</p>
+                  ) : (
+                    <div className="crudx-table-scroll">
+                      <table className="crudx-table">
+                        <thead>
+                          <tr>
+                            {Object.keys(machineView.rows[0]).map((c) => (
+                              <th key={c}>{getDbColumnLabel(c, CRUD_COLUMN_LABELS)}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {machineView.rows.map((r, i) => (
+                            <tr key={i}>
+                              {Object.entries(r).map(([c, v]) => (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {v == null ? '—'
+                                    : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
+                                    : String(v)}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+      </div>
+
+      {vehClienteModal != null ? (
+        <div
+          className="crudx-modal-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="veh-cli-modal-title"
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 10,
+              padding: '20px 22px',
+              maxWidth: 420,
+              boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+            }}
+          >
+            <h2 id="veh-cli-modal-title" style={{ fontSize: '1.05rem', margin: '0 0 10px' }}>
+              Vehículo sin cliente
+            </h2>
+            <p style={{ margin: '0 0 14px', lineHeight: 1.45, color: '#334155' }}>
+              Asigne un cliente al vehículo (VEH_ID {vehClienteModal.VEH_ID}) antes de crear la membresía, o cancele y
+              edite el vehículo en la entidad Vehículo.
+            </p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <button type="button" className="crudx-btn-secondary" onClick={() => setVehClienteModal(null)}>
+                Cancelar
+              </button>
+              <button type="button" className="crudx-btn-primary" onClick={assignClienteAVehiculoModal}>
+                Asignar cliente
+              </button>
             </div>
-          </form>
+          </div>
         </div>
-      </section>
-
-      {/* Espacios */}
-      <section className="crud-section">
-        <h3>Espacios</h3>
-        {loading.espacios ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {espacios.length === 0 ? <li className="crud-list-empty">No hay espacios.</li> : espacios.map((e) =>
-              listItem(e, (x) => { setEditEspacio(x); setFormEspacio({ ESP_ID: x.ESP_ID, ESP_CODIGO: x.ESP_CODIGO ?? '', EES_ID: x.EES_ID ?? '', ESP_UBICACION: x.ESP_UBICACION ?? '' }); }, null,
-                `ID: ${e.ESP_ID} — Código: ${e.ESP_CODIGO} — Estado: ${e.EES_ESTADO ?? e.EES_ID ?? '-'} — ${e.ESP_UBICACION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editEspacio ? 'Editar espacio' : 'Agregar espacio'}</h4>
-          <form onSubmit={handleSaveEspacio} className="crud-form">
-            <input placeholder="ID" value={formEspacio.ESP_ID} onChange={(e) => setFormEspacio((f) => ({ ...f, ESP_ID: e.target.value }))} disabled={editEspacio != null} />
-            <input placeholder="Código" value={formEspacio.ESP_CODIGO} onChange={(e) => setFormEspacio((f) => ({ ...f, ESP_CODIGO: e.target.value }))} required />
-            <input placeholder="EES_ID" value={formEspacio.EES_ID} onChange={(e) => setFormEspacio((f) => ({ ...f, EES_ID: e.target.value }))} />
-            <input placeholder="Ubicación" value={formEspacio.ESP_UBICACION} onChange={(e) => setFormEspacio((f) => ({ ...f, ESP_UBICACION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editEspacio && <button type="button" onClick={() => { setEditEspacio(null); setFormEspacio({ ESP_ID: '', ESP_CODIGO: '', EES_ID: '', ESP_UBICACION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
-
-      {/* Estado Espacio (solo listar + agregar) */}
-      <section className="crud-section">
-        <h3>Estado Espacio</h3>
-        {loading.estadoEspacio ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {estadoEspacio.length === 0 ? <li className="crud-list-empty">No hay registros.</li> : estadoEspacio.map((x) => (
-              <li key={x.EES_ID} className="crud-list-item">
-                <span>ID: {x.EES_ID} — Estado: {x.EES_ESTADO}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>Agregar estado espacio</h4>
-          <form onSubmit={handleSaveEstadoEspacio} className="crud-form">
-            <input placeholder="EES_ID" value={formEstadoEspacio.EES_ID} onChange={(e) => setFormEstadoEspacio((f) => ({ ...f, EES_ID: e.target.value }))} required />
-            <input placeholder="EES_ESTADO" value={formEstadoEspacio.EES_ESTADO} onChange={(e) => setFormEstadoEspacio((f) => ({ ...f, EES_ESTADO: e.target.value }))} required />
-            <button type="submit">Guardar</button>
-          </form>
-        </div>
-      </section>
-
-      {/* Estado Máquina */}
-      <section className="crud-section">
-        <h3>Estado Máquina</h3>
-        {loading.estadoMaquina ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {estadoMaquina.length === 0 ? <li className="crud-list-empty">No hay registros.</li> : estadoMaquina.map((x) =>
-              listItem(x,
-                (item) => { setEditEstadoMaquina(item); setFormEstadoMaquina({ EMA_ID: item.EMA_ID, EMA_ESTADO: item.EMA_ESTADO ?? '', EMA_DESCRIPCION: item.EMA_DESCRIPCION ?? '' }); },
-                () => handleDelete('/estado-maquina', x.EMA_ID, fetchEstadoMaquina, setEstadoMaquina)(),
-                `ID: ${x.EMA_ID} — ${x.EMA_ESTADO} — ${x.EMA_DESCRIPCION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editEstadoMaquina ? 'Editar estado máquina' : 'Agregar estado máquina'}</h4>
-          <form onSubmit={handleSaveEstadoMaquina} className="crud-form">
-            <input placeholder="EMA_ID" value={formEstadoMaquina.EMA_ID} onChange={(e) => setFormEstadoMaquina((f) => ({ ...f, EMA_ID: e.target.value }))} disabled={editEstadoMaquina != null} />
-            <input placeholder="Estado" value={formEstadoMaquina.EMA_ESTADO} onChange={(e) => setFormEstadoMaquina((f) => ({ ...f, EMA_ESTADO: e.target.value }))} required />
-            <input placeholder="Descripción" value={formEstadoMaquina.EMA_DESCRIPCION} onChange={(e) => setFormEstadoMaquina((f) => ({ ...f, EMA_DESCRIPCION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editEstadoMaquina && <button type="button" onClick={() => { setEditEstadoMaquina(null); setFormEstadoMaquina({ EMA_ID: '', EMA_ESTADO: '', EMA_DESCRIPCION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
-
-      {/* Tipo Máquina */}
-      <section className="crud-section">
-        <h3>Tipo Máquina</h3>
-        {loading.tipoMaquina ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {tipoMaquina.length === 0 ? <li className="crud-list-empty">No hay registros.</li> : tipoMaquina.map((x) =>
-              listItem(x,
-                (item) => { setEditTipoMaquina(item); setFormTipoMaquina({ TMA_ID: item.TMA_ID, TMA_TIPO: item.TMA_TIPO ?? '', TMA_DESCRIPCION: item.TMA_DESCRIPCION ?? '' }); },
-                () => handleDelete('/tipo-maquina', x.TMA_ID, fetchTipoMaquina, setTipoMaquina)(),
-                `ID: ${x.TMA_ID} — ${x.TMA_TIPO} — ${x.TMA_DESCRIPCION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editTipoMaquina ? 'Editar tipo máquina' : 'Agregar tipo máquina'}</h4>
-          <form onSubmit={handleSaveTipoMaquina} className="crud-form">
-            <input placeholder="TMA_ID" value={formTipoMaquina.TMA_ID} onChange={(e) => setFormTipoMaquina((f) => ({ ...f, TMA_ID: e.target.value }))} disabled={editTipoMaquina != null} />
-            <input placeholder="Tipo" value={formTipoMaquina.TMA_TIPO} onChange={(e) => setFormTipoMaquina((f) => ({ ...f, TMA_TIPO: e.target.value }))} required />
-            <input placeholder="Descripción" value={formTipoMaquina.TMA_DESCRIPCION} onChange={(e) => setFormTipoMaquina((f) => ({ ...f, TMA_DESCRIPCION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editTipoMaquina && <button type="button" onClick={() => { setEditTipoMaquina(null); setFormTipoMaquina({ TMA_ID: '', TMA_TIPO: '', TMA_DESCRIPCION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
-
-      {/* Rol */}
-      <section className="crud-section">
-        <h3>Roles</h3>
-        {loading.roles ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {roles.length === 0 ? <li className="crud-list-empty">No hay roles.</li> : roles.map((x) =>
-              listItem(x,
-                (item) => { setEditRol(item); setFormRol({ ROL_ID: item.ROL_ID, ROL_TIPO: item.ROL_TIPO ?? '', ROL_DESCRIPCION: item.ROL_DESCRIPCION ?? '' }); },
-                () => handleDelete('/rol', x.ROL_ID, fetchRoles, setRoles)(),
-                `ID: ${x.ROL_ID} — ${x.ROL_TIPO} — ${x.ROL_DESCRIPCION ?? '-'}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editRol ? 'Editar rol' : 'Agregar rol'}</h4>
-          <form onSubmit={handleSaveRol} className="crud-form">
-            <input placeholder="ROL_ID" value={formRol.ROL_ID} onChange={(e) => setFormRol((f) => ({ ...f, ROL_ID: e.target.value }))} disabled={editRol != null} />
-            <input placeholder="Tipo" value={formRol.ROL_TIPO} onChange={(e) => setFormRol((f) => ({ ...f, ROL_TIPO: e.target.value }))} required />
-            <input placeholder="Descripción" value={formRol.ROL_DESCRIPCION} onChange={(e) => setFormRol((f) => ({ ...f, ROL_DESCRIPCION: e.target.value }))} />
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editRol && <button type="button" onClick={() => { setEditRol(null); setFormRol({ ROL_ID: '', ROL_TIPO: '', ROL_DESCRIPCION: '' }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
-
-      {/* Usuario */}
-      <section className="crud-section">
-        <h3>Usuarios</h3>
-        {loading.usuarios ? <p className="crud-loading">Cargando…</p> : (
-          <ul className="crud-list">
-            {usuarios.length === 0 ? <li className="crud-list-empty">No hay usuarios.</li> : usuarios.map((u) =>
-              listItem(u,
-                (item) => {
-                  setEditUsuario(item);
-                  setFormUsuario({
-                    USU_ID: item.USU_ID, USU_PRIMER_NOMBRE: item.USU_PRIMER_NOMBRE ?? '', USU_SEGUNDO_NOMBRE: item.USU_SEGUNDO_NOMBRE ?? '',
-                    USU_PRIMER_APELLIDO: item.USU_PRIMER_APELLIDO ?? '', USU_SEGUNDO_APELLIDO: item.USU_SEGUNDO_APELLIDO ?? '',
-                    USU_CORREO: item.USU_CORREO ?? '', USU_PASSWORD: '', USU_TELEFONO: item.USU_TELEFONO ?? '',
-                    ROL_ID: item.ROL_ID ?? '', USU_ACTIVO: item.USU_ACTIVO ?? 1,
-                  });
-                },
-                null,
-                `ID: ${u.USU_ID} — ${u.USU_PRIMER_NOMBRE} ${u.USU_PRIMER_APELLIDO} — ${u.USU_CORREO} — Rol: ${u.ROL_ID}`)
-            )}
-          </ul>
-        )}
-        <div className="crud-form-box">
-          <h4>{editUsuario ? 'Editar usuario' : 'Agregar usuario'}</h4>
-          <form onSubmit={handleSaveUsuario} className="crud-form crud-form-cliente">
-            <input placeholder="USU_ID" value={formUsuario.USU_ID} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_ID: e.target.value }))} disabled={editUsuario != null} />
-            <input placeholder="Primer nombre" value={formUsuario.USU_PRIMER_NOMBRE} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_PRIMER_NOMBRE: e.target.value }))} required />
-            <input placeholder="Segundo nombre" value={formUsuario.USU_SEGUNDO_NOMBRE} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_SEGUNDO_NOMBRE: e.target.value }))} />
-            <input placeholder="Primer apellido" value={formUsuario.USU_PRIMER_APELLIDO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_PRIMER_APELLIDO: e.target.value }))} required />
-            <input placeholder="Segundo apellido" value={formUsuario.USU_SEGUNDO_APELLIDO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_SEGUNDO_APELLIDO: e.target.value }))} />
-            <input placeholder="Correo" type="email" value={formUsuario.USU_CORREO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_CORREO: e.target.value }))} required />
-            <input placeholder="Password" type="password" value={formUsuario.USU_PASSWORD} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_PASSWORD: e.target.value }))} />
-            <input placeholder="Teléfono" value={formUsuario.USU_TELEFONO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_TELEFONO: e.target.value }))} />
-            <input placeholder="ROL_ID" value={formUsuario.ROL_ID} onChange={(e) => setFormUsuario((f) => ({ ...f, ROL_ID: e.target.value }))} required />
-            <label className="crud-checkbox"><input type="checkbox" checked={!!formUsuario.USU_ACTIVO} onChange={(e) => setFormUsuario((f) => ({ ...f, USU_ACTIVO: e.target.checked ? 1 : 0 }))} /> Activo</label>
-            <div className="crud-form-actions">
-              <button type="submit">Guardar</button>
-              {editUsuario && <button type="button" onClick={() => { setEditUsuario(null); setFormUsuario({ USU_ID: '', USU_PRIMER_NOMBRE: '', USU_SEGUNDO_NOMBRE: '', USU_PRIMER_APELLIDO: '', USU_SEGUNDO_APELLIDO: '', USU_CORREO: '', USU_PASSWORD: '', USU_TELEFONO: '', ROL_ID: '', USU_ACTIVO: 1 }); }}>Cancelar</button>}
-            </div>
-          </form>
-        </div>
-      </section>
+      ) : null}
     </div>
   );
 }
