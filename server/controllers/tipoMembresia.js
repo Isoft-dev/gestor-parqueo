@@ -1,4 +1,4 @@
-import * as service from '../services/tarifa.js';
+import * as service from '../services/tipoMembresia.js';
 
 export async function getAll(_req, res) {
   try {
@@ -20,8 +20,8 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { TAR_ID, TAR_TIPO, TAR_PRECIO } = req.body;
-    if (!TAR_ID || !TAR_TIPO || !TAR_PRECIO) {
+    const { TME_ID, TME_TIPO, TME_DURACION, TME_PRECIO } = req.body;
+    if (!TME_ID || !TME_TIPO || !TME_DURACION || !TME_PRECIO) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
     const created = await service.create(req.body);

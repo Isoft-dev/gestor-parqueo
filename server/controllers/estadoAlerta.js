@@ -1,4 +1,4 @@
-import * as service from '../services/cobro.js';
+import * as service from '../services/estadoAlerta.js';
 
 export async function getAll(_req, res) {
   try {
@@ -20,8 +20,8 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { COB_ID, COB_HORAS_TOTALES, TCO_ID, COB_MONTO_TOTAL, COB_MONTO_RECIBIDO, COB_VUELTO, COB_FECHA_HORA, TAR_ID } = req.body;
-    if (!COB_ID || !COB_HORAS_TOTALES || !TCO_ID || !COB_MONTO_TOTAL || !COB_MONTO_RECIBIDO || !COB_VUELTO || !COB_FECHA_HORA || !TAR_ID) {
+    const { EAL_ID, EAL_ESTADO } = req.body;
+    if (!EAL_ID || !EAL_ESTADO) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
     const created = await service.create(req.body);

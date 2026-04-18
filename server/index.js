@@ -10,6 +10,17 @@ import rolRoutes from './routes/rol.js';
 import clienteRoutes from './routes/cliente.js';
 import usuarioRoutes from './routes/usuario.js';
 import espacioRoutes from './routes/espacio.js';
+import vehiculoRoutes from './routes/vehiculo.js';
+import tipoVehiculoRoutes from './routes/tipoVehiculo.js';
+import registroMovimientoMembresiaRoutes from './routes/registroMovimientoMembresia.js';
+import tipoMembresiaRoutes from './routes/tipoMembresia.js';
+import estadoMembresiaRoutes from './routes/estadoMembresia.js';
+import tipoCobroRoutes from './routes/tipoCobro.js';
+import cobroRoutes from './routes/cobro.js';
+import tarifaRoutes from './routes/tarifa.js';
+import tipoAlertaRoutes from './routes/tipoAlerta.js';
+import estadoAlertaRoutes from './routes/estadoAlerta.js';
+import alertaRoutes from './routes/alerta.js';
 
 const app = express();
 
@@ -41,6 +52,17 @@ app.use('/api/rol', rolRoutes);
 app.use('/api/cliente', clienteRoutes);
 app.use('/api/usuario', usuarioRoutes);
 app.use('/api/espacio', espacioRoutes);
+app.use('/api/vehiculo', vehiculoRoutes);
+app.use('/api/tipo-vehiculo', tipoVehiculoRoutes);
+app.use('/api/registro-movimiento-membresia', registroMovimientoMembresiaRoutes);
+app.use('/api/tipo-membresia', tipoMembresiaRoutes);
+app.use('/api/estado-membresia', estadoMembresiaRoutes);
+app.use('/api/tipo-cobro', tipoCobroRoutes);
+app.use('/api/cobro', cobroRoutes);
+app.use('/api/tarifa', tarifaRoutes);
+app.use('/api/tipo-alerta', tipoAlertaRoutes);
+app.use('/api/estado-alerta', estadoAlertaRoutes);
+app.use('/api/alerta', alertaRoutes);
 
 app.listen(PORT, () => {
   console.log(`Servidor en http://localhost:${PORT}`);
