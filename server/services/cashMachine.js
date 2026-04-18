@@ -57,6 +57,18 @@ export async function applyCashMovementTx(conn, { maqId, vuelto, ingresoPorValor
   if (v > 0.02) {
     const { ok, plan, remaining } = greedyChange(v, inv);
     if (!ok) {
+      // HU Viviana: si no hay efectivo suficiente para el vuelto, bloquear y generar alerta.
+      try {
+        const { insertMachineAlerta } = await import('../utils/systemAlert.js');
+        await insertMachineAlerta({
+          maqId,
+          motivo: 'Saldo insuficiente para vuelto',
+          descripcion: `Falta Q${Number(remaining).toFixed(2)} para completar vuelto de Q${Number(v).toFixed(2)}`,
+          preferSaldoBajo: true,
+        });
+      } catch {
+        // Si la alerta falla, igual se debe bloquear la transacción.
+      }
       throw new Error(
         `No hay efectivo suficiente en la máquina para dar vuelto (falta Q${Number(remaining).toFixed(2)})`
       );
@@ -96,7 +108,15 @@ export async function applyCashMovementTx(conn, { maqId, vuelto, ingresoPorValor
     }
   }
 
-  await evaluateLowBalanceAlertTx(conn, maqId);
+  try {
+    await evaluateLowBalanceAlertTx(conn, maqId);
+  } catch (e) {
+    const { insertSystemAlerta } = await import('../utils/systemAlert.js');
+    await insertSystemAlerta({
+      motivo: 'Error actualizando balance / alerta saldo bajo',
+      descripcion: `MAQ_ID ${maqId}: ${e?.message || e}`,
+    });
+  }
 }
 
 async function evaluateLowBalanceAlertTx(conn, maqId) {
@@ -120,11 +140,21 @@ async function evaluateLowBalanceAlertTx(conn, maqId) {
       WHERE LOWER(EAL_ESTADO) LIKE '%pend%'
       ORDER BY EAL_ID FETCH FIRST 1 ROW ONLY`
   );
-  const tal = await conn.execute(
-    `SELECT TAL_ID FROM PAR_TIPO_ALERTA ORDER BY TAL_ID FETCH FIRST 1 ROW ONLY`
+  let tal = await conn.execute(
+    `SELECT TAL_ID FROM PAR_TIPO_ALERTA
+      WHERE LOWER(TAL_TIPO) LIKE '%saldo%baj%'
+         OR LOWER(TAL_TIPO) LIKE '%bajo%saldo%'
+         OR LOWER(NVL(TAL_DESCRIPCION, '')) LIKE '%saldo%baj%'
+      ORDER BY TAL_ID FETCH FIRST 1 ROW ONLY`,
   );
-  const ealId = eal.rows?.[0]?.EAL_ID;
-  const talId = tal.rows?.[0]?.TAL_ID;
+  let talId = tal.rows?.[0]?.TAL_ID ?? tal.rows?.[0]?.tal_id;
+  if (talId == null) {
+    tal = await conn.execute(
+      `SELECT TAL_ID FROM PAR_TIPO_ALERTA ORDER BY TAL_ID FETCH FIRST 1 ROW ONLY`,
+    );
+    talId = tal.rows?.[0]?.TAL_ID ?? tal.rows?.[0]?.tal_id;
+  }
+  const ealId = eal.rows?.[0]?.EAL_ID ?? eal.rows?.[0]?.eal_id;
   if (!ealId || !talId) return;
 
   for (const row of rows.rows || []) {

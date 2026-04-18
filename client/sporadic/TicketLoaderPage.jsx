@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { API_BASE } from '../config.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
@@ -64,11 +65,19 @@ function randomFrom(arr) {
 }
 
 function generateRandomPlate() {
+  const firstOnly = 'PMAO';
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const nums = '0123456789';
-  const l = () => letters[Math.floor(Math.random() * letters.length)];
-  const n = () => nums[Math.floor(Math.random() * nums.length)];
-  return `${l()}${l()}${l()}-${n()}${n()}${n()}${n()}`;
+  const pick = (pool) => pool[Math.floor(Math.random() * pool.length)];
+  return (
+    pick(firstOnly) +
+    pick(nums) +
+    pick(nums) +
+    pick(nums) +
+    pick(letters) +
+    pick(letters) +
+    pick(letters)
+  );
 }
 
 function generateVehicleData() {
@@ -82,6 +91,7 @@ function generateVehicleData() {
 }
 
 export default function TicketLoaderPage({ embeddedInAdmin = false }) {
+  const { user, logout } = useAuth();
   const fileRef = useRef(null);
   const tagFileRef = useRef(null);
   const salidaFileRef = useRef(null);
@@ -128,6 +138,15 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
 
   const sumaBilletes =
     billetes[5] * 5 + billetes[10] * 10 + billetes[20] * 20 + billetes[50] * 50;
+
+  /** Solo dígitos y un punto decimal; nunca negativos (evita que `min` del input sea insuficiente). */
+  function onMontoRecibidoChange(raw) {
+    let v = String(raw ?? '').replace(/,/g, '.');
+    v = v.replace(/[^0-9.]/g, '');
+    const i = v.indexOf('.');
+    if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '');
+    setMontoRecibido(v);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -198,7 +217,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
-      setAssistMsg('Solicitud enviada al panel.');
+      setAssistMsg(
+        data?.ALE_ID != null
+          ? `Solicitud registrada (alerta #${data.ALE_ID}). Revisa gestión de alertas.`
+          : 'Solicitud enviada al panel.',
+      );
     } catch (e) {
       setAssistMsg(`No se pudo enviar: ${String(e?.message || e)}`);
     }
@@ -437,7 +460,12 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       setMsg('Primero debes cargar un ticket válido.');
       return;
     }
-    if (!montoRecibido || Number(montoRecibido) < montoTotalCalculado) {
+    const recibido = Number(montoRecibido);
+    if (!montoRecibido.trim() || !Number.isFinite(recibido) || recibido < 0) {
+      setMsg('El monto recibido debe ser un número mayor o igual a cero.');
+      return;
+    }
+    if (recibido < montoTotalCalculado) {
       setMsg('El efectivo ingresado debe ser mayor o igual al monto total.');
       return;
     }
@@ -450,7 +478,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         MAQ_ID: maqId,
         COB_NIT: cf ? 'CF' : nit,
         USE_CF: cf,
-        COB_MONTO_RECIBIDO: Number(montoRecibido),
+        COB_MONTO_RECIBIDO: recibido,
       };
       const tieneBilletes = Object.values(billetes).some((n) => n > 0);
       if (tieneBilletes) {
@@ -504,12 +532,29 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   }
 
   return (
-    <div className="ops-shell" style={{ maxWidth: embeddedInAdmin ? '100%' : 980, margin: '12px auto', padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h1 style={{ margin: 0 }}>{embeddedInAdmin ? 'Operación en cabina' : 'Consulta de ticket'}</h1>
-        {!embeddedInAdmin ? <Link to="/admin">Ir a panel admin</Link> : null}
-      </div>
-      <p style={{ color: '#555', marginTop: 0 }}>
+    <div
+      className={embeddedInAdmin ? 'ops-shell ops-shell--embedded' : 'admin-page ops-page-public'}
+      style={{ maxWidth: embeddedInAdmin ? '100%' : 1040, margin: '12px auto', padding: 16 }}
+    >
+      <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
+        <h1 className="admin-page-title">{embeddedInAdmin ? 'Operación en cabina' : 'Consulta de ticket'}</h1>
+        {!embeddedInAdmin ? (
+          user ? (
+            <button
+              type="button"
+              className="ops-header-auth-btn"
+              onClick={() => logout()}
+            >
+              Cerrar sesión
+            </button>
+          ) : (
+            <Link to="/login" className="ops-header-auth-link">
+              Ir al panel de admin
+            </Link>
+          )
+        ) : null}
+      </header>
+      <p className="admin-page-desc">
         Puedes generar ticket de entrada o cargar ticket para continuar con el cobro.
       </p>
       {espacioResumen ? (
@@ -551,9 +596,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       ) : null}
 
-      <div style={{ marginTop: 10, border: '2px dashed #9ec5ff', borderRadius: 8, padding: 12, background: '#f4f9ff' }}>
-        <h2 style={{ margin: '0 0 6px 0', fontSize: 19 }}>Cliente mensual (Tag)</h2>
-        <p style={{ margin: 0, color: '#35507a' }}>Sección exclusiva para validar tag de membresía.</p>
+      <section className="admin-panel-block ops-panel-block">
+        <div className="admin-panel-head">
+          <h2>Cliente mensual (Tag)</h2>
+          <p className="admin-panel-sub">Sección exclusiva para validar tag de membresía.</p>
+        </div>
         <input
           ref={tagFileRef}
           type="file"
@@ -564,16 +611,16 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
             if (f) onLoadTagPdf(f);
           }}
         />
-        <button type="button" onClick={() => tagFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
+        <button type="button" className="admin-btn-primary" onClick={() => tagFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Validar Tag
         </button>
-      </div>
+      </section>
 
-      <div style={{ marginTop: 10, border: '2px dashed #76c7b7', borderRadius: 8, padding: 12, background: '#f1fffb' }}>
-        <h2 style={{ margin: '0 0 6px 0', fontSize: 19 }}>Salida cliente mensual</h2>
-        <p style={{ margin: 0, color: '#1c6b5f' }}>
-          Carga el tag para cerrar un ingreso activo asociado a la membresía.
-        </p>
+      <section className="admin-panel-block ops-panel-block">
+        <div className="admin-panel-head">
+          <h2>Salida cliente mensual</h2>
+          <p className="admin-panel-sub">Carga el tag para cerrar un ingreso activo asociado a la membresía.</p>
+        </div>
         <input
           ref={tagSalidaFileRef}
           type="file"
@@ -584,16 +631,18 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
             if (f) onLoadTagExitPdf(f);
           }}
         />
-        <button type="button" onClick={() => tagSalidaFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
+        <button type="button" className="admin-btn-primary" onClick={() => tagSalidaFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Cargar Tag
         </button>
-      </div>
+      </section>
 
-      <div style={{ marginTop: 10, border: '2px dashed #ffd78d', borderRadius: 8, padding: 12, background: '#fffaf0' }}>
-        <h2 style={{ margin: '0 0 6px 0', fontSize: 19 }}>Salida cliente esporádico</h2>
-        <p style={{ margin: 0, color: '#7a5a1f' }}>
-          Carga el ticket para verificar estado de pago y tiempo de gracia post-pago.
-        </p>
+      <section className="admin-panel-block ops-panel-block">
+        <div className="admin-panel-head">
+          <h2>Salida cliente esporádico</h2>
+          <p className="admin-panel-sub">
+            Carga el ticket para verificar estado de pago y tiempo de gracia post-pago.
+          </p>
+        </div>
         <input
           ref={salidaFileRef}
           type="file"
@@ -617,15 +666,21 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => salidaFileRef.current?.click()} disabled={loading || catalogLoading}>
+          <button
+            type="button"
+            className="admin-btn-primary"
+            onClick={() => salidaFileRef.current?.click()}
+            disabled={loading || catalogLoading}
+          >
             Cargar Ticket
           </button>
         </div>
-      </div>
+      </section>
 
       <div className="ops-main-ticket-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button
           type="button"
+          className="admin-btn-primary"
           onClick={() => { setShowGenerateForm((v) => !v); setMsg(''); }}
           disabled={loading || catalogLoading || espacioResumen?.parqueoLleno}
         >
@@ -633,9 +688,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </button>
         <button
           type="button"
+          className="admin-btn-ghost"
           onClick={() => fileRef.current?.click()}
           disabled={loading || catalogLoading}
-          title="Sube el PDF del ticket: se cotiza el monto y aparece el formulario. El cobro queda registrado al pulsar Continuar en Detalle de pago."
+          title="Selecciona el PDF del ticket para cotizar y completar el pago en el detalle de cobro."
         >
           Pagar ticket
         </button>
@@ -784,6 +840,13 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
           <p style={{ margin: '6px 0', fontSize: 18 }}>
             <strong>Monto total a pagar: Q{montoTotalCalculado.toFixed(2)}</strong>
           </p>
+          {quote.politicaMinimoSub1h?.aplicada ? (
+            <p style={{ margin: '6px 0', fontSize: 13, color: '#444' }}>
+              Cobro mínimo por estadía menor a 1 h: Q
+              {Number(quote.politicaMinimoSub1h.quetzales ?? 5).toFixed(2)} (configuración del servidor
+              {quote.politicaMinimoSub1h?.origen === 'runtime' ? ', panel admin' : ', .env'}).
+            </p>
+          ) : null}
           <hr />
           <h3 style={{ marginBottom: 8 }}>Facturación (campos automáticos y manuales)</h3>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -876,12 +939,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
               </div>
             </div>
             <input
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               placeholder="Monto recibido (manual)"
               value={montoRecibido}
-              onChange={(e) => setMontoRecibido(e.target.value)}
+              onChange={(e) => onMontoRecibidoChange(e.target.value)}
               style={{ padding: '8px 10px', minWidth: 190 }}
             />
             <input

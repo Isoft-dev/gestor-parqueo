@@ -20,11 +20,11 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { EES_ID, EES_ESTADO } = req.body;
-    if (!EES_ID || !EES_ESTADO) {
-      return res.status(400).json({ error: 'EES_ID y EES_ESTADO son requeridos' });
+    const { EES_ESTADO } = req.body;
+    if (!EES_ESTADO) {
+      return res.status(400).json({ error: 'EES_ESTADO es requerido' });
     }
-    const created = await service.create({ EES_ID, EES_ESTADO });
+    const created = await service.create(req.body);
     res.status(201).json(created);
   } catch (err) {
     res.status(500).json({ error: err.message });

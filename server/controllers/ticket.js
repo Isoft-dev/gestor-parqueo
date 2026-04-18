@@ -7,14 +7,14 @@ function businessStatus(err) {
   if (/ya saldado/i.test(msg)) return 409;
   if (/salida bloqueada|solicita asistencia/i.test(msg)) return 403;
   if (/efectivo suficiente|suma de billetes|vuelto/i.test(msg)) return 400;
-  if (/requerid|tipo de cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_TICKET_COB_ID|FK_PAR_TICKET_COBRO/i.test(msg)) return 400;
+  if (/requerid|tipo de cobro|tipo entrada|tipo salida|tipo cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_COBRO_TIC_ID|FK_PAR_COBRO_TICKET/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict|unico|ORA-00001/i.test(msg)) return 409;
   return 500;
 }
 
 export async function getAll(_req, res) {
   try { res.json(await service.getAll()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
 }
 
 export async function getById(req, res) {
@@ -22,17 +22,17 @@ export async function getById(req, res) {
     const row = await service.getById(req.params.id);
     if (!row) return res.status(404).json({ error: 'Ticket no encontrado' });
     res.json(row);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
 }
 
 export async function create(req, res) {
   try {
-    const { TIC_ID, TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, ETI_ID } = req.body;
-    if (!TIC_ID || !TIC_CODIGO || !VEH_ID || !TIC_FECHA_HORA_ENTRADA || !ETI_ID) {
-      return res.status(400).json({ error: 'TIC_ID, TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA y ETI_ID son requeridos' });
+    const { TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, ETI_ID } = req.body;
+    if (!TIC_CODIGO || !VEH_ID || !TIC_FECHA_HORA_ENTRADA || !ETI_ID) {
+      return res.status(400).json({ error: 'TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA y ETI_ID son requeridos' });
     }
     res.status(201).json(await service.create(req.body));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
 }
 
 export async function update(req, res) {
@@ -42,14 +42,14 @@ export async function update(req, res) {
     res.json(await service.update(req.params.id, req.body));
   } catch (err) {
     const msg = String(err.message || '');
-    if (msg.includes('UK_PAR_TICKET_COB_ID')) {
+    if (msg.includes('UK_PAR_COBRO_TIC_ID')) {
       return res.status(400).json({
-        error: 'Ese cobro ya está asociado a otro ticket. Cada cobro solo puede pertenecer a un ticket.',
+        error: 'Este ticket ya tiene un cobro registrado (un ticket solo puede tener un cobro).',
       });
     }
-    if (msg.includes('FK_PAR_TICKET_COBRO') || msg.includes('ORA-02291')) {
+    if (msg.includes('FK_PAR_COBRO_TICKET') || msg.includes('ORA-02291')) {
       return res.status(400).json({
-        error: 'El COB_ID indicado no existe. Debes seleccionar un cobro válido.',
+        error: 'El TIC_ID del cobro no existe o no es válido.',
       });
     }
     res.status(businessStatus(err)).json({ error: err.message });
