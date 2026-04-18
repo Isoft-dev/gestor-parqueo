@@ -2,7 +2,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import AdminLayout from './admin/AdminLayout.jsx';
 import AdminSectionPage from './admin/AdminSectionPage.jsx';
 import DashboardPage from './admin/DashboardPage.jsx';
-import ReportesPlaceholder from './admin/ReportesPlaceholder.jsx';
+import ReportesIncidentesPage from './admin/ReportesIncidentesPage.jsx';
 import AdminOperationsPage from './admin/AdminOperationsPage.jsx';
 import LoginPage from './admin/LoginPage.jsx';
 import { ADMIN_NAV_ROUTES } from './admin/adminNavConfig.js';
@@ -54,7 +54,7 @@ export default function App() {
           />
         ))}
         <Route path="operacion-cabina" element={<AdminOperationsPage />} />
-        <Route path="reportes" element={<ReportesPlaceholder />} />
+        <Route path="reportes" element={<ReportesIncidentesPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>

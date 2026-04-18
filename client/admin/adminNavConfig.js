@@ -95,9 +95,9 @@ export const ADMIN_NAV_ROUTES = [
   {
     path: 'reportes',
     label: 'Reportes',
-    description: 'Consolidados y exportaciones (programado para sprint posterior).',
+    description:
+      'Reportes de incidentes: tendencia, frecuencia por tipo y estado de resolución, con PDF.',
     icon: '📘',
-    isPlaceholder: true,
   },
 ];
 
