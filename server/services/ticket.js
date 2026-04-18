@@ -901,23 +901,37 @@ export async function generateReceiptPdfByTicketId(ticketId) {
 }
 
 export async function create(data) {
+  const entrada = data.TIC_FECHA_HORA_ENTRADA ? new Date(data.TIC_FECHA_HORA_ENTRADA) : new Date();
+  if (Number.isNaN(entrada.getTime())) throw new Error('TIC_FECHA_HORA_ENTRADA no válida');
+
+  let codigo = String(data.TIC_CODIGO ?? '').trim();
+  if (!codigo) {
+    const vrows = await executeSql(
+      `SELECT UPPER(TRIM(VEH_PLACA)) AS P FROM PAR_VEHICULO WHERE VEH_ID = :id`,
+      { id: data.VEH_ID }
+    );
+    const placa = vrows[0]?.P ?? vrows[0]?.p;
+    if (!placa) throw new Error('No se encontró la placa del vehículo para generar TIC_CODIGO');
+    codigo = buildTicketCodigo(placa, entrada);
+  }
+
   const identity = await executeSql(
     `SELECT GENERATION_TYPE
        FROM USER_TAB_IDENTITY_COLS
       WHERE TABLE_NAME='PAR_TICKET' AND COLUMN_NAME='TIC_ID'`
   );
-  const useIdentity = String(identity[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS' || !data.TIC_ID;
-  if (useIdentity) {
+  const alwaysIdentity = String(identity[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
+
+  if (alwaysIdentity) {
     await executeSql(
       `INSERT INTO PAR_TICKET
         (TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, TIC_FECHA_HORA_SALIDA, ETI_ID)
        VALUES
-        (:TIC_CODIGO, :VEH_ID, :TIC_FECHA_HORA_ENTRADA, :TIC_FECHA_HORA_SALIDA, :ETI_ID)`,
+        (:TIC_CODIGO, :VEH_ID, :TIC_FECHA_HORA_ENTRADA, NULL, :ETI_ID)`,
       {
-        TIC_CODIGO: data.TIC_CODIGO ?? null,
+        TIC_CODIGO: codigo,
         VEH_ID: data.VEH_ID ?? null,
-        TIC_FECHA_HORA_ENTRADA: data.TIC_FECHA_HORA_ENTRADA ? new Date(data.TIC_FECHA_HORA_ENTRADA) : null,
-        TIC_FECHA_HORA_SALIDA: data.TIC_FECHA_HORA_SALIDA ? new Date(data.TIC_FECHA_HORA_SALIDA) : null,
+        TIC_FECHA_HORA_ENTRADA: entrada,
         ETI_ID: data.ETI_ID ?? null,
       },
       { autoCommit: true }
@@ -926,22 +940,29 @@ export async function create(data) {
       `SELECT TIC_ID FROM PAR_TICKET
         WHERE TIC_CODIGO = :codigo
         ORDER BY TIC_ID DESC`,
-      { codigo: data.TIC_CODIGO ?? null }
+      { codigo }
     );
     return rows[0] ? getById(rows[0].TIC_ID) : null;
   }
+
+  let ticId = data.TIC_ID;
+  if (ticId == null || String(ticId).trim() === '') {
+    const r = await executeSql(`SELECT NVL(MAX(TIC_ID), 0) + 1 AS N FROM PAR_TICKET`);
+    ticId = Number(r[0]?.N ?? r[0]?.n ?? 1);
+  }
+
   await executeProcedure(
     `BEGIN SP_TICKET_CREATE(:TIC_ID, :TIC_CODIGO, :VEH_ID, :TIC_FECHA_HORA_ENTRADA, :TIC_FECHA_HORA_SALIDA, :ETI_ID); END;`,
     {
-      TIC_ID: data.TIC_ID ?? null,
-      TIC_CODIGO: data.TIC_CODIGO ?? null,
+      TIC_ID: ticId,
+      TIC_CODIGO: codigo,
       VEH_ID: data.VEH_ID ?? null,
-      TIC_FECHA_HORA_ENTRADA: data.TIC_FECHA_HORA_ENTRADA ? new Date(data.TIC_FECHA_HORA_ENTRADA) : null,
-      TIC_FECHA_HORA_SALIDA: data.TIC_FECHA_HORA_SALIDA ? new Date(data.TIC_FECHA_HORA_SALIDA) : null,
+      TIC_FECHA_HORA_ENTRADA: entrada,
+      TIC_FECHA_HORA_SALIDA: null,
       ETI_ID: data.ETI_ID ?? null,
     }
   );
-  return getById(data.TIC_ID);
+  return getById(ticId);
 }
 
 export async function update(id, data) {

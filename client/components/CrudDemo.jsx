@@ -556,6 +556,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         : entity.fields.filter(f => !(isEdit && f.createOnly));
     const payload = preparePayload(fieldsToUse, form);
     if (!isEdit && entity?.key === 'alerta') delete payload.ALE_ID;
+    if (!isEdit && entity?.key === 'ticket') {
+      delete payload.TIC_ID;
+      delete payload.TIC_CODIGO;
+      delete payload.TIC_FECHA_HORA_SALIDA;
+    }
     if (
       entity.key === 'bitacora-incidente-vehiculo' &&
       isEdit &&
@@ -680,6 +685,12 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     window.open(`${API_BASE}/ticket/${id}/entrada.pdf`, '_blank');
   }
 
+  function downloadTicketComprobantePdf(row) {
+    const id = row?.TIC_ID ?? row?.[entity.id];
+    if (!id) return;
+    window.open(`${API_BASE}/ticket/${id}/comprobante.pdf`, '_blank');
+  }
+
   const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
   const isNewRecord = editId === '__new__';
   const formFields = entity
@@ -688,7 +699,10 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         : entity.fields.filter(f => !(editId && !isNewRecord && f.createOnly))
     : [];
 
-  const visibleFormFields = formFields;
+  const visibleFormFields =
+    entity?.key === 'ticket' && isNewRecord
+      ? formFields.filter((f) => !['TIC_ID', 'TIC_CODIGO', 'TIC_FECHA_HORA_SALIDA'].includes(f.k))
+      : formFields;
 
   const listContextHint = useMemo(() => {
     if (!sectionPath || !entity?.key) return null;
@@ -839,6 +853,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                     {entity.key === 'membresia' && isNewRecord ? (
                       <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
                         El vencimiento se calcula automáticamente según el tipo de membresía (duración en días) y la fecha de inicio.
+                      </p>
+                    ) : null}
+                    {entity.key === 'ticket' && isNewRecord ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        El código del ticket se genera solo. La salida se registra al editar el ticket.
                       </p>
                     ) : null}
                     {visibleFormFields.map((f) => {
@@ -1027,13 +1046,24 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                               {entity.ops.u && <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">Editar</button>}
                               {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
                               {entity.key === 'ticket' && (
-                                <button
-                                  type="button"
-                                  onClick={() => downloadTicketEntradaPdf(row)}
-                                  className="crudx-btn-secondary crudx-btn-xs"
-                                >
-                                  PDF entrada
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadTicketEntradaPdf(row)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Descargar ticket
+                                  </button>
+                                  {row?.COB_ID != null && String(row.COB_ID).trim() !== '' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadTicketComprobantePdf(row)}
+                                      className="crudx-btn-secondary crudx-btn-xs"
+                                    >
+                                      Comprobante PDF
+                                    </button>
+                                  ) : null}
+                                </>
                               )}
                               {entity.key === 'cliente' && Number(row.CLI_ACTIVO ?? 1) === 1 && (
                                 <button
