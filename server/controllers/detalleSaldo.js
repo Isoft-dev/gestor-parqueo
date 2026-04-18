@@ -3,7 +3,7 @@ import * as service from '../services/detalleSaldo.js';
 function businessStatus(err) {
   const msg = String(err?.message || '');
   if (/no encontrado/i.test(msg)) return 404;
-  if (/requerid|umbral|ORA-02291|ORA-01400|ORA-00904/i.test(msg)) return 400;
+  if (/requerid|umbral|solo aplica|máquinas cuyo tipo|ORA-02291|ORA-01400|ORA-00904/i.test(msg)) return 400;
   return 500;
 }
 

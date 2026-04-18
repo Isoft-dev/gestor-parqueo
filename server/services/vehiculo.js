@@ -1,6 +1,35 @@
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
-export async function getAll() {
+const LIST_SELECT = `SELECT v.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+              v.TVE_ID, tv.TVE_TIPO, v.CLI_ID
+         FROM PAR_VEHICULO v
+         LEFT JOIN PAR_TIPO_VEHICULO tv ON v.TVE_ID = tv.TVE_ID`;
+
+/** Tickets / esporádicos: sin cliente, o cliente sin ninguna membresía (p. ej. NIT en cobro sin plan). */
+const WHERE_TICKETS_ESPORADICOS = `WHERE v.CLI_ID IS NULL
+        OR NOT EXISTS (
+             SELECT 1
+               FROM PAR_MEMBRESIA m
+               JOIN PAR_VEHICULO v2 ON m.VEH_ID = v2.VEH_ID
+              WHERE v2.CLI_ID = v.CLI_ID
+           )`;
+
+/** Clientes mensuales: solo flota de clientes que tienen al menos una membresía registrada. */
+const WHERE_CLIENTE_CON_MEMBRESIA = `WHERE v.CLI_ID IS NOT NULL
+        AND EXISTS (
+             SELECT 1
+               FROM PAR_MEMBRESIA m
+               JOIN PAR_VEHICULO v2 ON m.VEH_ID = v2.VEH_ID
+              WHERE v2.CLI_ID = v.CLI_ID
+           )`;
+
+export async function getAll(options = {}) {
+  if (options.soloClienteConMembresia) {
+    return executeSql(`${LIST_SELECT} ${WHERE_CLIENTE_CON_MEMBRESIA} ORDER BY v.VEH_ID`);
+  }
+  if (options.soloEsporadicos) {
+    return executeSql(`${LIST_SELECT} ${WHERE_TICKETS_ESPORADICOS} ORDER BY v.VEH_ID`);
+  }
   return executeCursor(`BEGIN SP_VEHICULO_GET_ALL(:cursor); END;`);
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../config.js';
+import { getDbColumnLabel } from '../utils/dbColumnLabel.js';
 
 export default function MonthlyPaymentsPanel() {
   const [query, setQuery] = useState('');
@@ -72,7 +73,7 @@ export default function MonthlyPaymentsPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
-      setMsg(`Pago registrado. PAG_ID=${data.PAG_ID}`);
+      setMsg(`Pago registrado. ${getDbColumnLabel('PAG_ID')}: ${data.PAG_ID}`);
       setSelected(null);
       setResults([]);
       setHistory(null);
@@ -186,10 +187,10 @@ export default function MonthlyPaymentsPanel() {
           <table className="admin-table">
             <thead>
               <tr>
-                <th>MEM_ID</th>
-                <th>Placa</th>
-                <th>Precio</th>
-                <th>Vencimiento</th>
+                <th>{getDbColumnLabel('MEM_ID')}</th>
+                <th>{getDbColumnLabel('VEH_PLACA')}</th>
+                <th>{getDbColumnLabel('TME_PRECIO')}</th>
+                <th>{getDbColumnLabel('MEM_FECHA_VENCIMIENTO')}</th>
                 <th />
               </tr>
             </thead>
@@ -266,7 +267,11 @@ export default function MonthlyPaymentsPanel() {
             <table className="admin-table">
               <thead>
                 <tr><th colSpan="3">Movimientos</th></tr>
-                <tr><th>ID</th><th>Entrada</th><th>Salida</th></tr>
+                <tr>
+                  <th>{getDbColumnLabel('RMM_ID')}</th>
+                  <th>{getDbColumnLabel('RMM_FECHA_HORA_ENTRADA')}</th>
+                  <th>{getDbColumnLabel('RMM_FECHA_HORA_SALIDA')}</th>
+                </tr>
               </thead>
               <tbody>
                 {(history.movimientos || []).map((m) => (
@@ -283,7 +288,13 @@ export default function MonthlyPaymentsPanel() {
             <table className="admin-table">
               <thead>
                 <tr><th colSpan="5">Pagos</th></tr>
-                <tr><th>PAG_ID</th><th>Monto</th><th>Recibido</th><th>Vuelto</th><th>Fecha</th></tr>
+                <tr>
+                  <th>{getDbColumnLabel('PAG_ID')}</th>
+                  <th>{getDbColumnLabel('PAG_MONTO_TOTAL')}</th>
+                  <th>{getDbColumnLabel('PAG_MONTO_RECIBIDO')}</th>
+                  <th>{getDbColumnLabel('PAG_VUELTO')}</th>
+                  <th>{getDbColumnLabel('PAG_FECHA_HORA')}</th>
+                </tr>
               </thead>
               <tbody>
                 {(history.pagos || []).map((p) => (

@@ -20,7 +20,9 @@ export default function LostTicketPanel() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
       setQuote(data);
-      setMsg('Estado actualizado a extraviado. Cotización lista para cobro manual (use «Operación cabina» o el API checkout con COB_PROCESADO_MAQUINA=0).');
+      setMsg(
+        'Estado actualizado a extraviado. Cotización lista para cobro manual (use «Operación cabina» o el API checkout con cobro no procesado por máquina).',
+      );
     } catch (e) {
       setMsg(String(e?.message || e));
     } finally {
@@ -39,7 +41,7 @@ export default function LostTicketPanel() {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="VEH_PLACA"
+          placeholder="Placa del vehículo"
           value={placa}
           onChange={(e) => setPlaca(e.target.value.toUpperCase())}
           style={{ padding: '8px 10px', minWidth: 160 }}

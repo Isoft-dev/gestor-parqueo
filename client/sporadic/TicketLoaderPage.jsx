@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { API_BASE } from '../config.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
@@ -64,11 +65,19 @@ function randomFrom(arr) {
 }
 
 function generateRandomPlate() {
+  const firstOnly = 'PMAO';
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const nums = '0123456789';
-  const l = () => letters[Math.floor(Math.random() * letters.length)];
-  const n = () => nums[Math.floor(Math.random() * nums.length)];
-  return `${l()}${l()}${l()}-${n()}${n()}${n()}${n()}`;
+  const pick = (pool) => pool[Math.floor(Math.random() * pool.length)];
+  return (
+    pick(firstOnly) +
+    pick(nums) +
+    pick(nums) +
+    pick(nums) +
+    pick(letters) +
+    pick(letters) +
+    pick(letters)
+  );
 }
 
 function generateVehicleData() {
@@ -82,6 +91,7 @@ function generateVehicleData() {
 }
 
 export default function TicketLoaderPage({ embeddedInAdmin = false }) {
+  const { user, logout } = useAuth();
   const fileRef = useRef(null);
   const tagFileRef = useRef(null);
   const salidaFileRef = useRef(null);
@@ -112,6 +122,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   const [exitMaqId, setExitMaqId] = useState('');
   const [exitValidationDone, setExitValidationDone] = useState(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [espacioResumen, setEspacioResumen] = useState(null);
+  const [assistMaqId, setAssistMaqId] = useState('');
+  const [billetes, setBilletes] = useState({ 5: 0, 10: 0, 20: 0, 50: 0 });
+  const [assistMsg, setAssistMsg] = useState('');
   const montoTotalCalculado = Number(quote?.montoTotal || 0);
   const horasCalculadas = Number(
     quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
@@ -121,6 +135,37 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
     Number.isFinite(montoRecibidoNum) && montoRecibidoNum >= montoTotalCalculado
       ? Number((montoRecibidoNum - montoTotalCalculado).toFixed(2))
       : 0;
+
+  const sumaBilletes =
+    billetes[5] * 5 + billetes[10] * 10 + billetes[20] * 20 + billetes[50] * 50;
+
+  /** Solo dígitos y un punto decimal; nunca negativos (evita que `min` del input sea insuficiente). */
+  function onMontoRecibidoChange(raw) {
+    let v = String(raw ?? '').replace(/,/g, '.');
+    v = v.replace(/[^0-9.]/g, '');
+    const i = v.indexOf('.');
+    if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '');
+    setMontoRecibido(v);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    async function pollEspacios() {
+      try {
+        const res = await fetch(`${API_BASE}/espacio/resumen-publico`);
+        const data = await res.json();
+        if (!cancelled && res.ok) setEspacioResumen(data);
+      } catch {
+        /* kiosk sin API */
+      }
+    }
+    pollEspacios();
+    const t = setInterval(pollEspacios, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -142,6 +187,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         setTipoVehiculo(Array.isArray(dTve) ? dTve : []);
         setTiposCobro(Array.isArray(dCobro) ? dCobro : []);
         setMaquinas(Array.isArray(dMaq) ? dMaq : []);
+        if (Array.isArray(dMaq) && dMaq[0]?.MAQ_ID != null) {
+          setAssistMaqId((prev) => prev || String(dMaq[0].MAQ_ID));
+        }
       } catch {
         setTipoVehiculo([]);
         setTiposCobro([]);
@@ -151,6 +199,33 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       }
     })();
   }, []);
+
+  async function enviarAsistencia(motivoExtra) {
+    if (!assistMaqId) {
+      setAssistMsg('Selecciona una máquina para asociar la asistencia.');
+      return;
+    }
+    setAssistMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/alerta/solicitud-asistencia`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          MAQ_ID: assistMaqId,
+          ALE_MOTIVO: motivoExtra || 'Solicitud de asistencia',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      setAssistMsg(
+        data?.ALE_ID != null
+          ? `Solicitud registrada (alerta #${data.ALE_ID}). Revisa gestión de alertas.`
+          : 'Solicitud enviada al panel.',
+      );
+    } catch (e) {
+      setAssistMsg(`No se pudo enviar: ${String(e?.message || e)}`);
+    }
+  }
 
   function applyAutocompletado() {
     const generated = generateVehicleData();
@@ -385,24 +460,34 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       setMsg('Primero debes cargar un ticket válido.');
       return;
     }
-    if (!montoRecibido || Number(montoRecibido) < montoTotalCalculado) {
+    const recibido = Number(montoRecibido);
+    if (!montoRecibido.trim() || !Number.isFinite(recibido) || recibido < 0) {
+      setMsg('El monto recibido debe ser un número mayor o igual a cero.');
+      return;
+    }
+    if (recibido < montoTotalCalculado) {
       setMsg('El efectivo ingresado debe ser mayor o igual al monto total.');
       return;
     }
     setLoading(true);
     setMsg('');
     try {
+      const payload = {
+        TIC_CODIGO: quote.ticket.TIC_CODIGO,
+        TCO_ID: tcoId,
+        MAQ_ID: maqId,
+        COB_NIT: cf ? 'CF' : nit,
+        USE_CF: cf,
+        COB_MONTO_RECIBIDO: recibido,
+      };
+      const tieneBilletes = Object.values(billetes).some((n) => n > 0);
+      if (tieneBilletes) {
+        payload.BILLETES_INGRESO = { ...billetes };
+      }
       const res = await fetch(`${API_BASE}/ticket/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          TIC_CODIGO: quote.ticket.TIC_CODIGO,
-          TCO_ID: tcoId,
-          MAQ_ID: maqId,
-          COB_NIT: cf ? 'CF' : nit,
-          USE_CF: cf,
-          COB_MONTO_RECIBIDO: Number(montoRecibido),
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
@@ -414,6 +499,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       setTcoId('');
       setMaqId('');
       setMontoRecibido('');
+      setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
     } catch (err) {
       setMsg(`Error: ${String(err?.message || err)}`);
     } finally {
@@ -436,6 +522,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
     setExitValidationDone(null);
     setExitMaqId('');
     setShowGenerateForm(false);
+    setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
   }
 
   function downloadReceiptAndReset() {
@@ -445,14 +532,63 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   }
 
   return (
-    <div className="ops-shell" style={{ maxWidth: embeddedInAdmin ? '100%' : 980, margin: '12px auto', padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h1 style={{ margin: 0 }}>{embeddedInAdmin ? 'Operación en cabina' : 'Consulta de ticket'}</h1>
-        {!embeddedInAdmin ? <Link to="/admin">Ir a panel admin</Link> : null}
-      </div>
-      <p style={{ color: '#555', marginTop: 0 }}>
+    <div
+      className={embeddedInAdmin ? 'ops-shell ops-shell--embedded' : 'admin-page ops-page-public'}
+      style={{ maxWidth: embeddedInAdmin ? '100%' : 1040, margin: '12px auto', padding: 16 }}
+    >
+      <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
+        <h1 className="admin-page-title">{embeddedInAdmin ? 'Operación en cabina' : 'Consulta de ticket'}</h1>
+        {!embeddedInAdmin ? (
+          user ? (
+            <button
+              type="button"
+              className="ops-header-auth-btn"
+              onClick={() => logout()}
+            >
+              Cerrar sesión
+            </button>
+          ) : (
+            <Link to="/login" className="ops-header-auth-link">
+              Ir al panel de admin
+            </Link>
+          )
+        ) : null}
+      </header>
+      <p className="admin-page-desc">
         Puedes generar ticket de entrada o cargar ticket para continuar con el cobro.
       </p>
+      {espacioResumen ? (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: 10,
+            borderRadius: 8,
+            background: espacioResumen.parqueoLleno ? '#fff4f4' : '#f0fdf4',
+            border: `1px solid ${espacioResumen.parqueoLleno ? '#f5c2c2' : '#86efac'}`,
+          }}
+        >
+          <strong>Espacios disponibles:</strong> {espacioResumen.disponibles ?? '—'} de {espacioResumen.total ?? '—'}
+          {espacioResumen.parqueoLleno ? (
+            <span style={{ color: '#991b1b', marginLeft: 8 }}>Parqueo lleno — no se puede generar ticket.</span>
+          ) : null}
+        </div>
+      ) : null}
+      <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span>
+        <select
+          value={assistMaqId}
+          onChange={(e) => setAssistMaqId(e.target.value)}
+          style={{ padding: '6px 10px', minWidth: 200 }}
+        >
+          <option value="">—</option>
+          {maquinas.map((m) => (
+            <option key={m.MAQ_ID} value={m.MAQ_ID}>
+              {m.MAQ_CODIGO || `MAQ ${m.MAQ_ID}`}
+            </option>
+          ))}
+        </select>
+        {assistMsg ? <span style={{ fontSize: 13, color: '#065f46' }}>{assistMsg}</span> : null}
+      </div>
       {catalogLoading ? (
         <div className="ops-loader-wrap">
           <span className="ops-loader" aria-hidden="true" />
@@ -460,9 +596,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       ) : null}
 
-      <div style={{ marginTop: 10, border: '2px dashed #9ec5ff', borderRadius: 8, padding: 12, background: '#f4f9ff' }}>
-        <h2 style={{ margin: '0 0 6px 0', fontSize: 19 }}>Cliente mensual (Tag)</h2>
-        <p style={{ margin: 0, color: '#35507a' }}>Sección exclusiva para validar tag de membresía.</p>
+      <section className="admin-panel-block ops-panel-block">
+        <div className="admin-panel-head">
+          <h2>Cliente mensual (Tag)</h2>
+          <p className="admin-panel-sub">Sección exclusiva para validar tag de membresía.</p>
+        </div>
         <input
           ref={tagFileRef}
           type="file"
@@ -473,16 +611,16 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
             if (f) onLoadTagPdf(f);
           }}
         />
-        <button type="button" onClick={() => tagFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
+        <button type="button" className="admin-btn-primary" onClick={() => tagFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Validar Tag
         </button>
-      </div>
+      </section>
 
-      <div style={{ marginTop: 10, border: '2px dashed #76c7b7', borderRadius: 8, padding: 12, background: '#f1fffb' }}>
-        <h2 style={{ margin: '0 0 6px 0', fontSize: 19 }}>Salida cliente mensual</h2>
-        <p style={{ margin: 0, color: '#1c6b5f' }}>
-          Carga el tag para cerrar un ingreso activo asociado a la membresía.
-        </p>
+      <section className="admin-panel-block ops-panel-block">
+        <div className="admin-panel-head">
+          <h2>Salida cliente mensual</h2>
+          <p className="admin-panel-sub">Carga el tag para cerrar un ingreso activo asociado a la membresía.</p>
+        </div>
         <input
           ref={tagSalidaFileRef}
           type="file"
@@ -493,16 +631,18 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
             if (f) onLoadTagExitPdf(f);
           }}
         />
-        <button type="button" onClick={() => tagSalidaFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
+        <button type="button" className="admin-btn-primary" onClick={() => tagSalidaFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Cargar Tag
         </button>
-      </div>
+      </section>
 
-      <div style={{ marginTop: 10, border: '2px dashed #ffd78d', borderRadius: 8, padding: 12, background: '#fffaf0' }}>
-        <h2 style={{ margin: '0 0 6px 0', fontSize: 19 }}>Salida cliente esporádico</h2>
-        <p style={{ margin: 0, color: '#7a5a1f' }}>
-          Carga el ticket para verificar estado de pago y tiempo de gracia post-pago.
-        </p>
+      <section className="admin-panel-block ops-panel-block">
+        <div className="admin-panel-head">
+          <h2>Salida cliente esporádico</h2>
+          <p className="admin-panel-sub">
+            Carga el ticket para verificar estado de pago y tiempo de gracia post-pago.
+          </p>
+        </div>
         <input
           ref={salidaFileRef}
           type="file"
@@ -526,21 +666,32 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => salidaFileRef.current?.click()} disabled={loading || catalogLoading}>
+          <button
+            type="button"
+            className="admin-btn-primary"
+            onClick={() => salidaFileRef.current?.click()}
+            disabled={loading || catalogLoading}
+          >
             Cargar Ticket
           </button>
         </div>
-      </div>
+      </section>
 
       <div className="ops-main-ticket-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => { setShowGenerateForm((v) => !v); setMsg(''); }} disabled={loading || catalogLoading}>
+        <button
+          type="button"
+          className="admin-btn-primary"
+          onClick={() => { setShowGenerateForm((v) => !v); setMsg(''); }}
+          disabled={loading || catalogLoading || espacioResumen?.parqueoLleno}
+        >
           Generar Ticket
         </button>
         <button
           type="button"
+          className="admin-btn-ghost"
           onClick={() => fileRef.current?.click()}
           disabled={loading || catalogLoading}
-          title="Sube el PDF del ticket: se cotiza el monto y aparece el formulario. El cobro queda registrado al pulsar Continuar en Detalle de pago."
+          title="Selecciona el PDF del ticket para cotizar y completar el pago en el detalle de cobro."
         >
           Pagar ticket
         </button>
@@ -689,6 +840,13 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
           <p style={{ margin: '6px 0', fontSize: 18 }}>
             <strong>Monto total a pagar: Q{montoTotalCalculado.toFixed(2)}</strong>
           </p>
+          {quote.politicaMinimoSub1h?.aplicada ? (
+            <p style={{ margin: '6px 0', fontSize: 13, color: '#444' }}>
+              Cobro mínimo por estadía menor a 1 h: Q
+              {Number(quote.politicaMinimoSub1h.quetzales ?? 5).toFixed(2)} (configuración del servidor
+              {quote.politicaMinimoSub1h?.origen === 'runtime' ? ', panel admin' : ', .env'}).
+            </p>
+          ) : null}
           <hr />
           <h3 style={{ marginBottom: 8 }}>Facturación (campos automáticos y manuales)</h3>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -744,13 +902,48 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
               style={{ padding: '8px 10px', minWidth: 150, background: '#f3f4f6' }}
               title="Monto total calculado automáticamente"
             />
+            <div style={{ width: '100%', marginTop: 8 }}>
+              <span style={{ fontWeight: 600 }}>Simulación de billetes (Q5, Q10, Q20, Q50)</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                {[5, 10, 20, 50].map((d) => (
+                  <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) + 1) }))
+                      }
+                    >
+                      +Q{d}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) - 1) }))
+                      }
+                    >
+                      −
+                    </button>
+                    <small>
+                      {d}: {billetes[d] || 0}
+                    </small>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMontoRecibido(String(sumaBilletes.toFixed(2)));
+                  }}
+                >
+                  Usar suma billetes ({sumaBilletes.toFixed(2)})
+                </button>
+              </div>
+            </div>
             <input
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               placeholder="Monto recibido (manual)"
               value={montoRecibido}
-              onChange={(e) => setMontoRecibido(e.target.value)}
+              onChange={(e) => onMontoRecibidoChange(e.target.value)}
               style={{ padding: '8px 10px', minWidth: 190 }}
             />
             <input
@@ -770,6 +963,27 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
           </p>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => enviarAsistencia()}
+        style={{
+          position: 'fixed',
+          right: 16,
+          bottom: 16,
+          zIndex: 50,
+          padding: '12px 16px',
+          borderRadius: 999,
+          border: 'none',
+          background: '#2563eb',
+          color: '#fff',
+          fontWeight: 700,
+          cursor: 'pointer',
+          boxShadow: '0 4px 14px rgba(37,99,235,0.4)',
+        }}
+      >
+        Asistencia
+      </button>
 
       {checkoutDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>

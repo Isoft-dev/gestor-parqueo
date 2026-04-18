@@ -1,40 +1,68 @@
-import { executeCursor, executeProcedure } from '../db/oracle.js';
+import oracledb from 'oracledb';
+import { executeCursor, executeProcedure, getConnection } from '../db/oracle.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_COBRO_GET_ALL(:cursor); END;`);
 }
 
 export async function getById(id) {
-  const rows = await executeCursor(`BEGIN SP_COBRO_GET_BY_ID(:id, :cursor); END;`, { id });
+  const rows = await executeCursor(`BEGIN SP_COBRO_GET_BY_ID(:id, :cursor); END;`, {
+    id: Number(id),
+  });
   return rows[0] || null;
 }
 
 export async function create(data) {
-  await executeProcedure(
-    `BEGIN SP_COBRO_CREATE(:COB_ID, :COB_HORAS_TOTALES, :TCO_ID, :COB_MONTO_TOTAL,
-      :COB_MONTO_RECIBIDO, :COB_VUELTO, :COB_FECHA_HORA,
-      :COB_PROCESADO_MAQUINA, :TAR_ID); END;`,
-    {
-      COB_ID:               data.COB_ID ?? null,
-      COB_HORAS_TOTALES:    data.COB_HORAS_TOTALES ?? null,
-      TCO_ID:               data.TCO_ID ?? null,
-      COB_MONTO_TOTAL:      data.COB_MONTO_TOTAL ?? null,
-      COB_MONTO_RECIBIDO:   data.COB_MONTO_RECIBIDO ?? null,
-      COB_VUELTO:           data.COB_VUELTO ?? null,
-      COB_FECHA_HORA:       data.COB_FECHA_HORA ? new Date(data.COB_FECHA_HORA) : new Date(),
-      COB_PROCESADO_MAQUINA: data.COB_PROCESADO_MAQUINA ?? 0,
-      TAR_ID:               data.TAR_ID ?? null,
-    }
-  );
-  return getById(data.COB_ID);
+  const ticId = data.TIC_ID;
+  if (ticId == null || String(ticId).trim() === '') {
+    throw new Error('TIC_ID es requerido');
+  }
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(
+      `BEGIN SP_COBRO_CREATE(
+        :TIC_ID, :COB_NIT, :COB_HORAS_TOTALES, :TCO_ID, :COB_MONTO_TOTAL,
+        :COB_MONTO_RECIBIDO, :COB_VUELTO, :COB_FECHA_HORA,
+        :COB_PROCESADO_MAQUINA, :TAR_ID, :NEW_COB_ID
+      ); END;`,
+      {
+        TIC_ID: Number(ticId),
+        COB_NIT:
+          data.COB_NIT != null && String(data.COB_NIT).trim() !== ''
+            ? String(data.COB_NIT).trim()
+            : null,
+        COB_HORAS_TOTALES: Number(data.COB_HORAS_TOTALES),
+        TCO_ID: Number(data.TCO_ID),
+        COB_MONTO_TOTAL: Number(data.COB_MONTO_TOTAL),
+        COB_MONTO_RECIBIDO:
+          data.COB_MONTO_RECIBIDO != null && data.COB_MONTO_RECIBIDO !== ''
+            ? Number(data.COB_MONTO_RECIBIDO)
+            : null,
+        COB_VUELTO:
+          data.COB_VUELTO != null && data.COB_VUELTO !== '' ? Number(data.COB_VUELTO) : null,
+        COB_FECHA_HORA: data.COB_FECHA_HORA ? new Date(data.COB_FECHA_HORA) : new Date(),
+        COB_PROCESADO_MAQUINA: data.COB_PROCESADO_MAQUINA ?? 0,
+        TAR_ID: Number(data.TAR_ID),
+        NEW_COB_ID: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+      },
+      { autoCommit: true },
+    );
+    const raw = result.outBinds?.NEW_COB_ID;
+    const newId = Array.isArray(raw) ? raw[0] : raw;
+    return getById(newId);
+  } finally {
+    if (conn) await conn.close();
+  }
 }
 
 export async function update(id, data) {
   const current = await getById(id);
   if (!current) return null;
 
-  // Regla HU: cobros historicos no deben mutar por cambios de tarifa/configuracion.
   const immutableFields = [
+    'TIC_ID',
+    'COB_NIT',
     'COB_HORAS_TOTALES',
     'TCO_ID',
     'COB_MONTO_TOTAL',
@@ -52,20 +80,11 @@ export async function update(id, data) {
   }
 
   await executeProcedure(
-    `BEGIN SP_COBRO_UPDATE(:id, :COB_HORAS_TOTALES, :TCO_ID, :COB_MONTO_TOTAL,
-      :COB_MONTO_RECIBIDO, :COB_VUELTO, :COB_FECHA_HORA,
-      :COB_PROCESADO_MAQUINA, :TAR_ID); END;`,
+    `BEGIN SP_COBRO_UPDATE(:id, :COB_PROCESADO_MAQUINA); END;`,
     {
-      id,
-      COB_HORAS_TOTALES: current.COB_HORAS_TOTALES,
-      TCO_ID: current.TCO_ID,
-      COB_MONTO_TOTAL: current.COB_MONTO_TOTAL,
-      COB_MONTO_RECIBIDO: current.COB_MONTO_RECIBIDO,
-      COB_VUELTO: current.COB_VUELTO,
-      COB_FECHA_HORA: current.COB_FECHA_HORA ? new Date(current.COB_FECHA_HORA) : null,
+      id: Number(id),
       COB_PROCESADO_MAQUINA: data.COB_PROCESADO_MAQUINA ?? current.COB_PROCESADO_MAQUINA ?? 0,
-      TAR_ID: current.TAR_ID,
-    }
+    },
   );
   return getById(id);
 }

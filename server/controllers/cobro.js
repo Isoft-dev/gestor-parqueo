@@ -28,18 +28,29 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { COB_ID, COB_HORAS_TOTALES, TCO_ID, COB_MONTO_TOTAL, COB_MONTO_RECIBIDO, COB_VUELTO, COB_FECHA_HORA, TAR_ID } = req.body;
+    const {
+      TIC_ID,
+      COB_HORAS_TOTALES,
+      TCO_ID,
+      COB_MONTO_TOTAL,
+      COB_FECHA_HORA,
+      TAR_ID,
+    } = req.body;
     if (
-      !COB_ID ||
+      TIC_ID == null ||
+      String(TIC_ID).trim() === '' ||
       COB_HORAS_TOTALES == null ||
-      !TCO_ID ||
+      TCO_ID == null ||
+      String(TCO_ID).trim() === '' ||
       COB_MONTO_TOTAL == null ||
-      COB_MONTO_RECIBIDO == null ||
-      COB_VUELTO == null ||
       !COB_FECHA_HORA ||
-      !TAR_ID
+      TAR_ID == null ||
+      String(TAR_ID).trim() === ''
     ) {
-      return res.status(400).json({ error: 'Faltan campos requeridos' });
+      return res.status(400).json({
+        error:
+          'Faltan campos requeridos: TIC_ID, COB_HORAS_TOTALES, TCO_ID, COB_MONTO_TOTAL, COB_FECHA_HORA, TAR_ID',
+      });
     }
     const created = await service.create(req.body);
     res.status(201).json(created);

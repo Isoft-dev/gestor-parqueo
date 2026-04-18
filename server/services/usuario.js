@@ -19,6 +19,8 @@ function verifyPassword(plain, stored) {
   const [, salt, hash] = value.split('$');
   if (!salt || !hash) return false;
   const calc = crypto.scryptSync(String(plain), salt, 32).toString('base64');
+  // Evita RangeError en timingSafeEqual cuando el hash persistido tiene tamaño inesperado.
+  if (calc.length !== hash.length) return false;
   return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(hash));
 }
 
@@ -154,9 +156,11 @@ export async function update(id, data) {
 export async function login(data) {
   const correo = normalizeEmail(data.USU_CORREO);
   const rows = await executeSql(
-    `SELECT USU_ID, USU_PRIMER_NOMBRE, USU_PRIMER_APELLIDO, USU_CORREO, USU_PASSWORD, USU_ACTIVO, ROL_ID
-       FROM PAR_USUARIO
-      WHERE LOWER(USU_CORREO) = :correo`,
+    `SELECT u.USU_ID, u.USU_PRIMER_NOMBRE, u.USU_PRIMER_APELLIDO, u.USU_CORREO, u.USU_PASSWORD,
+            u.USU_ACTIVO, u.ROL_ID, r.ROL_TIPO
+       FROM PAR_USUARIO u
+       LEFT JOIN PAR_ROL r ON r.ROL_ID = u.ROL_ID
+      WHERE LOWER(TRIM(u.USU_CORREO)) = :correo`,
     { correo }
   );
   const user = rows[0];
@@ -170,5 +174,6 @@ export async function login(data) {
     USU_CORREO: user.USU_CORREO,
     USU_ACTIVO: user.USU_ACTIVO,
     ROL_ID: user.ROL_ID,
+    ROL_TIPO: user.ROL_TIPO ?? null,
   };
 }

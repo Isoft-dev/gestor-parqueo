@@ -67,7 +67,7 @@ export const ADMIN_NAV_ROUTES = [
   },
   {
     path: 'tarifas',
-    label: 'Gestión de tarifas',
+    label: 'Gestión de cobro',
     description: 'Tarifas del parqueo, tipos de cobro y formas de pago.',
     icon: 'Q',
     entityKeys: ['tarifa', 'tipo-cobro', 'tipo-pago'],
