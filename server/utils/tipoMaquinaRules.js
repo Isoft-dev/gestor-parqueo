@@ -7,7 +7,8 @@ export function normTipoMaquina(s) {
 }
 
 export function isTipoMaquinaCobro(tmaTipo) {
-  return normTipoMaquina(tmaTipo).includes('cobro');
+  const x = normTipoMaquina(tmaTipo);
+  return x.includes('cobro') || x.includes('caja');
 }
 
 export function isTipoMaquinaEntrada(tmaTipo) {

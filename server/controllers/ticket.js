@@ -27,9 +27,9 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA, ETI_ID } = req.body;
-    if (!TIC_CODIGO || !VEH_ID || !TIC_FECHA_HORA_ENTRADA || !ETI_ID) {
-      return res.status(400).json({ error: 'TIC_CODIGO, VEH_ID, TIC_FECHA_HORA_ENTRADA y ETI_ID son requeridos' });
+    const { VEH_ID, TIC_FECHA_HORA_ENTRADA, ETI_ID } = req.body;
+    if (!VEH_ID || !TIC_FECHA_HORA_ENTRADA || !ETI_ID) {
+      return res.status(400).json({ error: 'VEH_ID, TIC_FECHA_HORA_ENTRADA y ETI_ID son requeridos' });
     }
     res.status(201).json(await service.create(req.body));
   } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }

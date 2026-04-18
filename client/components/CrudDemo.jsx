@@ -87,7 +87,14 @@ const SECTIONS = {
         fields: [{ k:'TVE_ID',l:'ID',req:true },{ k:'TVE_TIPO',l:'Tipo',req:true },{ k:'TVE_MARCA',l:'Marca' },{ k:'TVE_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:true,d:true} },
       { key: 'vehiculo', label: 'Vehículo', id: 'VEH_ID',
-        fields: [{ k:'VEH_ID',l:'ID',req:true },{ k:'VEH_PLACA',l:'Placa',req:true },{ k:'VEH_MODELO',l:'Modelo' },{ k:'VEH_COLOR',l:'Color' },{ k:'TVE_ID',l:'TVE_ID',req:true },{ k:'CLI_ID',l:'CLI_ID' }],
+        fields: [
+          { k:'VEH_ID',l:'ID',req:true },
+          { k:'VEH_PLACA',l:'Placa',req:true },
+          { k:'VEH_MODELO',l:'Modelo' },
+          { k:'VEH_COLOR',l:'Color' },
+          { k:'TVE_ID',l:'Tipo de vehículo',req:true,t:'select',catalog:'tipo-vehiculo',valueKey:'TVE_ID',labelKey:'TVE_TIPO' },
+          { k:'CLI_ID',l:'CLI_ID' },
+        ],
         ops:{c:true,u:true,d:false} },
       { key: 'estado-membresia', label: 'Estado Membresía', id: 'EME_ID',
         fields: [{ k:'EME_ID',l:'ID',req:true },{ k:'EME_ESTADO',l:'Estado',req:true }],
@@ -96,7 +103,15 @@ const SECTIONS = {
         fields: [{ k:'TME_ID',l:'ID',req:true },{ k:'TME_TIPO',l:'Tipo',req:true },{ k:'TME_DESCRIPCION',l:'Descripción' },{ k:'TME_DURACION',l:'Duración (días)',t:'number',req:true },{ k:'TME_PRECIO',l:'Precio',t:'number',req:true }],
         ops:{c:true,u:true,d:true} },
       { key: 'membresia', label: 'Membresía', id: 'MEM_ID',
-        fields: [{ k:'MEM_ID',l:'ID',req:true },{ k:'TME_ID',l:'TME_ID',req:true },{ k:'MEM_FECHA_INICIO',l:'Inicio',t:'datetime-local',req:true,createOnly:true },{ k:'EME_ID',l:'EME_ID' },{ k:'MEM_FECHA_ULTIMO_CAMBIO_ESTADO',l:'Último Cambio',t:'datetime-local' },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'ESP_ID',l:'ESP_ID',req:true }],
+        fields: [
+          { k:'MEM_ID',l:'ID',req:true },
+          { k:'TME_ID',l:'Tipo de membresía',req:true,t:'select',catalog:'tipo-membresia',valueKey:'TME_ID',labelKey:'TME_TIPO' },
+          { k:'MEM_FECHA_INICIO',l:'Inicio',t:'datetime-local',req:true,createOnly:true },
+          { k:'EME_ID',l:'Estado membresía',t:'select',catalog:'estado-membresia',valueKey:'EME_ID',labelKey:'EME_ESTADO' },
+          { k:'MEM_FECHA_ULTIMO_CAMBIO_ESTADO',l:'Último Cambio',t:'datetime-local' },
+          { k:'VEH_ID',l:'VEH_ID',req:true },
+          { k:'ESP_ID',l:'ESP_ID',req:true },
+        ],
         ops:{c:true,u:true,d:false} },
       { key: 'registro-movimiento-membresia', label: 'Reg. Mov. Membresía', id: 'RMM_ID',
         fields: [{ k:'RMM_ID',l:'ID',req:true },{ k:'RMM_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local' },{ k:'RMM_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'MEM_ID',l:'MEM_ID',req:true }],
@@ -146,7 +161,9 @@ function toInput(v, t) {
   try { const d = new Date(v); if (isNaN(d)) return ''; return t === 'date' ? d.toISOString().slice(0,10) : d.toISOString().slice(0,16); } catch { return ''; }
 }
 function emptyForm(fields) {
-  return Object.fromEntries(fields.map(f => [f.k, f.t === 'checkbox' ? 0 : '']));
+  return Object.fromEntries(
+    fields.map((f) => [f.k, f.t === 'checkbox' ? 0 : '']),
+  );
 }
 function preparePayload(fields, form) {
   const out = {};
@@ -174,6 +191,74 @@ function isCrudErrorMessage(text) {
   if (/^Error(:|\s)/i.test(t)) return true;
   if (/^No se puede\b/i.test(t)) return true;
   return false;
+}
+
+/** Texto corto y claro bajo el título de cada lista del panel admin (`sectionPath` + entidad). */
+function getAdminListContextHint(sectionPath, entityKey) {
+  if (!sectionPath || !entityKey) return null;
+
+  const HINTS = {
+    'clientes-mensuales': {
+      cliente:
+        'Clientes dados de alta para el esquema mensual. Desde aquí actualizas datos de contacto y dirección.',
+      membresia:
+        'Contratos mensuales: unen un vehículo con un espacio fijo y el tipo de plan elegido.',
+      vehiculo:
+        'Solo se muestran vehículos de clientes que ya tienen al menos una membresía (tu flota mensual).',
+      'tipo-vehiculo': 'Catálogo de categorías de vehículo (sedán, SUV, etc.) que asignas a cada placa.',
+      'tipo-membresia': 'Planes disponibles: duración, precio y nombre comercial para nuevas membresías.',
+      'estado-membresia': 'Estados posibles del contrato (activa, vencida, suspendida…).',
+      'registro-movimiento-membresia':
+        'Movimientos de entrada y salida registrados contra cada membresía.',
+    },
+    'tickets-vehiculos': {
+      'estado-ticket':
+        'Define en qué etapa va cada ticket (por ejemplo activo o ya pagado).',
+      ticket:
+        'Tickets de visitantes sin plan mensual. Consejo: en la barra del navegador puedes añadir ?q= y escribir parte del código o de la placa para acotar la lista.',
+      vehiculo:
+        'Vehículos de visita o factura puntual: ves placas sin cliente, o con cliente pero sin ninguna membresía (típico tras pagar con NIT en caja).',
+      cobro: 'Historial de cobros al salir: montos, NIT o consumidor final y máquina donde se pagó.',
+      'tipo-cobro': 'Tipos de cobro que el cajero elige al cerrar un ticket (efectivo, tarjeta, etc.).',
+      'detalle-maquina-ticket':
+        'Línea de tiempo de cada paso del ticket en las máquinas (entrada, cobro o salida).',
+    },
+    usuarios: {
+      usuario: 'Cuentas de quienes usan el sistema o el panel administrativo.',
+      rol: 'Perfiles que agrupan permisos (por ejemplo, administrador u operador).',
+    },
+    maquinas: {
+      maquina: 'Equipos de cabina: entrada, cobro o salida, con su código interno y estado.',
+      'tipo-maquina': 'Clasifica cada equipo según su función en el parqueo.',
+      'estado-maquina': 'Indica si la máquina está en servicio, en revisión o fuera de línea.',
+      'detalle-maquina-ticket':
+        'Auditoría de qué máquina atendió cada movimiento del ticket.',
+      'saldo-disponible':
+        'Billetes o monedas que la caja de una máquina puede recibir o devolver.',
+      'detalle-saldo': 'Cantidad física por cada denominación dentro de una máquina.',
+      'recargo-maquina': 'Registro de recargas de efectivo hechas en caja.',
+      'registro-mantenimiento': 'Intervenciones técnicas o preventivas sobre cada equipo.',
+    },
+    tarifas: {
+      tarifa: 'Precio por tiempo, tipo de tarifa y minutos de gracia que aplican al cobrar estacionamiento.',
+      'tipo-cobro': 'Catálogo reutilizable al registrar un cobro (nombre y descripción).',
+      'tipo-pago': 'Medios de pago para otros procesos del sistema (membresías, mensualidades, etc.).',
+    },
+    'bitacora-incidentes': {
+      'bitacora-incidente-vehiculo':
+        'Seguimiento de novedades por vehículo. Arriba puedes filtrar por incidente, fechas o si ya quedó resuelto.',
+      incidente: 'Tipos de suceso que luego enlazas en la bitácora (choque, avería, etc.).',
+    },
+    alertas: {
+      'tipo-alerta': 'Motivos por los que el sistema genera alertas (saldo bajo, asistencia, etc.).',
+      'estado-alerta': 'Etapas de atención de una alerta (pendiente, en curso, cerrada…).',
+      alerta: 'Listado de alertas generadas; revisa prioridad y máquina asociada.',
+    },
+  };
+
+  const specific = HINTS[sectionPath]?.[entityKey];
+  if (specific) return specific;
+  return 'Consulta o edita los registros de esta lista. Usa «+ Nuevo» para altas y «Editar» en cada fila cuando aplique.';
 }
 
 function escapeHtml(s) {
@@ -241,7 +326,7 @@ function openAlertaDetailPopup(row) {
  * @param {{ filterEntityKeys?: string[]; sessionUserId?: string | number | null }} props
  * Si `filterEntityKeys` está definido, se ocultan las pestañas ME-MS / MC / PA y solo se listan esas entidades.
  * `sessionUserId`: USU_ID del admin logueado (bitácora: marca quién resolvió el incidente).
- * `sectionPath`: ruta admin (p. ej. tickets-vehiculos → vehículos solo esporádicos).
+ * `sectionPath`: ruta del módulo en `/admin` (muestra textos de ayuda acordes a cada lista).
  */
 const emptyBivFilter = { inc: '', resuelto: '', desde: '', hasta: '' };
 
@@ -263,7 +348,40 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   const [bivFilter, setBivFilter] = useState(emptyBivFilter);
   /** Modal MEM-2: vehículo sin cliente al crear membresía */
   const [vehClienteModal, setVehClienteModal] = useState(null);
+  /** Catálogos para campos `t: 'select'` (clave = segmento API, p. ej. tipo-vehiculo). */
+  const [catalogOptions, setCatalogOptions] = useState({});
   const bivQueryKey = searchParams.toString();
+
+  useEffect(() => {
+    if (!entity) return;
+    const cats = [
+      ...new Set(
+        entity.fields.filter((f) => f.t === 'select' && f.catalog).map((f) => f.catalog),
+      ),
+    ];
+    if (!cats.length) return;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      await Promise.all(
+        cats.map(async (cat) => {
+          try {
+            const res = await fetch(`${API_BASE}/${cat}`, { cache: 'no-store' });
+            const data = await res.json();
+            updates[cat] = Array.isArray(data) ? data : [];
+          } catch {
+            updates[cat] = [];
+          }
+        }),
+      );
+      if (!cancelled) {
+        setCatalogOptions((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entity?.key]);
 
   useEffect(() => {
     if (entity?.key !== 'bitacora-incidente-vehiculo') return;
@@ -286,6 +404,9 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       let listUrl = `${API_BASE}/${entity.key}`;
       if (entity.key === 'vehiculo' && sectionPath === 'tickets-vehiculos') {
         listUrl += '?esporadico=1';
+      }
+      if (entity.key === 'vehiculo' && sectionPath === 'clientes-mensuales') {
+        listUrl += '?con_membresia_cliente=1';
       }
       const res = await fetch(listUrl, { cache: 'no-store' });
       const data = await res.json();
@@ -380,10 +501,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
       : entity.fields;
     const f = {};
-    fields.forEach(fd => {
+    fields.forEach((fd) => {
       const v = row[fd.k];
       if (fd.t === 'checkbox') f[fd.k] = v == 1 ? 1 : 0;
       else if (fd.t === 'datetime-local' || fd.t === 'date') f[fd.k] = toInput(v, fd.t);
+      else if (fd.t === 'select') f[fd.k] = v != null && v !== '' ? String(v) : '';
       else f[fd.k] = v ?? '';
     });
     setForm(f); setEditId(row[entity.id]);
@@ -434,6 +556,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         : entity.fields.filter(f => !(isEdit && f.createOnly));
     const payload = preparePayload(fieldsToUse, form);
     if (!isEdit && entity?.key === 'alerta') delete payload.ALE_ID;
+    if (!isEdit && entity?.key === 'ticket') {
+      delete payload.TIC_ID;
+      delete payload.TIC_CODIGO;
+      delete payload.TIC_FECHA_HORA_SALIDA;
+    }
     if (
       entity.key === 'bitacora-incidente-vehiculo' &&
       isEdit &&
@@ -558,6 +685,12 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     window.open(`${API_BASE}/ticket/${id}/entrada.pdf`, '_blank');
   }
 
+  function downloadTicketComprobantePdf(row) {
+    const id = row?.TIC_ID ?? row?.[entity.id];
+    if (!id) return;
+    window.open(`${API_BASE}/ticket/${id}/comprobante.pdf`, '_blank');
+  }
+
   const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
   const isNewRecord = editId === '__new__';
   const formFields = entity
@@ -566,7 +699,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         : entity.fields.filter(f => !(editId && !isNewRecord && f.createOnly))
     : [];
 
-  const visibleFormFields = formFields;
+  const visibleFormFields =
+    entity?.key === 'ticket' && isNewRecord
+      ? formFields.filter((f) => !['TIC_ID', 'TIC_CODIGO', 'TIC_FECHA_HORA_SALIDA'].includes(f.k))
+      : formFields;
+
+  const listContextHint = useMemo(() => {
+    if (!sectionPath || !entity?.key) return null;
+    return getAdminListContextHint(sectionPath, entity.key);
+  }, [sectionPath, entity?.key]);
 
   return (
     <div className="crudx-shell">
@@ -626,6 +767,12 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                 )}
               </div>
 
+              {listContextHint ? (
+                <p className="crudx-context-hint" role="note">
+                  {listContextHint}
+                </p>
+              ) : null}
+
               {entity.key === 'bitacora-incidente-vehiculo' ? (
                 <form className="crudx-biv-filters" onSubmit={applyBivFilters}>
                   <span className="crudx-biv-filters-title">Filtros</span>
@@ -676,20 +823,6 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                   </div>
                 </form>
               ) : null}
-              {sectionPath === 'tickets-vehiculos' &&
-              (entity.key === 'ticket' || entity.key === 'vehiculo') ? (
-                <p className="crudx-empty" style={{ marginTop: 0, marginBottom: 12, textAlign: 'left' }}>
-                  Búsqueda rápida vía URL: <code>q</code> (coincidencia en{' '}
-                  {entity.key === 'ticket' ? (
-                    <>
-                      código de ticket o placa del vehículo
-                    </>
-                  ) : (
-                    <>placa del vehículo</>
-                  )}
-                  ).
-                </p>
-              ) : null}
 
               {/* Form */}
               {editId && (
@@ -722,13 +855,24 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         El vencimiento se calcula automáticamente según el tipo de membresía (duración en días) y la fecha de inicio.
                       </p>
                     ) : null}
+                    {entity.key === 'ticket' && isNewRecord ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        El código del ticket se genera solo. La salida se registra al editar el ticket.
+                      </p>
+                    ) : null}
                     {visibleFormFields.map((f) => {
                       const fieldId = `crud-${entity.key}-${String(f.k).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
                       const lbl = `${getDbColumnLabel(f.k, CRUD_COLUMN_LABELS)}${f.req ? ' *' : ''}`;
                       return (
                         <div
                           key={f.k}
-                          className={`crudx-field${f.t === 'checkbox' ? ' crudx-field--checkbox' : ''}`}
+                          className={`crudx-field${
+                            f.t === 'checkbox'
+                              ? ' crudx-field--checkbox'
+                              : f.t === 'select'
+                                ? ' crudx-field--select'
+                                : ''
+                          }`}
                         >
                           {f.t === 'checkbox' ? (
                             <label htmlFor={fieldId} className="crudx-checkbox-inline">
@@ -743,6 +887,53 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                               />
                               <span>{lbl}</span>
                             </label>
+                          ) : f.t === 'select' ? (
+                            <>
+                              <label htmlFor={fieldId}>{lbl}</label>
+                              <select
+                                id={fieldId}
+                                className="crudx-select"
+                                value={form[f.k] ?? ''}
+                                required={!!f.req && !(isNewRecord && f.k === entity?.id)}
+                                disabled={
+                                  (f.k === entity.id && editId !== '__new__') ||
+                                  (isNewRecord && f.k === entity?.id)
+                                }
+                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
+                                aria-label={lbl}
+                                title={lbl}
+                              >
+                                {f.req ? (
+                                  <option value="" disabled>
+                                    Seleccione…
+                                  </option>
+                                ) : (
+                                  <option value="">—</option>
+                                )}
+                                {(catalogOptions[f.catalog] || []).map((row) => {
+                                  const val =
+                                    row[f.valueKey] != null ? String(row[f.valueKey]) : '';
+                                  if (val === '') return null;
+                                  const lab =
+                                    row[f.labelKey] != null
+                                      ? String(row[f.labelKey])
+                                      : val;
+                                  return (
+                                    <option key={`${f.k}-${val}`} value={val}>
+                                      {lab}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              {f.help ? (
+                                <p
+                                  className="crudx-form-note"
+                                  style={{ margin: '4px 0 0', fontSize: 11, lineHeight: 1.4 }}
+                                >
+                                  {f.help}
+                                </p>
+                              ) : null}
+                            </>
                           ) : (
                             <>
                               <label htmlFor={fieldId}>{lbl}</label>
@@ -855,13 +1046,24 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                               {entity.ops.u && <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">Editar</button>}
                               {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
                               {entity.key === 'ticket' && (
-                                <button
-                                  type="button"
-                                  onClick={() => downloadTicketEntradaPdf(row)}
-                                  className="crudx-btn-secondary crudx-btn-xs"
-                                >
-                                  PDF entrada
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadTicketEntradaPdf(row)}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Descargar ticket
+                                  </button>
+                                  {row?.COB_ID != null && String(row.COB_ID).trim() !== '' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadTicketComprobantePdf(row)}
+                                      className="crudx-btn-secondary crudx-btn-xs"
+                                    >
+                                      Comprobante PDF
+                                    </button>
+                                  ) : null}
+                                </>
                               )}
                               {entity.key === 'cliente' && Number(row.CLI_ACTIVO ?? 1) === 1 && (
                                 <button

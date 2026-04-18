@@ -10,9 +10,20 @@ function businessStatus(err) {
 
 export async function getAll(req, res) {
   try {
+    const soloClienteConMembresia =
+      req.query?.con_membresia_cliente === '1' ||
+      String(req.query?.solo_cliente_con_membresia || '').toLowerCase() === 'true';
     const soloEsporadicos =
       req.query?.esporadico === '1' || String(req.query?.solo_esporadicos || '').toLowerCase() === 'true';
-    res.json(await service.getAll({ soloEsporadicos }));
+    if (soloClienteConMembresia && soloEsporadicos) {
+      return res.status(400).json({ error: 'No combines con_membresia_cliente y esporadico' });
+    }
+    res.json(
+      await service.getAll({
+        soloClienteConMembresia,
+        soloEsporadicos,
+      }),
+    );
   } catch (err) {
     const code = /misma VEH_PLACA/i.test(err.message) ? 400 : 500;
     res.status(code).json({ error: err.message });
