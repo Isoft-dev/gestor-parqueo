@@ -55,14 +55,14 @@ const SECTIONS = {
         fields: [{ k:'REM_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true },{ k:'REM_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },{ k:'REM_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:false,d:false} },
       { key: 'tipo-alerta', label: 'Tipo Alerta', id: 'TAL_ID',
-        fields: [{ k:'TAL_ID',l:'ID',req:true },{ k:'TAL_TIPO',l:'Tipo',req:true },{ k:'TAL_DESCRIPCION',l:'Descripción' }],
-        ops:{c:true,u:true,d:true} },
+        fields: [{ k:'TAL_ID',l:'ID',req:true },{ k:'TAL_TIPO',l:'Tipo de alerta',req:true },{ k:'TAL_DESCRIPCION',l:'Descripción' }],
+        ops:{c:false,u:true,d:false}, updateFields:['TAL_DESCRIPCION'], readOnlyOnUpdate:['TAL_ID','TAL_TIPO'] },
       { key: 'estado-alerta', label: 'Estado Alerta', id: 'EAL_ID',
         fields: [{ k:'EAL_ID',l:'ID',req:true },{ k:'EAL_ESTADO',l:'Estado',req:true },{ k:'EAL_DESCRIPCION',l:'Descripción' }],
-        ops:{c:true,u:false,d:false} },
+        ops:{c:false,u:false,d:false} },
       { key: 'alerta', label: 'Alerta', id: 'ALE_ID',
-        fields: [{ k:'ALE_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID' },{ k:'ALE_MOTIVO',l:'Motivo',req:true },{ k:'ALE_DESCRIPCION',l:'Descripción' },{ k:'ALE_FECHA_HORA_GENERACION',l:'Generación',t:'datetime-local' },{ k:'EAL_ID',l:'EAL_ID',req:true,t:'number' },{ k:'TAL_ID',l:'TAL_ID',req:true,t:'number' },{ k:'ALE_FECHA_ATENCION',l:'Atención',t:'datetime-local' }],
-        ops:{c:true,u:true,d:false}, updateFields:['EAL_ID','ALE_FECHA_ATENCION'] },
+        fields: [{ k:'ALE_ID',l:'ID',req:true },{ k:'MAQ_ID',l:'Máquina',t:'select',catalog:'maquina',valueKey:'MAQ_ID',labelKey:'MAQ_CODIGO' },{ k:'ALE_MOTIVO',l:'Motivo',req:true },{ k:'ALE_DESCRIPCION',l:'Descripción' },{ k:'ALE_FECHA_HORA_GENERACION',l:'Generación',t:'datetime-local' },{ k:'EAL_ID',l:'Estado alerta',req:true,t:'select',catalog:'estado-alerta',valueKey:'EAL_ID',labelKey:'EAL_ESTADO' },{ k:'TAL_ID',l:'TAL_ID',req:true,t:'number' },{ k:'ALE_FECHA_ATENCION',l:'Atención',t:'datetime-local' },{ k:'ALE_USU_ID_RESOLVIO',l:'Persona a cargo',t:'select',catalog:'usuario',valueKey:'USU_ID',labelKey:'USU_PRIMER_NOMBRE' },{ k:'ALE_DESCRIPCION_SOLUCION',l:'Desc. Solución' }],
+        ops:{c:false,u:true,d:false}, updateFields:['EAL_ID','ALE_FECHA_ATENCION','ALE_USU_ID_RESOLVIO','ALE_DESCRIPCION_SOLUCION'], readOnlyOnUpdate:['EAL_ID'] },
     ],
   },
   'pa': {
@@ -281,8 +281,44 @@ function formatCellForPopup(v) {
   return String(v);
 }
 
-/** Abre una ventana de navegador pequeña con todos los campos de la fila (descripción sin truncar). */
-function openAlertaDetailPopup(row) {
+function labelMaquina(row, catalogOptions) {
+  const maqId = row?.MAQ_ID ?? row?.maq_id;
+  if (maqId == null || maqId === '') return '—';
+  const maq = (catalogOptions?.maquina || []).find((m) => String(m.MAQ_ID) === String(maqId));
+  if (!maq) return String(maqId);
+  const tma = (catalogOptions?.['tipo-maquina'] || []).find((t) => String(t.TMA_ID) === String(maq.TMA_ID));
+  let tipo = String(tma?.TMA_TIPO || '').trim();
+  if (!tipo) {
+    const cod = String(maq.MAQ_CODIGO || '').toLowerCase();
+    if (cod.includes('ent')) tipo = 'entrada';
+    else if (cod.includes('cob')) tipo = 'cobro';
+    else if (cod.includes('sal')) tipo = 'salida';
+    else tipo = 'máquina';
+  }
+  const tipoNorm = String(tipo).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  if (!tipoNorm.includes('maquina')) tipo = `Máquina de ${tipo.toLowerCase()}`;
+  return `${tipo} ${maq.MAQ_ID}`;
+}
+
+function labelEstadoAlerta(ealId, catalogOptions) {
+  const e = (catalogOptions?.['estado-alerta'] || []).find((x) => String(x.EAL_ID) === String(ealId));
+  return e?.EAL_ESTADO ? String(e.EAL_ESTADO) : (ealId == null ? '—' : String(ealId));
+}
+
+function labelUsuario(usuId, catalogOptions) {
+  const u = (catalogOptions?.usuario || []).find((x) => String(x.USU_ID) === String(usuId));
+  if (!u) return usuId == null ? '—' : String(usuId);
+  const full = [u.USU_PRIMER_NOMBRE, u.USU_PRIMER_APELLIDO].filter(Boolean).join(' ').trim();
+  return full || String(usuId);
+}
+
+function labelTipoAlerta(talId, catalogOptions) {
+  const tal = (catalogOptions?.['tipo-alerta'] || []).find((x) => String(x.TAL_ID) === String(talId));
+  return tal?.TAL_TIPO ? String(tal.TAL_TIPO) : (talId == null ? '—' : String(talId));
+}
+
+/** Abre una ventana de navegador con detalle enriquecido de alerta. */
+function openAlertaDetailPopup(row, formatValue) {
   const features =
     'width=540,height=440,left=140,top=90,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no';
   const name = `alertaDetalle_${row?.ALE_ID ?? Date.now()}`;
@@ -300,23 +336,30 @@ function openAlertaDetailPopup(row) {
   const title = `Alerta ${row?.ALE_ID ?? ''}`.trim() || 'Detalle de alerta';
   const bodyRows = Object.entries(row)
     .map(([k, v]) => {
-      const display = formatCellForPopup(v);
-      const label = getDbColumnLabel(k, CRUD_COLUMN_LABELS);
+      const display = formatCellForPopup(formatValue ? formatValue(k, v, row) : v);
+      let label = getDbColumnLabel(k, CRUD_COLUMN_LABELS);
+      if (k === 'MAQ_ID') label = 'Máquina';
+      if (k === 'EAL_ID') label = 'Estado alerta';
+      if (k === 'TAL_ID') label = 'Tipo alerta';
+      if (k === 'ALE_USU_ID_RESOLVIO') label = 'Persona a cargo';
       return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(display)}</dd>`;
     })
     .join('');
 
   w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-  body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; padding: 16px 18px; font-size: 14px; line-height: 1.5; color: #0f172a; background: #f8fafc; }
-  h1 { font-size: 1.05rem; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0; }
+  body { font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; padding: 18px 18px; font-size: 14px; line-height: 1.55; color: #0f172a; background: linear-gradient(180deg,#f8fafc,#eef2ff); }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 28px rgba(15,23,42,0.08); }
+  h1 { font-size: 1.08rem; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0; }
   dl { margin: 0; }
-  dt { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin-top: 12px; }
+  dt { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; margin-top: 12px; }
   dt:first-of-type { margin-top: 0; }
-  dd { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; color: #1e293b; }
+  dd { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; color: #0f172a; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; }
 </style></head><body>
+<div class="card">
 <h1>${escapeHtml(title)}</h1>
 <dl>${bodyRows}</dl>
+</div>
 </body></html>`);
   w.document.close();
 }
@@ -329,8 +372,10 @@ function openAlertaDetailPopup(row) {
  * `sectionPath`: ruta del módulo en `/admin` (muestra textos de ayuda acordes a cada lista).
  */
 const emptyBivFilter = { inc: '', resuelto: '', desde: '', hasta: '' };
+const emptyAlertaFilter = { eal: '', tal: '', maq: '' };
 
 export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null, sectionPath = '' }) {
+  const readOnlyFieldStyle = { background: '#e5e7eb', color: '#4b5563', borderColor: '#d1d5db' };
   const [searchParams, setSearchParams] = useSearchParams();
   const filteredEntities = useMemo(
     () => (filterEntityKeys?.length ? collectEntitiesByKeys(filterEntityKeys) : null),
@@ -344,21 +389,32 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   const [form, setForm]        = useState({});
   const [editId, setEditId]    = useState(null);
   const [msg, setMsg]          = useState('');
+  const [editRowSnapshot, setEditRowSnapshot] = useState(null);
   const [machineView, setMachineView] = useState({ maqId: null, title: '', rows: [] });
   const [bivFilter, setBivFilter] = useState(emptyBivFilter);
+  const [alertaFilter, setAlertaFilter] = useState(emptyAlertaFilter);
   /** Modal MEM-2: vehículo sin cliente al crear membresía */
   const [vehClienteModal, setVehClienteModal] = useState(null);
   /** Catálogos para campos `t: 'select'` (clave = segmento API, p. ej. tipo-vehiculo). */
   const [catalogOptions, setCatalogOptions] = useState({});
   const bivQueryKey = searchParams.toString();
+  const formatAlertaDetailValue = (key, value, row) => {
+    if (key === 'MAQ_ID') return labelMaquina({ MAQ_ID: value }, catalogOptions);
+    if (key === 'EAL_ID') return labelEstadoAlerta(value, catalogOptions);
+    if (key === 'ALE_USU_ID_RESOLVIO') return labelUsuario(value, catalogOptions);
+    if (key === 'TAL_ID') return labelTipoAlerta(value, catalogOptions);
+    return value;
+  };
 
   useEffect(() => {
     if (!entity) return;
-    const cats = [
+    const catsBase = [
       ...new Set(
         entity.fields.filter((f) => f.t === 'select' && f.catalog).map((f) => f.catalog),
       ),
     ];
+    const cats =
+      entity.key === 'alerta' ? [...new Set([...catsBase, 'tipo-maquina', 'tipo-alerta'])] : catsBase;
     if (!cats.length) return;
     let cancelled = false;
     (async () => {
@@ -391,6 +447,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       resuelto: r === '0' || r === '1' ? r : '',
       desde: (searchParams.get('biv_desde') || '').slice(0, 10),
       hasta: (searchParams.get('biv_hasta') || '').slice(0, 10),
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
+    if (entity?.key !== 'alerta') return;
+    setAlertaFilter({
+      eal: searchParams.get('eal_id') || '',
+      tal: searchParams.get('tal_id') || '',
+      maq: searchParams.get('maq_id') || '',
     });
   }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
 
@@ -493,12 +558,16 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     setEntity(e);
     setEditId(null);
     setForm(emptyForm(e.fields));
+    setEditRowSnapshot(null);
     setMsg('');
   }
 
   function startEdit(row) {
-    const fields = entity.updateFields
-      ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+    const updateKeys = Array.from(
+      new Set([...(entity.updateFields || []), ...(entity.readOnlyOnUpdate || [])]),
+    );
+    const fields = updateKeys.length
+      ? entity.fields.filter(f => f.k === entity.id || updateKeys.includes(f.k))
       : entity.fields;
     const f = {};
     fields.forEach((fd) => {
@@ -508,10 +577,10 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       else if (fd.t === 'select') f[fd.k] = v != null && v !== '' ? String(v) : '';
       else f[fd.k] = v ?? '';
     });
-    setForm(f); setEditId(row[entity.id]);
+    setForm(f); setEditId(row[entity.id]); setEditRowSnapshot(row);
   }
 
-  function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); }
+  function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); setEditRowSnapshot(null); }
 
   function applyBivFilters(e) {
     e.preventDefault();
@@ -529,6 +598,23 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     ['inc_id', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
     setSearchParams(p, { replace: true });
     setBivFilter(emptyBivFilter);
+  }
+
+  function applyAlertaFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    ['eal_id', 'tal_id', 'maq_id'].forEach((k) => p.delete(k));
+    if (alertaFilter.eal) p.set('eal_id', alertaFilter.eal);
+    if (alertaFilter.tal) p.set('tal_id', alertaFilter.tal);
+    if (alertaFilter.maq) p.set('maq_id', alertaFilter.maq);
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearAlertaFilters() {
+    const p = new URLSearchParams(searchParams);
+    ['eal_id', 'tal_id', 'maq_id'].forEach((k) => p.delete(k));
+    setSearchParams(p, { replace: true });
+    setAlertaFilter(emptyAlertaFilter);
   }
 
   async function showMachineData(maqId, endpoint, title) {
@@ -551,10 +637,26 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     e.preventDefault(); setMsg('');
     const isEdit = editId != null && editId !== '__new__';
     const fieldsToUse =
-      isEdit && entity.updateFields
-        ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+      isEdit && (entity.updateFields || entity.readOnlyOnUpdate)
+        ? (() => {
+            const updateKeys = Array.from(
+              new Set([...(entity.updateFields || []), ...(entity.readOnlyOnUpdate || [])]),
+            );
+            return entity.fields.filter(f => f.k === entity.id || updateKeys.includes(f.k));
+          })()
         : entity.fields.filter(f => !(isEdit && f.createOnly));
     const payload = preparePayload(fieldsToUse, form);
+    if (entity.key === 'alerta' && isEdit) {
+      const hasFechaAtencion = !!payload.ALE_FECHA_ATENCION;
+      if (!hasFechaAtencion) {
+        if (payload.ALE_USU_ID_RESOLVIO != null || String(payload.ALE_DESCRIPCION_SOLUCION || '').trim()) {
+          setMsg('Primero define la fecha de atención para asignar Persona a cargo o Desc. Solución.');
+          return;
+        }
+        payload.ALE_USU_ID_RESOLVIO = null;
+        payload.ALE_DESCRIPCION_SOLUCION = null;
+      }
+    }
     if (!isEdit && entity?.key === 'alerta') delete payload.ALE_ID;
     if (!isEdit && entity?.key === 'ticket') {
       delete payload.TIC_ID;
@@ -694,8 +796,13 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
   const isNewRecord = editId === '__new__';
   const formFields = entity
-    ? !isNewRecord && editId && entity.updateFields
-        ? entity.fields.filter(f => f.k === entity.id || entity.updateFields.includes(f.k))
+    ? !isNewRecord && editId && (entity.updateFields || entity.readOnlyOnUpdate)
+        ? (() => {
+            const updateKeys = Array.from(
+              new Set([...(entity.updateFields || []), ...(entity.readOnlyOnUpdate || [])]),
+            );
+            return entity.fields.filter(f => f.k === entity.id || updateKeys.includes(f.k));
+          })()
         : entity.fields.filter(f => !(editId && !isNewRecord && f.createOnly))
     : [];
 
@@ -768,7 +875,10 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
               </div>
 
               {listContextHint ? (
-                <p className="crudx-context-hint" role="note">
+                <p
+                  className={`crudx-context-hint${['alerta', 'tipo-alerta', 'estado-alerta'].includes(entity.key) ? ' crudx-context-hint--full' : ''}`}
+                  role="note"
+                >
                   {listContextHint}
                 </p>
               ) : null}
@@ -822,6 +932,60 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                     </button>
                   </div>
                 </form>
+              ) : entity.key === 'alerta' ? (
+                <form className="crudx-biv-filters crudx-biv-filters--full" onSubmit={applyAlertaFilters}>
+                  <span className="crudx-biv-filters-title">Filtros de alertas</span>
+                  <label className="crudx-biv-filters-field">
+                    <span>Estado</span>
+                    <select
+                      value={alertaFilter.eal}
+                      onChange={(e) => setAlertaFilter((f) => ({ ...f, eal: e.target.value }))}
+                    >
+                      <option value="">Todos</option>
+                      {(catalogOptions?.['estado-alerta'] || []).map((x) => (
+                        <option key={x.EAL_ID} value={String(x.EAL_ID)}>
+                          {x.EAL_ESTADO}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="crudx-biv-filters-field">
+                    <span>Tipo de alerta</span>
+                    <select
+                      value={alertaFilter.tal}
+                      onChange={(e) => setAlertaFilter((f) => ({ ...f, tal: e.target.value }))}
+                    >
+                      <option value="">Todos</option>
+                      {(catalogOptions?.['tipo-alerta'] || []).map((x) => (
+                        <option key={x.TAL_ID} value={String(x.TAL_ID)}>
+                          {x.TAL_TIPO}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="crudx-biv-filters-field">
+                    <span>Máquina</span>
+                    <select
+                      value={alertaFilter.maq}
+                      onChange={(e) => setAlertaFilter((f) => ({ ...f, maq: e.target.value }))}
+                    >
+                      <option value="">Todas</option>
+                      {(catalogOptions?.maquina || []).map((x) => (
+                        <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
+                          {labelMaquina(x, catalogOptions)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="crudx-biv-filters-actions">
+                    <button type="submit" className="crudx-btn-secondary crudx-btn-xs">
+                      Aplicar filtros
+                    </button>
+                    <button type="button" className="crudx-btn-secondary crudx-btn-xs" onClick={clearAlertaFilters}>
+                      Limpiar
+                    </button>
+                  </div>
+                </form>
               ) : null}
 
               {/* Form */}
@@ -863,6 +1027,17 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                     {visibleFormFields.map((f) => {
                       const fieldId = `crud-${entity.key}-${String(f.k).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
                       const lbl = `${getDbColumnLabel(f.k, CRUD_COLUMN_LABELS)}${f.req ? ' *' : ''}`;
+                      const readOnlyOnUpdate = !isNewRecord && !!entity?.readOnlyOnUpdate?.includes(f.k);
+                      const lockByAlertBusinessRule =
+                        entity?.key === 'alerta' &&
+                        !isNewRecord &&
+                        (f.k === 'ALE_USU_ID_RESOLVIO' || f.k === 'ALE_DESCRIPCION_SOLUCION') &&
+                        !form?.ALE_FECHA_ATENCION;
+                      const fieldDisabled =
+                        (f.k === entity.id && editId !== '__new__') ||
+                        (isNewRecord && f.k === entity?.id) ||
+                        readOnlyOnUpdate ||
+                        lockByAlertBusinessRule;
                       return (
                         <div
                           key={f.k}
@@ -895,10 +1070,8 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                 className="crudx-select"
                                 value={form[f.k] ?? ''}
                                 required={!!f.req && !(isNewRecord && f.k === entity?.id)}
-                                disabled={
-                                  (f.k === entity.id && editId !== '__new__') ||
-                                  (isNewRecord && f.k === entity?.id)
-                                }
+                                disabled={fieldDisabled}
+                                style={fieldDisabled ? readOnlyFieldStyle : undefined}
                                 onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
                                 aria-label={lbl}
                                 title={lbl}
@@ -914,10 +1087,13 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   const val =
                                     row[f.valueKey] != null ? String(row[f.valueKey]) : '';
                                   if (val === '') return null;
-                                  const lab =
-                                    row[f.labelKey] != null
-                                      ? String(row[f.labelKey])
-                                      : val;
+                                  const lab = f.catalog === 'usuario'
+                                    ? [row.USU_PRIMER_NOMBRE, row.USU_PRIMER_APELLIDO].filter(Boolean).join(' ') || val
+                                    : f.catalog === 'maquina'
+                                      ? labelMaquina(row, catalogOptions)
+                                      : row[f.labelKey] != null
+                                        ? String(row[f.labelKey])
+                                        : val;
                                   return (
                                     <option key={`${f.k}-${val}`} value={val}>
                                       {lab}
@@ -947,10 +1123,8 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                     : undefined
                                 }
                                 required={!!f.req && !(isNewRecord && f.k === entity?.id)}
-                                disabled={
-                                  (f.k === entity.id && editId !== '__new__') ||
-                                  (isNewRecord && f.k === entity?.id)
-                                }
+                                disabled={fieldDisabled}
+                                style={fieldDisabled ? readOnlyFieldStyle : undefined}
                                 onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
                                 aria-label={lbl}
                                 title={lbl}
@@ -992,8 +1166,20 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                   <table className="crudx-table">
                     <thead>
                       <tr>
-                        {Object.keys(rows[0]).map((c) => (
-                          <th key={c}>{getDbColumnLabel(c, CRUD_COLUMN_LABELS)}</th>
+                        {Object.keys(rows[0])
+                          .filter((c) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
+                          .map((c) => (
+                          <th key={c}>
+                            {entity?.key === 'alerta' && c === 'EAL_ID'
+                              ? 'Estado alerta'
+                              : entity?.key === 'alerta' && c === 'MAQ_ID'
+                                ? 'Máquina'
+                                : entity?.key === 'alerta' && c === 'TAL_ID'
+                                  ? 'Tipo alerta'
+                                : entity?.key === 'alerta' && c === 'ALE_USU_ID_RESOLVIO'
+                                  ? 'Persona a cargo'
+                                  : getDbColumnLabel(c, CRUD_COLUMN_LABELS)}
+                          </th>
                         ))}
                         {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
                           <th>Acc.</th>
@@ -1003,7 +1189,9 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                     <tbody>
                       {rows.map((row, i) => (
                         <tr key={i}>
-                          {Object.entries(row).map(([c, v]) => {
+                          {Object.entries(row)
+                            .filter(([c]) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
+                            .map(([c, v]) => {
                             if (entity?.key === 'alerta' && c === 'ALE_DESCRIPCION') {
                               const text = v == null ? '—' : String(v);
                               const hasTip = text !== '—' && text.length > 0;
@@ -1016,13 +1204,48 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                     <button
                                       type="button"
                                       className="crudx-btn-secondary crudx-btn-xs"
-                                      onClick={() => openAlertaDetailPopup(row)}
+                                      onClick={() => openAlertaDetailPopup(row, formatAlertaDetailValue)}
                                       aria-label="Abrir detalle completo de la alerta en una ventana pequeña"
                                       title="Ver todos los campos (sin truncar) en ventana pequeña"
                                     >
                                       Detalle
                                     </button>
                                   </div>
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'alerta' && c === 'ALE_MOTIVO') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {labelTipoAlerta(row?.TAL_ID, catalogOptions)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'alerta' && c === 'EAL_ID') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {labelEstadoAlerta(v, catalogOptions)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'alerta' && c === 'MAQ_ID') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {labelMaquina({ MAQ_ID: v }, catalogOptions)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'alerta' && c === 'ALE_USU_ID_RESOLVIO') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {labelUsuario(v, catalogOptions)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'alerta' && c === 'TAL_ID') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {labelTipoAlerta(v, catalogOptions)}
                                 </td>
                               );
                             }
@@ -1043,7 +1266,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   : 'crudx-actions-cell'
                               }
                             >
-                              {entity.ops.u && <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">Editar</button>}
+                              {entity.ops.u && (
+                                <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">
+                                  {entity.key === 'alerta'
+                                    ? (labelEstadoAlerta(row?.EAL_ID, catalogOptions).trim().toLowerCase() === 'atendida'
+                                      ? 'Editar'
+                                      : 'Resolver')
+                                    : 'Editar'}
+                                </button>
+                              )}
                               {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
                               {entity.key === 'ticket' && (
                                 <>

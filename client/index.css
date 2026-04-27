@@ -1553,6 +1553,11 @@ body {
   max-width: 52rem;
 }
 
+.crudx-context-hint--full {
+  width: 100%;
+  max-width: none;
+}
+
 [data-theme='dark'] .crudx-context-hint {
   color: #cbd5e1;
   background: #1e3a5f;
@@ -1570,6 +1575,11 @@ body {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   max-width: 52rem;
+}
+
+.crudx-biv-filters--full {
+  width: 100%;
+  max-width: none;
 }
 
 .crudx-biv-filters-title {

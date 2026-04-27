@@ -353,8 +353,16 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   }, [cobroOnly, entradaOnly, salidaOnly]);
 
   async function enviarAsistencia(motivoExtra) {
-    if (!assistMaqId) {
-      setAssistMsg('Selecciona una máquina para asociar la asistencia.');
+    const maqAsistencia = entradaOnly
+      ? String(vehicleForm.MAQ_ID || '')
+      : salidaOnly
+        ? String(exitMaqId || '')
+        : cobroOnly
+          ? String(maqId || assistMaqId || '')
+          : String(assistMaqId || '');
+
+    if (!maqAsistencia) {
+      setAssistMsg('Selecciona la máquina activa para asociar la asistencia.');
       return;
     }
     setAssistMsg('');
@@ -363,7 +371,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          MAQ_ID: assistMaqId,
+          MAQ_ID: maqAsistencia,
           ALE_MOTIVO: motivoExtra || 'Solicitud de asistencia',
         }),
       });
