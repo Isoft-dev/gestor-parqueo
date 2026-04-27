@@ -1269,6 +1269,12 @@ body {
   border-color: #60a5fa;
 }
 
+.crudx-field select:disabled,
+.crudx-select:disabled,
+.crudx-field input:disabled {
+  cursor: default;
+}
+
 .crudx-form-actions {
   width: 100%;
   display: flex;
@@ -1306,12 +1312,113 @@ body {
 }
 
 /* Búsqueda — registro de pagos membresía */
+/* Bloque de búsqueda tipo registro de pagos (reutilizado en CRUD Ticket) */
+.crudx-ticket-search-block {
+  margin-bottom: 14px;
+}
+
+.crudx-ticket-search-block .admin-panel-head {
+  margin-bottom: 0.75rem;
+}
+
 .admin-search-form {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+/* Fila de búsqueda Ticket: misma altura y baseline que membresía */
+.crudx-ticket-search-form {
+  align-items: center;
+  gap: 12px;
+}
+
+.crudx-ticket-search-form .admin-search-input-wrap {
+  flex: 1 1 200px;
+  max-width: 420px;
+}
+
+.crudx-ticket-search-estado {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  margin: 0;
+  cursor: default;
+}
+
+.crudx-ticket-search-estado-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #64748b);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.crudx-ticket-search-form .admin-search-input,
+.crudx-ticket-search-form .admin-search-select {
+  min-height: 42px;
+  box-sizing: border-box;
+}
+
+.crudx-ticket-search-form .admin-btn-search,
+.crudx-ticket-search-form .admin-btn-search-clear {
+  min-height: 42px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.crudx-ticket-search-form .admin-search-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-search-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font: inherit;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #0f172a);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-search-select:focus {
+  outline: none;
+  border-color: var(--admin-accent, #3b82f6);
+  box-shadow: 0 0 0 3px var(--admin-accent-soft, rgba(59, 130, 246, 0.2));
+}
+
+.admin-search-select:disabled {
+  cursor: default;
+}
+
+/* Select en fila Ticket: ancho por contenido (el genérico usa width: 100%) */
+.crudx-ticket-search-form .admin-search-select {
+  width: auto;
+  min-width: 10.5rem;
+  max-width: 16rem;
+}
+
+/* Misma fila admin: inputs compactos y fechas (bitácora / filtros CRUD) */
+.crudx-ticket-search-form .admin-search-input.crudx-admin-filter-input-compact {
+  width: auto;
+  min-width: 5.5rem;
+  max-width: 9rem;
+}
+
+.crudx-ticket-search-form input.admin-search-input[type='date'] {
+  width: auto;
+  min-width: 10.5rem;
+  max-width: 12rem;
 }
 
 .admin-search-input-wrap {
@@ -1420,6 +1527,12 @@ body {
 
 [data-theme='dark'] .admin-search-input::placeholder {
   color: #94a3b8;
+}
+
+[data-theme='dark'] .admin-search-select {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
 }
 
 [data-theme='dark'] .crudx-form-note,
@@ -1711,14 +1824,10 @@ body {
 .crudx-actions-cell {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
-}
-
-/* Cliente / Usuario: Editar + Desactivar en una sola fila */
-.crudx-actions-cell--inline {
   flex-wrap: nowrap;
   align-items: center;
   white-space: nowrap;
+  min-width: max-content;
 }
 
 .crudx-btn-xs {
