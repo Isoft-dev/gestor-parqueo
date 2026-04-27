@@ -7,7 +7,6 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/admin';
-
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -40,9 +39,17 @@ export default function LoginPage() {
 
   return (
     <>
-      <Link to="/" className="ops-header-auth-link login-page-back">
-        ← Volver al gestor de cabinas
-      </Link>
+      <div className="login-page-back" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Link to="/maquina-entrada" className="ops-header-auth-link">
+          Ir a máquina de entrada
+        </Link>
+        <Link to="/maquina-cobro" className="ops-header-auth-link">
+          Ir a máquina de cobro
+        </Link>
+        <Link to="/maquina-salida" className="ops-header-auth-link">
+          Ir a máquina de salida
+        </Link>
+      </div>
       <div className="admin-page login-page-shell">
         <div className="admin-panel-block login-page-card">
           <h1 className="admin-page-title login-page-title">Iniciar sesión</h1>

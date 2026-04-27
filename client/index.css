@@ -1737,3 +1737,257 @@ body {
   align-items: center;
   margin-bottom: 8px;
 }
+
+/* —— Reporte incidentes (admin /reportes) —— */
+.reporte-inc-card {
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 14px;
+  padding: 1.25rem 1.35rem 1.35rem;
+  background: var(--color-surface, #fff);
+  margin-bottom: 1rem;
+}
+
+.reporte-inc-card__title {
+  font-size: 1.05rem;
+  margin: 0 0 1rem;
+  font-weight: 700;
+  color: var(--color-text, #0f172a);
+}
+
+.reporte-inc-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem 1.25rem;
+}
+
+.reporte-inc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #64748b);
+}
+
+.reporte-inc-field--grow {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.reporte-inc-field--inline {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.reporte-inc-field--inline span {
+  min-width: 10rem;
+}
+
+.reporte-res-kpi .admin-kpi-value {
+  font-size: 2rem;
+}
+
+.reporte-inc-field input,
+.reporte-inc-field select {
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  font-size: 0.9rem;
+  color: var(--color-text, #0f172a);
+  background: var(--color-surface, #fff);
+}
+
+.reporte-inc-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.reporte-inc-empty {
+  padding: 1rem 0;
+  color: var(--color-text-muted, #64748b);
+  font-size: 0.95rem;
+}
+
+.reporte-inc-chart-wrap {
+  margin-top: 1.5rem;
+  padding: 1rem 1rem 0.5rem;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 14px;
+  background: var(--color-surface, #fff);
+}
+
+.reporte-inc-chart-wrap .reporte-chart-svg {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Pastel resolución: tamaño fijo razonable (no estirar a todo el ancho del panel). */
+.reporte-inc-chart-wrap .reporte-chart-svg--pie {
+  width: min(100%, 300px);
+  max-width: 300px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+/* Pastel membresías: mismo ancho que resolución + caja menos alta */
+.reporte-inc-chart-wrap--mem-pie {
+  margin-top: 1rem;
+  padding: 0.6rem 1rem 0.75rem;
+}
+
+.reporte-inc-chart-wrap--mem-pie .reporte-inc-subtitle {
+  margin-bottom: 0.35rem;
+}
+
+.reporte-inc-chart-wrap .reporte-chart-svg--pie-memb {
+  width: min(100%, 280px);
+  max-width: 280px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.reporte-mem-criterio {
+  margin: 0.85rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.reporte-mem-kpi .admin-kpi-value {
+  font-size: clamp(1.35rem, 4vw, 1.85rem);
+}
+
+.reporte-inc-form--mora .reporte-inc-form__actions {
+  margin-top: 0;
+}
+
+.reporte-mora-leyenda {
+  margin: 0.85rem 0 0;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--color-text-muted, #64748b);
+  background: var(--color-surface-muted, #f1f5f9);
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #e2e8f0);
+}
+
+.reporte-mora-table .reporte-mora-row--critico {
+  background: rgba(234, 88, 12, 0.12);
+}
+
+.reporte-mora-table .reporte-mora-row--critico td {
+  border-color: rgba(234, 88, 12, 0.25);
+}
+
+.reporte-mora-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #9a3412;
+  background: #ffedd5;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+/* Barras por tipo: no ocupar todo el ancho del panel; escala razonable. */
+.reporte-inc-chart-wrap .reporte-chart-svg--bar {
+  width: min(100%, 560px);
+  max-width: 560px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.reporte-inc-subtitle {
+  font-size: 0.95rem;
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+  color: var(--color-text, #0f172a);
+}
+
+.reporte-inc-table-wrap {
+  margin-top: 1.5rem;
+}
+
+.reporte-inc-table .reporte-inc-desc {
+  max-width: 280px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.reporte-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.reporte-tab-btn {
+  padding: 0.45rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #0f172a);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reporte-tab-btn:hover {
+  border-color: #93c5fd;
+}
+
+.reporte-tab-btn--active {
+  border-color: #2563eb;
+  background: linear-gradient(145deg, #eff6ff, #dbeafe);
+  color: #1e3a8a;
+}
+
+.reporte-tipo-destacado {
+  margin-top: 1.25rem;
+  padding: 1rem 1.15rem;
+  border-radius: 12px;
+  border: 2px solid #fdba74;
+  background: linear-gradient(135deg, #fff7ed, #ffedd5);
+  color: #9a3412;
+  font-size: 0.95rem;
+}
+
+.reporte-tipo-destacado__nombre {
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+
+.reporte-tipo-destacado__meta {
+  font-weight: 500;
+  opacity: 0.95;
+}
+
+[data-theme='dark'] .reporte-tipo-destacado {
+  border-color: #ea580c;
+  background: linear-gradient(135deg, #431407, #7c2d12);
+  color: #ffedd5;
+}
+
+.reporte-inc-table__row--max {
+  background: rgba(251, 146, 60, 0.12);
+}
+
+.reporte-inc-badge-max {
+  margin-left: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #c2410c;
+  white-space: nowrap;
+}

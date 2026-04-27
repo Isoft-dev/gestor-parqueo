@@ -51,13 +51,23 @@ function extractTicketCodeFromPdfText(text) {
 
 function extractMemCodeFromPdfText(text) {
   const normalized = String(text || '').replace(/\s+/g, ' ');
-  const explicit =
-    normalized.match(/MEM[_\s-]*CODIGO[^A-Z0-9]*([A-Z0-9-]{6,40})/i) ||
-    normalized.match(/CODIGO[^A-Z0-9]*([A-Z0-9-]{6,40})/i) ||
-    normalized.match(/TAG[^A-Z0-9]*([A-Z0-9-]{6,40})/i);
-  if (explicit?.[1]) return explicit[1].trim().toUpperCase();
-  const generic = normalized.match(/\b\d{6}[A-Z0-9]{1,25}\b/);
-  return generic?.[0]?.trim().toUpperCase() || '';
+  // El MEM_CODIGO generado por backend es numérico (DDMMYY + MEM_ID).
+  // Priorizamos capturas estrictas para evitar arrastrar palabras como CLIENTE/PLACA.
+  const explicitNumeric =
+    normalized.match(/MEM[_\s-]*CODIGO[^0-9]*([0-9]{6,25})(?=\s|$)/i) ||
+    normalized.match(/CODIGO[^0-9]*([0-9]{6,25})(?=\s|$)/i) ||
+    normalized.match(/TAG[^0-9]*([0-9]{6,25})(?=\s|$)/i);
+  if (explicitNumeric?.[1]) return explicitNumeric[1].trim();
+
+  // Compatibilidad por si existiera formato alfanumérico en datos históricos.
+  const explicitAlpha =
+    normalized.match(/MEM[_\s-]*CODIGO[^A-Z0-9]*([A-Z0-9-]{6,40})(?=\s|$)/i) ||
+    normalized.match(/CODIGO[^A-Z0-9]*([A-Z0-9-]{6,40})(?=\s|$)/i) ||
+    normalized.match(/TAG[^A-Z0-9]*([A-Z0-9-]{6,40})(?=\s|$)/i);
+  if (explicitAlpha?.[1]) return explicitAlpha[1].trim().toUpperCase();
+
+  const generic = normalized.match(/\b[0-9]{6,25}\b/);
+  return generic?.[0]?.trim() || '';
 }
 
 function randomFrom(arr) {
@@ -90,7 +100,7 @@ function generateVehicleData() {
   };
 }
 
-export default function TicketLoaderPage({ embeddedInAdmin = false }) {
+export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = false, entradaOnly = false, salidaOnly = false }) {
   const { user, logout } = useAuth();
   const fileRef = useRef(null);
   const tagFileRef = useRef(null);
@@ -101,7 +111,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   const [quote, setQuote] = useState(null);
   const [tipoVehiculo, setTipoVehiculo] = useState([]);
   const [tiposCobro, setTiposCobro] = useState([]);
+  const [tiposMaquina, setTiposMaquina] = useState([]);
   const [maquinas, setMaquinas] = useState([]);
+  const [maquinasCobro, setMaquinasCobro] = useState([]);
+  const [maquinasEntrada, setMaquinasEntrada] = useState([]);
+  const [maquinasSalida, setMaquinasSalida] = useState([]);
   const [showGenerateForm, setShowGenerateForm] = useState(false);
   const [entryTicketDone, setEntryTicketDone] = useState(null);
   const [vehicleForm, setVehicleForm] = useState({
@@ -124,8 +138,20 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [espacioResumen, setEspacioResumen] = useState(null);
   const [assistMaqId, setAssistMaqId] = useState('');
+  const [defaultCobroMaqId, setDefaultCobroMaqId] = useState('');
+  const [defaultEntradaMaqId, setDefaultEntradaMaqId] = useState('');
+  const [defaultSalidaMaqId, setDefaultSalidaMaqId] = useState('');
+  const [entradaAutoMaqIndex, setEntradaAutoMaqIndex] = useState(0);
   const [billetes, setBilletes] = useState({ 5: 0, 10: 0, 20: 0, 50: 0 });
+  const [cardSim, setCardSim] = useState({
+    numero: '',
+    nombre: '',
+    exp: '',
+    cvv: '',
+  });
   const [assistMsg, setAssistMsg] = useState('');
+  const onlyKiosk = cobroOnly || entradaOnly || salidaOnly;
+  const [denominacionesDisponibles, setDenominacionesDisponibles] = useState([5, 10, 20, 50]);
   const montoTotalCalculado = Number(quote?.montoTotal || 0);
   const horasCalculadas = Number(
     quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
@@ -136,8 +162,18 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       ? Number((montoRecibidoNum - montoTotalCalculado).toFixed(2))
       : 0;
 
-  const sumaBilletes =
-    billetes[5] * 5 + billetes[10] * 10 + billetes[20] * 20 + billetes[50] * 50;
+  const sumaBilletes = denominacionesDisponibles.reduce(
+    (acc, d) => acc + Number(billetes[d] || 0) * Number(d),
+    0,
+  );
+  const tipoCobroSeleccionado = tiposCobro.find((t) => String(t?.TCO_ID) === String(tcoId));
+  const hasTipoCobroSeleccionado = String(tcoId || '').trim().length > 0;
+  const isCardPaymentSelected = /tarjeta|card|credito|cr[eé]dito|debito|d[eé]bito/i.test(
+    String(tipoCobroSeleccionado?.TCO_TIPO || ''),
+  );
+  const isCashPaymentSelected = /efectivo|cash/i.test(
+    String(tipoCobroSeleccionado?.TCO_TIPO || ''),
+  );
 
   /** Solo dígitos y un punto decimal; nunca negativos (evita que `min` del input sea insuficiente). */
   function onMontoRecibidoChange(raw) {
@@ -146,6 +182,38 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
     const i = v.indexOf('.');
     if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '');
     setMontoRecibido(v);
+  }
+
+  function isTipoMaquinaCobro(tipo) {
+    const t = String(tipo || '').toLowerCase();
+    return t.includes('cobro') || t.includes('caja') || t.includes('pago');
+  }
+
+  function isTipoMaquinaEntrada(tipo) {
+    const t = String(tipo || '').toLowerCase();
+    return t.includes('entrada') || t.includes('ingreso');
+  }
+
+  function isTipoMaquinaSalida(tipo) {
+    const t = String(tipo || '').toLowerCase();
+    return t.includes('salida') || t.includes('egreso');
+  }
+
+  function machineLabel(m) {
+    const tipoRaw = tiposMaquina.find((t) => String(t?.TMA_ID) === String(m?.TMA_ID))?.TMA_TIPO;
+    let base = String(tipoRaw || '').trim();
+    if (!base) return `Máquina (${m?.MAQ_ID ?? '?'})`;
+    if (!/maquina/i.test(base)) base = `Máquina de ${base.toLowerCase()}`;
+    return `${base} (${m?.MAQ_ID ?? '?'})`;
+  }
+
+  function resetCardSimulator() {
+    setCardSim({
+      numero: '',
+      nombre: '',
+      exp: '',
+      cvv: '',
+    });
   }
 
   useEffect(() => {
@@ -171,34 +239,118 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
     (async () => {
       setCatalogLoading(true);
       try {
-        const [rTve, rCobro, rMaq] = await Promise.all([
+        const [rTve, rCobro, rMaq, rSdi, rTma] = await Promise.all([
           fetch(`${API_BASE}/tipo-vehiculo`),
           fetch(`${API_BASE}/tipo-cobro`),
           fetch(`${API_BASE}/maquina`),
+          fetch(`${API_BASE}/saldo-disponible`),
+          fetch(`${API_BASE}/tipo-maquina`),
         ]);
-        const [dTve, dCobro, dMaq] = await Promise.all([
+        const [dTve, dCobro, dMaq, dSdi, dTma] = await Promise.all([
           rTve.json(),
           rCobro.json(),
           rMaq.json(),
+          rSdi.json(),
+          rTma.json(),
         ]);
         if (!rTve.ok) throw new Error(dTve.error || rTve.statusText);
         if (!rCobro.ok) throw new Error(dCobro.error || rCobro.statusText);
         if (!rMaq.ok) throw new Error(dMaq.error || rMaq.statusText);
+        if (!rSdi.ok) throw new Error(dSdi.error || rSdi.statusText);
+        if (!rTma.ok) throw new Error(dTma.error || rTma.statusText);
         setTipoVehiculo(Array.isArray(dTve) ? dTve : []);
         setTiposCobro(Array.isArray(dCobro) ? dCobro : []);
-        setMaquinas(Array.isArray(dMaq) ? dMaq : []);
-        if (Array.isArray(dMaq) && dMaq[0]?.MAQ_ID != null) {
-          setAssistMaqId((prev) => prev || String(dMaq[0].MAQ_ID));
+        setTiposMaquina(Array.isArray(dTma) ? dTma : []);
+        const maqList = Array.isArray(dMaq) ? dMaq : [];
+        setMaquinas(maqList);
+
+        const tipoById = new Map(
+          (Array.isArray(dTma) ? dTma : []).map((t) => [String(t.TMA_ID), t]),
+        );
+        const cobroMaq = maqList.find((m) => {
+          const tipo = tipoById.get(String(m.TMA_ID));
+          return isTipoMaquinaCobro(tipo?.TMA_TIPO);
+        });
+        const cobroList = maqList.filter((m) => {
+          const tipo = tipoById.get(String(m.TMA_ID));
+          return isTipoMaquinaCobro(tipo?.TMA_TIPO);
+        });
+        setMaquinasCobro(cobroList);
+        const fallbackByCode = maqList.find((m) =>
+          String(m.MAQ_CODIGO || '').toLowerCase().includes('cob'),
+        );
+        const pickedCobroMaqId = String(
+          cobroMaq?.MAQ_ID ?? fallbackByCode?.MAQ_ID ?? maqList[0]?.MAQ_ID ?? '',
+        );
+        setDefaultCobroMaqId(pickedCobroMaqId);
+
+        const entradaMaq = maqList.find((m) => {
+          const tipo = tipoById.get(String(m.TMA_ID));
+          return isTipoMaquinaEntrada(tipo?.TMA_TIPO);
+        });
+        const entradaList = maqList.filter((m) => {
+          const tipo = tipoById.get(String(m.TMA_ID));
+          return isTipoMaquinaEntrada(tipo?.TMA_TIPO);
+        });
+        setMaquinasEntrada(entradaList);
+        const entradaByCode = maqList.find((m) =>
+          String(m.MAQ_CODIGO || '').toLowerCase().includes('ent'),
+        );
+        const pickedEntradaMaqId = String(
+          entradaMaq?.MAQ_ID ?? entradaByCode?.MAQ_ID ?? maqList[0]?.MAQ_ID ?? '',
+        );
+        setDefaultEntradaMaqId(pickedEntradaMaqId);
+        const salidaMaq = maqList.find((m) => {
+          const tipo = tipoById.get(String(m.TMA_ID));
+          return isTipoMaquinaSalida(tipo?.TMA_TIPO);
+        });
+        const salidaList = maqList.filter((m) => {
+          const tipo = tipoById.get(String(m.TMA_ID));
+          return isTipoMaquinaSalida(tipo?.TMA_TIPO);
+        });
+        setMaquinasSalida(salidaList);
+        const salidaByCode = maqList.find((m) =>
+          String(m.MAQ_CODIGO || '').toLowerCase().includes('sal'),
+        );
+        const pickedSalidaMaqId = String(
+          salidaMaq?.MAQ_ID ?? salidaByCode?.MAQ_ID ?? maqList[0]?.MAQ_ID ?? '',
+        );
+        setDefaultSalidaMaqId(pickedSalidaMaqId);
+        const fromCatalog = (Array.isArray(dSdi) ? dSdi : [])
+          .map((row) => Number(row?.SDI_VALOR))
+          .filter((v) => [5, 10, 20, 50].includes(v))
+          .sort((a, b) => a - b);
+        setDenominacionesDisponibles(fromCatalog.length ? fromCatalog : [5, 10, 20, 50]);
+        if (pickedCobroMaqId || pickedEntradaMaqId || pickedSalidaMaqId) {
+          const defaultAssist = cobroOnly
+            ? pickedCobroMaqId
+            : (entradaOnly ? pickedEntradaMaqId : (salidaOnly ? pickedSalidaMaqId : pickedCobroMaqId));
+          setAssistMaqId((prev) => prev || defaultAssist);
+          if (cobroOnly) setMaqId(pickedCobroMaqId);
+          if (entradaOnly) {
+            setVehicleForm((prev) => ({ ...prev, MAQ_ID: pickedEntradaMaqId }));
+          }
+          if (salidaOnly) {
+            setExitMaqId((prev) => prev || pickedSalidaMaqId);
+          }
         }
       } catch {
         setTipoVehiculo([]);
         setTiposCobro([]);
+        setTiposMaquina([]);
         setMaquinas([]);
+        setMaquinasCobro([]);
+        setMaquinasEntrada([]);
+        setMaquinasSalida([]);
+        setDenominacionesDisponibles([5, 10, 20, 50]);
+        setDefaultCobroMaqId('');
+        setDefaultEntradaMaqId('');
+        setDefaultSalidaMaqId('');
       } finally {
         setCatalogLoading(false);
       }
     })();
-  }, []);
+  }, [cobroOnly, entradaOnly, salidaOnly]);
 
   async function enviarAsistencia(motivoExtra) {
     if (!assistMaqId) {
@@ -230,13 +382,19 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
   function applyAutocompletado() {
     const generated = generateVehicleData();
     const defaultTve = String(tipoVehiculo?.[0]?.TVE_ID ?? '');
-    const defaultMaq = String(maquinas?.[0]?.MAQ_ID ?? '');
+    const poolEntrada = maquinasEntrada.length > 0 ? maquinasEntrada : maquinas;
+    let selectedMaqId = String(defaultEntradaMaqId || (poolEntrada?.[0]?.MAQ_ID ?? ''));
+    if (entradaOnly && poolEntrada.length > 0) {
+      const idx = entradaAutoMaqIndex % poolEntrada.length;
+      selectedMaqId = String(poolEntrada[idx]?.MAQ_ID ?? selectedMaqId);
+      setEntradaAutoMaqIndex((prev) => prev + 1);
+    }
     setVehicleForm({
       VEH_PLACA: generated.VEH_PLACA,
       VEH_MODELO: generated.VEH_MODELO,
       VEH_COLOR: generated.VEH_COLOR,
       TVE_ID: defaultTve,
-      MAQ_ID: defaultMaq,
+      MAQ_ID: selectedMaqId,
     });
   }
 
@@ -460,14 +618,50 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       setMsg('Primero debes cargar un ticket válido.');
       return;
     }
-    const recibido = Number(montoRecibido);
-    if (!montoRecibido.trim() || !Number.isFinite(recibido) || recibido < 0) {
-      setMsg('El monto recibido debe ser un número mayor o igual a cero.');
-      return;
-    }
-    if (recibido < montoTotalCalculado) {
-      setMsg('El efectivo ingresado debe ser mayor o igual al monto total.');
-      return;
+    const recibido = isCardPaymentSelected ? Number(montoTotalCalculado) : Number(montoRecibido);
+    if (!isCardPaymentSelected) {
+      if (!montoRecibido.trim() || !Number.isFinite(recibido) || recibido < 0) {
+        setMsg('El monto recibido debe ser un número mayor o igual a cero.');
+        return;
+      }
+      if (recibido < montoTotalCalculado) {
+        setMsg('El efectivo ingresado debe ser mayor o igual al monto total.');
+        return;
+      }
+    } else {
+      const numero = String(cardSim.numero || '').replace(/\D/g, '');
+      if (!numero) {
+        setMsg('Ingresa el número de tarjeta.');
+        return;
+      }
+      if (numero.length !== 16) {
+        setMsg('El número de tarjeta debe tener 16 dígitos.');
+        return;
+      }
+      if (!String(cardSim.nombre || '').trim()) {
+        setMsg('Ingresa el nombre del titular de la tarjeta.');
+        return;
+      }
+      const expRaw = String(cardSim.exp || '');
+      const expMatch = expRaw.match(/^(0[1-9]|1[0-2])\/(\d{2})$/);
+      if (!expMatch) {
+        setMsg('La fecha de vencimiento debe tener formato MM/AA válido.');
+        return;
+      }
+      const expMonth = Number(expMatch[1]);
+      const expYear = 2000 + Number(expMatch[2]);
+      const now = new Date();
+      const nowMonth = now.getMonth() + 1;
+      const nowYear = now.getFullYear();
+      if (expYear < nowYear || (expYear === nowYear && expMonth < nowMonth)) {
+        setMsg('La tarjeta está vencida.');
+        return;
+      }
+      const cvv = String(cardSim.cvv || '').replace(/\D/g, '');
+      if (cvv.length !== 3) {
+        setMsg('El CVV debe tener exactamente.');
+        return;
+      }
     }
     setLoading(true);
     setMsg('');
@@ -480,7 +674,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         USE_CF: cf,
         COB_MONTO_RECIBIDO: recibido,
       };
-      const tieneBilletes = Object.values(billetes).some((n) => n > 0);
+      const tieneBilletes = !isCardPaymentSelected && Object.values(billetes).some((n) => n > 0);
       if (tieneBilletes) {
         payload.BILLETES_INGRESO = { ...billetes };
       }
@@ -497,9 +691,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       setNit('');
       setCf(false);
       setTcoId('');
-      setMaqId('');
+      setMaqId(cobroOnly ? String(defaultCobroMaqId || '') : '');
       setMontoRecibido('');
       setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+      resetCardSimulator();
     } catch (err) {
       setMsg(`Error: ${String(err?.message || err)}`);
     } finally {
@@ -512,7 +707,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
     setCheckoutDone(null);
     setMsg('');
     setTcoId('');
-    setMaqId('');
+    setMaqId(cobroOnly ? String(defaultCobroMaqId || '') : '');
     setNit('');
     setCf(false);
     setMontoRecibido('');
@@ -521,8 +716,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
     setTagExitValidationDone(null);
     setExitValidationDone(null);
     setExitMaqId('');
-    setShowGenerateForm(false);
+    setShowGenerateForm(entradaOnly);
     setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+    resetCardSimulator();
   }
 
   function downloadReceiptAndReset() {
@@ -537,25 +733,52 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       style={{ maxWidth: embeddedInAdmin ? '100%' : 1040, margin: '12px auto', padding: 16 }}
     >
       <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
-        <h1 className="admin-page-title">{embeddedInAdmin ? 'Operación en cabina' : 'Consulta de ticket'}</h1>
-        {!embeddedInAdmin ? (
-          user ? (
-            <button
-              type="button"
-              className="ops-header-auth-btn"
-              onClick={() => logout()}
-            >
-              Cerrar sesión
-            </button>
-          ) : (
-            <Link to="/login" className="ops-header-auth-link">
-              Ir al panel de admin
+        <h1 className="admin-page-title">
+          {embeddedInAdmin
+            ? 'Operación en cabina'
+            : cobroOnly
+              ? 'Máquina de cobro'
+              : entradaOnly
+                ? 'Máquina de entrada'
+              : salidaOnly
+                ? 'Máquina de salida'
+              : 'Consulta de ticket'}
+        </h1>
+        {!embeddedInAdmin && !onlyKiosk ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Link to="/maquina-entrada" className="ops-header-auth-link">
+              Ir a máquina de entrada
             </Link>
-          )
+            <Link to="/maquina-cobro" className="ops-header-auth-link">
+              Ir a máquina de cobro
+            </Link>
+            <Link to="/maquina-salida" className="ops-header-auth-link">
+              Ir a máquina de salida
+            </Link>
+            {user ? (
+              <button
+                type="button"
+                className="ops-header-auth-btn"
+                onClick={() => logout()}
+              >
+                Cerrar sesión
+              </button>
+            ) : (
+              <Link to="/login" className="ops-header-auth-link">
+                Ir al panel de admin
+              </Link>
+            )}
+          </div>
         ) : null}
       </header>
       <p className="admin-page-desc">
-        Puedes generar ticket de entrada o cargar ticket para continuar con el cobro.
+        {cobroOnly
+          ? 'Flujo de pago: carga ticket, selecciona tipo de cobro, ingresa NIT o CF, registra efectivo y confirma.'
+          : entradaOnly
+            ? 'Flujo de entrada: genera ticket para cliente esporádico o valida tag para cliente mensual.'
+            : salidaOnly
+              ? 'Flujo de salida: valida tag de cliente mensual o verifica ticket pagado de cliente esporádico.'
+          : 'Puedes generar ticket de entrada o cargar ticket para continuar con el cobro.'}
       </p>
       {espacioResumen ? (
         <div
@@ -574,19 +797,21 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       ) : null}
       <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span>
-        <select
-          value={assistMaqId}
-          onChange={(e) => setAssistMaqId(e.target.value)}
-          style={{ padding: '6px 10px', minWidth: 200 }}
-        >
-          <option value="">—</option>
-          {maquinas.map((m) => (
-            <option key={m.MAQ_ID} value={m.MAQ_ID}>
-              {m.MAQ_CODIGO || `MAQ ${m.MAQ_ID}`}
-            </option>
-          ))}
-        </select>
+        {!onlyKiosk ? <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span> : null}
+        {!onlyKiosk ? (
+          <select
+            value={assistMaqId}
+            onChange={(e) => setAssistMaqId(e.target.value)}
+            style={{ padding: '6px 10px', minWidth: 200 }}
+          >
+            <option value="">—</option>
+            {maquinas.map((m) => (
+              <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                {machineLabel(m)}
+              </option>
+            ))}
+          </select>
+        ) : null}
         {assistMsg ? <span style={{ fontSize: 13, color: '#065f46' }}>{assistMsg}</span> : null}
       </div>
       {catalogLoading ? (
@@ -596,7 +821,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       ) : null}
 
-      <section className="admin-panel-block ops-panel-block">
+      {!cobroOnly && !salidaOnly ? <section className="admin-panel-block ops-panel-block">
         <div className="admin-panel-head">
           <h2>Cliente mensual (Tag)</h2>
           <p className="admin-panel-sub">Sección exclusiva para validar tag de membresía.</p>
@@ -614,9 +839,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         <button type="button" className="admin-btn-primary" onClick={() => tagFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Validar Tag
         </button>
-      </section>
+      </section> : null}
 
-      <section className="admin-panel-block ops-panel-block">
+      {!cobroOnly && !entradaOnly ? <section className="admin-panel-block ops-panel-block">
         <div className="admin-panel-head">
           <h2>Salida cliente mensual</h2>
           <p className="admin-panel-sub">Carga el tag para cerrar un ingreso activo asociado a la membresía.</p>
@@ -634,11 +859,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         <button type="button" className="admin-btn-primary" onClick={() => tagSalidaFileRef.current?.click()} disabled={loading || catalogLoading} style={{ marginTop: 10 }}>
           Cargar Tag
         </button>
-      </section>
+      </section> : null}
 
-      <section className="admin-panel-block ops-panel-block">
+      {!cobroOnly && !entradaOnly ? <section className="admin-panel-block ops-panel-block">
         <div className="admin-panel-head">
-          <h2>Salida cliente esporádico</h2>
+          <h2>{salidaOnly ? 'Verificación de ticket pagado' : 'Salida cliente esporádico'}</h2>
           <p className="admin-panel-sub">
             Carga el ticket para verificar estado de pago y tiempo de gracia post-pago.
           </p>
@@ -660,9 +885,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
             style={{ padding: '8px 10px', minWidth: 250 }}
           >
             <option value="">Selecciona máquina de salida</option>
-            {maquinas.map((m) => (
+            {(maquinasSalida.length ? maquinasSalida : maquinas).map((m) => (
               <option key={m.MAQ_ID} value={m.MAQ_ID}>
-                {m.MAQ_CODIGO || `MAQ ${m.MAQ_ID}`} (ID {m.MAQ_ID})
+                {machineLabel(m)}
               </option>
             ))}
           </select>
@@ -675,26 +900,30 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
             Cargar Ticket
           </button>
         </div>
-      </section>
+      </section> : null}
 
       <div className="ops-main-ticket-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="admin-btn-primary"
-          onClick={() => { setShowGenerateForm((v) => !v); setMsg(''); }}
-          disabled={loading || catalogLoading || espacioResumen?.parqueoLleno}
-        >
-          Generar Ticket
-        </button>
-        <button
-          type="button"
-          className="admin-btn-ghost"
-          onClick={() => fileRef.current?.click()}
-          disabled={loading || catalogLoading}
-          title="Selecciona el PDF del ticket para cotizar y completar el pago en el detalle de cobro."
-        >
-          Pagar ticket
-        </button>
+        {!cobroOnly && !entradaOnly && !salidaOnly ? (
+          <button
+            type="button"
+            className="admin-btn-primary"
+            onClick={() => { setShowGenerateForm((v) => !v); setMsg(''); }}
+            disabled={loading || catalogLoading || espacioResumen?.parqueoLleno}
+          >
+            Generar Ticket
+          </button>
+        ) : null}
+        {!entradaOnly && !salidaOnly ? (
+          <button
+            type="button"
+            className={cobroOnly ? 'admin-btn-primary' : 'admin-btn-ghost'}
+            onClick={() => fileRef.current?.click()}
+            disabled={loading || catalogLoading}
+            title="Selecciona el PDF del ticket para cotizar y completar el pago en el detalle de cobro."
+          >
+            {cobroOnly ? '1) Cargar ticket' : 'Pagar ticket'}
+          </button>
+        ) : null}
       </div>
 
       <input
@@ -715,9 +944,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       ) : null}
 
-      {showGenerateForm && (
+      {!cobroOnly && !salidaOnly && (showGenerateForm || entradaOnly) && (
         <div style={{ marginTop: 14, border: '1px solid #ddd', borderRadius: 8, padding: 14 }}>
-          <h2 style={{ marginTop: 0, fontSize: 20 }}>Generar ticket de entrada</h2>
+          <h2 style={{ marginTop: 0, fontSize: 20 }}>
+            {entradaOnly ? 'Generación de ticket' : 'Generar ticket de entrada'}
+          </h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input
               type="text"
@@ -748,29 +979,44 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
               <option value="">Selecciona tipo de vehículo</option>
               {tipoVehiculo.map((t) => (
                 <option key={t.TVE_ID} value={t.TVE_ID}>
-                  {t.TVE_TIPO || `Tipo ${t.TVE_ID}`} (ID {t.TVE_ID})
+                  {t.TVE_TIPO || `Tipo ${t.TVE_ID}`} ({t.TVE_ID})
                 </option>
               ))}
             </select>
-            <select
-              value={vehicleForm.MAQ_ID}
-              onChange={(e) => setVehicleForm((p) => ({ ...p, MAQ_ID: e.target.value }))}
-              style={{ padding: '8px 10px', minWidth: 220 }}
-            >
-              <option value="">Selecciona máquina de entrada</option>
-              {maquinas.map((m) => (
-                <option key={m.MAQ_ID} value={m.MAQ_ID}>
-                  {m.MAQ_CODIGO || `MAQ ${m.MAQ_ID}`} (ID {m.MAQ_ID})
-                </option>
-              ))}
-            </select>
+            {!entradaOnly ? (
+              <select
+                value={vehicleForm.MAQ_ID}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, MAQ_ID: e.target.value }))}
+                style={{ padding: '8px 10px', minWidth: 220 }}
+              >
+                <option value="">Selecciona máquina de entrada</option>
+                {maquinas.map((m) => (
+                  <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                    {machineLabel(m)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <select
+                value={vehicleForm.MAQ_ID}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, MAQ_ID: e.target.value }))}
+                style={{ padding: '8px 10px', minWidth: 260 }}
+              >
+                <option value="">Selecciona máquina de entrada</option>
+                {(maquinasEntrada.length ? maquinasEntrada : maquinas).map((m) => (
+                  <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                    {machineLabel(m)}
+                  </option>
+                ))}
+              </select>
+            )}
             <button type="button" onClick={applyAutocompletado} disabled={loading}>Autocompletado</button>
             <button type="button" onClick={submitGenerateTicket} disabled={loading}>Confirmar</button>
           </div>
         </div>
       )}
 
-      {entryTicketDone && (
+      {!cobroOnly && !salidaOnly && entryTicketDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Ticket generado</strong>
           <p style={{ margin: '6px 0' }}>Ticket: {entryTicketDone.TIC_CODIGO}</p>
@@ -785,7 +1031,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       )}
 
-      {tagValidationDone && (
+      {!cobroOnly && !salidaOnly && tagValidationDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Acceso concedido</strong>
           <p style={{ margin: '6px 0' }}>Membresía: {tagValidationDone.MEM_ID}</p>
@@ -794,7 +1040,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       )}
 
-      {tagExitValidationDone && (
+      {!cobroOnly && !entradaOnly && tagExitValidationDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Salida mensual registrada</strong>
           <p style={{ margin: '6px 0' }}>Membresía: {tagExitValidationDone.MEM_ID}</p>
@@ -806,7 +1052,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
         </div>
       )}
 
-      {exitValidationDone && (
+      {!cobroOnly && !entradaOnly && exitValidationDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Salida autorizada</strong>
           <p style={{ margin: '6px 0' }}>Ticket: {exitValidationDone.TIC_CODIGO}</p>
@@ -818,6 +1064,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
       {quote && (
         <div style={{ marginTop: 14, border: '1px solid #ddd', borderRadius: 8, padding: 14 }}>
           <h2 style={{ marginTop: 0, fontSize: 20 }}>Detalle de pago</h2>
+          {cobroOnly ? (
+            <p style={{ margin: '6px 0', fontSize: 13, color: '#4b5563' }}>
+              2) Selecciona tipo de cobro, 3) ingresa NIT o CF, 4) registra efectivo, 5) confirma pago.
+            </p>
+          ) : null}
           <p style={{ margin: '6px 0' }}>
             <strong>Ticket:</strong> {quote.ticket?.TIC_CODIGO} ({quote.ticket?.TIC_ID})
           </p>
@@ -848,24 +1099,41 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
             </p>
           ) : null}
           <hr />
-          <h3 style={{ marginBottom: 8 }}>Facturación (campos automáticos y manuales)</h3>
+          <h3 style={{ marginBottom: 8 }}>
+            {cobroOnly ? 'Pasos de cobro' : 'Facturación (campos automáticos y manuales)'}
+          </h3>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={tcoId} onChange={(e) => setTcoId(e.target.value)} style={{ padding: '8px 10px', minWidth: 260 }}>
               <option value="">Selecciona tipo de cobro</option>
               {tiposCobro.map((t) => (
                 <option key={t.TCO_ID} value={t.TCO_ID}>
-                  {t.TCO_TIPO} (ID {t.TCO_ID})
+                  {t.TCO_TIPO} ({t.TCO_ID})
                 </option>
               ))}
             </select>
-            <select value={maqId} onChange={(e) => setMaqId(e.target.value)} style={{ padding: '8px 10px', minWidth: 220 }}>
-              <option value="">Selecciona máquina de cobro</option>
-              {maquinas.map((m) => (
-                <option key={m.MAQ_ID} value={m.MAQ_ID}>
-                  {m.MAQ_CODIGO || `MAQ ${m.MAQ_ID}`} (ID {m.MAQ_ID})
-                </option>
-              ))}
-            </select>
+            {!cobroOnly ? (
+              <select value={maqId} onChange={(e) => setMaqId(e.target.value)} style={{ padding: '8px 10px', minWidth: 220 }}>
+                <option value="">Selecciona máquina de cobro</option>
+                {maquinas.map((m) => (
+                  <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                    {machineLabel(m)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <select
+                value={maqId}
+                onChange={(e) => setMaqId(e.target.value)}
+                style={{ padding: '8px 10px', minWidth: 260 }}
+              >
+                <option value="">Selecciona máquina de cobro</option>
+                {(maquinasCobro.length ? maquinasCobro : maquinas).map((m) => (
+                  <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                    {machineLabel(m)}
+                  </option>
+                ))}
+              </select>
+            )}
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
@@ -902,60 +1170,154 @@ export default function TicketLoaderPage({ embeddedInAdmin = false }) {
               style={{ padding: '8px 10px', minWidth: 150, background: '#f3f4f6' }}
               title="Monto total calculado automáticamente"
             />
-            <div style={{ width: '100%', marginTop: 8 }}>
-              <span style={{ fontWeight: 600 }}>Simulación de billetes (Q5, Q10, Q20, Q50)</span>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                {[5, 10, 20, 50].map((d) => (
-                  <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) + 1) }))
-                      }
-                    >
-                      +Q{d}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) - 1) }))
-                      }
-                    >
-                      −
-                    </button>
-                    <small>
-                      {d}: {billetes[d] || 0}
-                    </small>
-                  </span>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMontoRecibido(String(sumaBilletes.toFixed(2)));
-                  }}
-                >
-                  Usar suma billetes ({sumaBilletes.toFixed(2)})
-                </button>
+            {!hasTipoCobroSeleccionado ? (
+              <div
+                style={{
+                  width: '100%',
+                  marginTop: 8,
+                  border: '1px dashed #cbd5e1',
+                  borderRadius: 8,
+                  padding: 10,
+                  background: '#f8fafc',
+                  color: '#475569',
+                }}
+              >
+                Selecciona un tipo de cobro para continuar con el ingreso de datos de pago.
               </div>
-            </div>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Monto recibido (manual)"
-              value={montoRecibido}
-              onChange={(e) => onMontoRecibidoChange(e.target.value)}
-              style={{ padding: '8px 10px', minWidth: 190 }}
-            />
-            <input
-              type="number"
-              value={vueltoCalculado.toFixed(2)}
-              readOnly
-              disabled
-              style={{ padding: '8px 10px', minWidth: 150, background: '#f3f4f6' }}
-              title="Vuelto calculado automáticamente"
-            />
+            ) : isCashPaymentSelected ? (
+              <>
+                <div style={{ width: '100%', marginTop: 8 }}>
+                  <span style={{ fontWeight: 600 }}>
+                    Simulación de billetes (según denominaciones configuradas)
+                  </span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                    {denominacionesDisponibles.map((d) => (
+                      <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) + 1) }))
+                          }
+                        >
+                          +Q{d}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBilletes((b) => ({ ...b, [d]: Math.max(0, (b[d] || 0) - 1) }))
+                          }
+                        >
+                          −
+                        </button>
+                        <small>
+                          {d}: {billetes[d] || 0}
+                        </small>
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMontoRecibido(String(sumaBilletes.toFixed(2)));
+                      }}
+                    >
+                      Usar suma billetes ({sumaBilletes.toFixed(2)})
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Monto recibido (manual)"
+                  value={montoRecibido}
+                  onChange={(e) => onMontoRecibidoChange(e.target.value)}
+                  style={{ padding: '8px 10px', minWidth: 190 }}
+                />
+                <input
+                  type="number"
+                  value={vueltoCalculado.toFixed(2)}
+                  readOnly
+                  disabled
+                  style={{ padding: '8px 10px', minWidth: 150, background: '#f3f4f6' }}
+                  title="Vuelto calculado automáticamente"
+                />
+              </>
+            ) : isCardPaymentSelected ? (
+              <div style={{ width: '100%', marginTop: 8, border: '1px solid #dbeafe', borderRadius: 8, padding: 10, background: '#f8fbff' }}>
+                <strong>Simulador de pago con tarjeta</strong>
+                <p style={{ margin: '4px 0 8px', fontSize: 12, color: '#374151' }}>
+                  Simulación local: los datos de tarjeta no se guardan ni se envían al backend.
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Número de tarjeta (16 dígitos)"
+                    value={cardSim.numero}
+                    onChange={(e) =>
+                      setCardSim((p) => ({
+                        ...p,
+                        numero: e.target.value.replace(/\D/g, '').slice(0, 16),
+                      }))
+                    }
+                    style={{ padding: '8px 10px', minWidth: 220 }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Nombre en tarjeta"
+                    value={cardSim.nombre}
+                    onChange={(e) =>
+                      setCardSim((p) => ({ ...p, nombre: e.target.value }))
+                    }
+                    style={{ padding: '8px 10px', minWidth: 180 }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="MM/AA"
+                    value={cardSim.exp}
+                    onChange={(e) =>
+                      setCardSim((p) => ({
+                        ...p,
+                        exp: (() => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          if (digits.length <= 2) return digits;
+                          return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+                        })(),
+                      }))
+                    }
+                    style={{ padding: '8px 10px', minWidth: 100 }}
+                  />
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    placeholder="CVV"
+                    value={cardSim.cvv}
+                    onChange={(e) =>
+                      setCardSim((p) => ({
+                        ...p,
+                        cvv: e.target.value.replace(/\D/g, '').slice(0, 3),
+                      }))
+                    }
+                    style={{ padding: '8px 10px', minWidth: 90 }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: '100%',
+                  marginTop: 8,
+                  border: '1px dashed #cbd5e1',
+                  borderRadius: 8,
+                  padding: 10,
+                  background: '#f8fafc',
+                  color: '#475569',
+                }}
+              >
+                Tipo de cobro seleccionado sin simulador visual específico.
+              </div>
+            )}
             <button type="button" onClick={submitCheckout} disabled={loading}>
-              Continuar
+              {cobroOnly ? 'Confirmar pago' : 'Continuar'}
             </button>
           </div>
           <p style={{ marginTop: 8, fontSize: 12, color: '#4b5563' }}>

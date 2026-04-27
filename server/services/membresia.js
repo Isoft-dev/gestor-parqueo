@@ -242,10 +242,12 @@ export async function update(id, data) {
     const dias = await loadDuracionTipoMembresia(nextTmeId);
     const inicio = current.MEM_FECHA_INICIO ? new Date(current.MEM_FECHA_INICIO) : new Date();
     memFechaVencimiento = addDaysCalendar(inicio, dias);
+  } else if (current.MEM_FECHA_VENCIMIENTO) {
+    memFechaVencimiento = new Date(current.MEM_FECHA_VENCIMIENTO);
   } else {
-    memFechaVencimiento = current.MEM_FECHA_VENCIMIENTO
-      ? new Date(current.MEM_FECHA_VENCIMIENTO)
-      : null;
+    const dias = await loadDuracionTipoMembresia(nextTmeId);
+    const inicio = current.MEM_FECHA_INICIO ? new Date(current.MEM_FECHA_INICIO) : new Date();
+    memFechaVencimiento = addDaysCalendar(inicio, dias);
   }
 
   await executeProcedure(
@@ -389,10 +391,11 @@ export async function registerMonthlyPayment(memId, payload) {
   let pagId;
   let dpmId;
 
-  const baseDate = membership.MEM_FECHA_VENCIMIENTO
+  const diasTipo = await loadDuracionTipoMembresia(membership.TME_ID);
+  const refVenc = membership.MEM_FECHA_VENCIMIENTO
     ? new Date(membership.MEM_FECHA_VENCIMIENTO)
     : new Date();
-  baseDate.setMonth(baseDate.getMonth() + 1);
+  const baseDate = addDaysCalendar(refVenc, diasTipo);
 
   const estado = norm(membership.EME_ESTADO);
   const suspended = estado.includes('suspend') || estado.includes('inactiv');
