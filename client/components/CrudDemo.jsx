@@ -177,14 +177,13 @@ const SECTIONS = {
             omitFromApi:true,
             placeholder:'Ej. P-123ABC',
           },
-          { k:'ESP_ID',l:'ESP_ID',req:true },
         ],
         ops:{c:true,u:true,d:false},
         readOnlyOnCreate:['MEM_FECHA_VENCIMIENTO'],
       },
       { key: 'registro-movimiento-membresia', label: 'Reg. Mov. Membresía', id: 'RMM_ID',
         fields: [{ k:'RMM_ID',l:'ID',req:true },{ k:'RMM_FECHA_HORA_ENTRADA',l:'Entrada',t:'datetime-local' },{ k:'RMM_FECHA_HORA_SALIDA',l:'Salida',t:'datetime-local' },{ k:'MEM_ID',l:'MEM_ID',req:true }],
-        ops:{c:true,u:false,d:false} },
+        ops:{c:false,u:false,d:false} },
       { key: 'tipo-notificacion', label: 'Tipo Notificación', id: 'TNO_ID',
         fields: [{ k:'TNO_ID',l:'ID',req:true },{ k:'TNO_TIPO',l:'Tipo',req:true },{ k:'TNO_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:true,d:true} },
@@ -199,7 +198,7 @@ const SECTIONS = {
           { k:'BIV_ID',l:'ID',req:true },
           { k:'BIV_DESCRIPCION',l:'Descripción',req:true },
           { k:'BIV_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },
-          { k:'VEH_ID',l:'VEH_ID',req:true },
+          { k:'VEH_ID',l:'Vehículo placa',req:true,placeholder:'Ej. P-123ABC' },
           { k:'INC_ID',l:'Incidente',req:true,t:'select',catalog:'incidente',valueKey:'INC_ID',labelKey:'INC_TIPO' },
           { k:'BIV_RESUELTO',l:'Resuelto',t:'checkbox' },
           { k:'BIV_FECHA_RESOLUCION',l:'Fecha Resolución',t:'datetime-local' },
@@ -952,6 +951,25 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       }
       payload.MEM_FECHA_VENCIMIENTO = new Date(vencEsperado).toISOString();
     }
+    if (entity.key === 'bitacora-incidente-vehiculo' && !isEdit) {
+      const placa = String(form.VEH_ID ?? '').trim();
+      if (!placa) {
+        setMsg('Indica la placa del vehículo.');
+        return;
+      }
+      let vehId;
+      try {
+        vehId = await resolveVehiculoIdByPlaca(placa);
+      } catch (err) {
+        setMsg('Error al buscar el vehículo: ' + err.message);
+        return;
+      }
+      if (vehId == null || String(vehId).trim() === '') {
+        setMsg('No existe un vehículo registrado con esa placa.');
+        return;
+      }
+      payload.VEH_ID = Number(vehId) || vehId;
+    }
     if (entity.key === 'alerta' && isEdit) {
       const hasFechaAtencion = !!payload.ALE_FECHA_ATENCION;
       if (!hasFechaAtencion) {
@@ -1527,10 +1545,10 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                     : f.catalog === 'maquina'
                                       ? labelMaquina(row, catalogOptions)
                                       : f.catalog === 'incidente'
-                                      ? labelIncidente(row)
-                                      : row[f.labelKey] != null
-                                        ? String(row[f.labelKey])
-                                        : val;
+                                        ? labelIncidente(row)
+                                        : row[f.labelKey] != null
+                                          ? String(row[f.labelKey])
+                                          : val;
                                   return (
                                     <option key={`${f.k}-${val}`} value={val}>
                                       {lab}

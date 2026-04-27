@@ -3,6 +3,7 @@ import { executeProcedure, executeSql, getConnection } from '../db/oracle.js';
 import { buildMemCodigo, buildTagPdfBuffer } from '../utils/tag.js';
 import { sendTagMail } from '../utils/mailer.js';
 import {
+  assignDynamicMembershipSpaceTx,
   afterMembresiaCreatedSetEspacioReservadoLibre,
   setMembresiaEspacioReservadoLibreTx,
   setMembresiaEspacioReservadoOcupadoTx,
@@ -145,7 +146,17 @@ export async function create(data) {
     throw new Error('Falta la columna MEM_CODIGO en PAR_MEMBRESIA. Esta HU requiere persistir ese valor en base de datos.');
   }
   await validateVehiculoParaMembresia(data.VEH_ID);
-  await validateEspacioDisponible(data.ESP_ID);
+  let espId = data.ESP_ID;
+  if (espId == null || String(espId).trim() === '') {
+    let conn;
+    try {
+      conn = await getConnection();
+      espId = await assignDynamicMembershipSpaceTx(conn);
+    } finally {
+      if (conn) await conn.close();
+    }
+  }
+  await validateEspacioDisponible(espId);
   const now = new Date();
   const fechaInicio = data.MEM_FECHA_INICIO ? new Date(data.MEM_FECHA_INICIO) : now;
   const diasTipo = await loadDuracionTipoMembresia(data.TME_ID);
@@ -170,7 +181,7 @@ export async function create(data) {
           ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
           : now,
         VEH_ID: data.VEH_ID ?? null,
-        ESP_ID: data.ESP_ID ?? null,
+        ESP_ID: espId ?? null,
       },
       { autoCommit: true }
     );
@@ -179,17 +190,17 @@ export async function create(data) {
          FROM PAR_MEMBRESIA
         WHERE VEH_ID = :vehId AND ESP_ID = :espId
         ORDER BY MEM_ID DESC`,
-      { vehId: data.VEH_ID ?? null, espId: data.ESP_ID ?? null }
+      { vehId: data.VEH_ID ?? null, espId: espId ?? null }
     );
     const memId = rows[0]?.MEM_ID;
     if (!memId) return null;
     const persisted = await persistMemCodigo(memId, fechaInicio);
     try {
-      await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
+      await afterMembresiaCreatedSetEspacioReservadoLibre(espId);
     } catch (e) {
       await insertSystemAlerta({
         motivo: 'Membresía creada pero no se actualizó estado del espacio',
-        descripcion: `ESP_ID ${data.ESP_ID}: ${e?.message || e}`,
+        descripcion: `ESP_ID ${espId}: ${e?.message || e}`,
       });
     }
     const created = await getById(memId);
@@ -208,16 +219,16 @@ export async function create(data) {
         ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
         : now,
       VEH_ID: data.VEH_ID ?? null,
-      ESP_ID: data.ESP_ID ?? null,
+      ESP_ID: espId ?? null,
     }
   );
   const persisted = await persistMemCodigo(data.MEM_ID, fechaInicio);
   try {
-    await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
+    await afterMembresiaCreatedSetEspacioReservadoLibre(espId);
   } catch (e) {
     await insertSystemAlerta({
       motivo: 'Membresía creada pero no se actualizó estado del espacio',
-      descripcion: `ESP_ID ${data.ESP_ID}: ${e?.message || e}`,
+      descripcion: `ESP_ID ${espId}: ${e?.message || e}`,
     });
   }
   const created = await getById(data.MEM_ID);
