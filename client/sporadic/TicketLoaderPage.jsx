@@ -1099,6 +1099,19 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
           <p style={{ margin: '6px 0', fontSize: 18 }}>
             <strong>Monto total a pagar: Q{montoTotalCalculado.toFixed(2)}</strong>
           </p>
+          {Number(quote.recargoTicketExtraviado) > 0 ? (
+            <p style={{ margin: '6px 0', fontSize: 13, color: '#b45309', background: '#fffbeb', padding: '8px 10px', borderRadius: 8, border: '1px solid #fcd34d' }}>
+              Ticket en estado <strong>Extraviado</strong>: se suma un recargo de{' '}
+              <strong>Q{Number(quote.recargoTicketExtraviado).toFixed(2)}</strong> al cobro por estadía
+              {quote.montoEstadia != null ? (
+                <>
+                  {' '}
+                  (estadía Q{Number(quote.montoEstadia).toFixed(2)} + recargo Q
+                  {Number(quote.recargoTicketExtraviado).toFixed(2)}).
+                </>
+              ) : null}
+            </p>
+          ) : null}
           {quote.politicaMinimoSub1h?.aplicada ? (
             <p style={{ margin: '6px 0', fontSize: 13, color: '#444' }}>
               Cobro mínimo por estadía menor a 1 h: Q

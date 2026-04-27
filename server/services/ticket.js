@@ -12,6 +12,15 @@ import {
   isTipoMaquinaSalida,
 } from '../utils/tipoMaquinaRules.js';
 
+/** Recargo fijo (GTQ) por ticket en estado extraviado al momento del cobro. */
+const RECARGO_TICKET_EXTRAVIADO_Q = 100;
+
+function ticketEstadoIndicaExtraviado(etiEstado) {
+  return String(etiEstado ?? '')
+    .toLowerCase()
+    .includes('extrav');
+}
+
 /** Aplica mínimo (p. ej. Q5) solo si la estadía facturable es estrictamente menor a 60 minutos. */
 function aplicarMinimoSub1h(montoBruto, minsFacturables) {
   const cfg = getCobroMinimoSub1hEffective();
@@ -112,6 +121,9 @@ export async function quoteByCodigo(codigo) {
   const precio = Number(tarifa.TAR_PRECIO || 0);
   const montoBruto = Number((horasRedondeadas * precio).toFixed(2));
   const { monto, politica } = aplicarMinimoSub1h(montoBruto, minsFacturables);
+  const extraviado = ticketEstadoIndicaExtraviado(ticket.ETI_ESTADO);
+  const recargoTicketExtraviado = extraviado ? RECARGO_TICKET_EXTRAVIADO_Q : 0;
+  const montoTotal = Number((monto + recargoTicketExtraviado).toFixed(2));
 
   return {
     ticket: {
@@ -119,6 +131,8 @@ export async function quoteByCodigo(codigo) {
       TIC_CODIGO: ticket.TIC_CODIGO,
       VEH_PLACA: ticket.VEH_PLACA,
       TIC_FECHA_HORA_ENTRADA: ticket.TIC_FECHA_HORA_ENTRADA,
+      ETI_ID: ticket.ETI_ID,
+      ETI_ESTADO: ticket.ETI_ESTADO,
     },
     tarifa: {
       TAR_ID: tarifa.TAR_ID,
@@ -132,7 +146,10 @@ export async function quoteByCodigo(codigo) {
       horasFacturables: Number(horas.toFixed(2)),
       horasCobradas: horasRedondeadas,
     },
-    montoTotal: monto,
+    montoEstadia: monto,
+    recargoTicketExtraviado,
+    extraviado,
+    montoTotal,
     montoMinimoAplicado: monto > montoBruto,
     politicaMinimoSub1h: politica,
     calculadoEn: ahora.toISOString(),
@@ -162,6 +179,111 @@ async function cobroIdentityAlwaysTx(conn) {
       WHERE TABLE_NAME='PAR_COBRO' AND COLUMN_NAME='COB_ID'`
   );
   return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
+}
+
+async function bitacoraIncidenteVehiculoIdentityAlwaysTx(conn) {
+  const r = await conn.execute(
+    `SELECT GENERATION_TYPE
+       FROM USER_TAB_IDENTITY_COLS
+      WHERE TABLE_NAME='PAR_BITACORA_INCIDENTE_VEHICULO' AND COLUMN_NAME='BIV_ID'`
+  );
+  return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
+}
+
+async function findIncidenteTicketExtraviadoIdTx(conn) {
+  const r = await conn.execute(
+    `SELECT INC_ID
+       FROM PAR_INCIDENTE
+      WHERE LOWER(INC_TIPO) LIKE '%extrav%'
+         OR LOWER(NVL(INC_DESCRIPCION, '')) LIKE '%extrav%'
+      ORDER BY INC_ID`
+  );
+  return r.rows?.[0]?.INC_ID ?? null;
+}
+
+/**
+ * Bitácora al marcar el ticket como extraviado desde gestión (pendiente hasta cobro/salida).
+ * Requiere al menos un PAR_INCIDENTE cuyo tipo o descripción sugiera «extraviado».
+ */
+/**
+ * Marca como resuelta la bitácora de ticket extraviado vinculada al pago (fecha = cobro).
+ */
+async function resolveBitacoraTicketExtraviadoEnCobroTx(conn, { vehId, ticId, fechaPago }) {
+  if (vehId == null || ticId == null) return;
+  const incId = await findIncidenteTicketExtraviadoIdTx(conn);
+  if (incId == null) return;
+  const mark = `(TIC_ID ${ticId})`;
+  await conn.execute(
+    `UPDATE PAR_BITACORA_INCIDENTE_VEHICULO b
+        SET b.BIV_RESUELTO = 1,
+            b.BIV_FECHA_RESOLUCION = :fh
+      WHERE b.BIV_ID = (
+        SELECT MAX(b2.BIV_ID)
+          FROM PAR_BITACORA_INCIDENTE_VEHICULO b2
+         WHERE b2.VEH_ID = :v
+           AND b2.INC_ID = :inc
+           AND NVL(b2.BIV_RESUELTO, 0) = 0
+           AND b2.BIV_FECHA_RESOLUCION IS NULL
+           AND INSTR(b2.BIV_DESCRIPCION, :mark) > 0
+      )`,
+    { fh: fechaPago, v: vehId, inc: incId, mark }
+  );
+}
+
+async function insertBitacoraTicketExtraviadoDesdeGestionStandalone({ vehId, ticId, ticCodigo, usuId }) {
+  const fecha = new Date();
+  const desc = (
+    `Ticket extraviado (gestión): estado actualizado en PAR_TICKET. Código ${ticCodigo} (TIC_ID ${ticId}). ` +
+    `Pendiente de cobro; al pagar en máquina de cobro se aplica recargo de Q${RECARGO_TICKET_EXTRAVIADO_Q.toFixed(2)} sobre la estadía.`
+  ).slice(0, 950);
+
+  const usuBind =
+    usuId != null && String(usuId).trim() !== '' && !Number.isNaN(Number(usuId)) ? Number(usuId) : null;
+
+  let conn;
+  try {
+    conn = await getConnection();
+    const incId = await findIncidenteTicketExtraviadoIdTx(conn);
+    if (incId == null) {
+      throw new Error(
+        'No hay incidente configurado para ticket extraviado: agrega en PAR_INCIDENTE un INC_TIPO o INC_DESCRIPCION que contenga «extraviado».'
+      );
+    }
+    const identityAlways = await bitacoraIncidenteVehiculoIdentityAlwaysTx(conn);
+    if (identityAlways) {
+      await conn.execute(
+        `INSERT INTO PAR_BITACORA_INCIDENTE_VEHICULO
+          (BIV_DESCRIPCION, BIV_FECHA_HORA, VEH_ID, INC_ID, BIV_RESUELTO, BIV_FECHA_RESOLUCION, USU_ID)
+         VALUES
+          (:d, :fh, :v, :inc, 0, NULL, :usu)`,
+        { d: desc, fh: fecha, v: vehId, inc: incId, usu: usuBind }
+      );
+    } else {
+      const nxt = await conn.execute(
+        `SELECT NVL(MAX(BIV_ID), 0) + 1 AS N FROM PAR_BITACORA_INCIDENTE_VEHICULO`
+      );
+      const bivId = Number(nxt.rows?.[0]?.N ?? nxt.rows?.[0]?.n ?? 1);
+      await conn.execute(
+        `INSERT INTO PAR_BITACORA_INCIDENTE_VEHICULO
+          (BIV_ID, BIV_DESCRIPCION, BIV_FECHA_HORA, VEH_ID, INC_ID, BIV_RESUELTO, BIV_FECHA_RESOLUCION, USU_ID)
+         VALUES
+          (:id, :d, :fh, :v, :inc, 0, NULL, :usu)`,
+        { id: bivId, d: desc, fh: fecha, v: vehId, inc: incId, usu: usuBind }
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
+  } finally {
+    if (conn) await conn.close();
+  }
 }
 
 async function detalleMaquinaTicketIdentityAlwaysTx(conn) {
@@ -516,8 +638,10 @@ export async function checkoutByCodigo({
 
     const tRes = await conn.execute(
       `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA, t.ETI_ID, t.VEH_ID,
+              et.ETI_ESTADO,
               c.COB_ID AS COB_ID
          FROM PAR_TICKET t
+         JOIN PAR_ESTADO_TICKET et ON et.ETI_ID = t.ETI_ID
          LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
         WHERE UPPER(TRIM(t.TIC_CODIGO)) = UPPER(TRIM(:codigo))
         FOR UPDATE OF t.TIC_ID`,
@@ -548,6 +672,9 @@ export async function checkoutByCodigo({
     const precio = Number(tarifa.TAR_PRECIO || 0);
     const montoBruto = Number((horasCobradas * precio).toFixed(2));
     const { monto } = aplicarMinimoSub1h(montoBruto, minsFacturables);
+    const extraviado = ticketEstadoIndicaExtraviado(ticket.ETI_ESTADO);
+    const recargoTicketExtraviado = extraviado ? RECARGO_TICKET_EXTRAVIADO_Q : 0;
+    const montoTotalCobro = Number((monto + recargoTicketExtraviado).toFixed(2));
 
     const maqTipo = await conn.execute(
       `SELECT tm.TMA_TIPO
@@ -562,10 +689,10 @@ export async function checkoutByCodigo({
     }
 
     const montoRecibido = Number(COB_MONTO_RECIBIDO);
-    if (!Number.isFinite(montoRecibido) || montoRecibido < monto) {
+    if (!Number.isFinite(montoRecibido) || montoRecibido < montoTotalCobro) {
       throw new Error('El monto recibido debe ser mayor o igual al monto total');
     }
-    const vuelto = Number((montoRecibido - monto).toFixed(2));
+    const vuelto = Number((montoRecibido - montoTotalCobro).toFixed(2));
 
     let ingresoMap = null;
     if (BILLETES_INGRESO && typeof BILLETES_INGRESO === 'object') {
@@ -598,7 +725,7 @@ export async function checkoutByCodigo({
           COB_HORAS_TOTALES: Number(horas.toFixed(2)),
           TCO_ID,
           TIC_ID: ticket.TIC_ID,
-          COB_MONTO_TOTAL: monto,
+          COB_MONTO_TOTAL: montoTotalCobro,
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
@@ -624,7 +751,7 @@ export async function checkoutByCodigo({
           COB_HORAS_TOTALES: Number(horas.toFixed(2)),
           TCO_ID,
           TIC_ID: ticket.TIC_ID,
-          COB_MONTO_TOTAL: monto,
+          COB_MONTO_TOTAL: montoTotalCobro,
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
@@ -633,6 +760,14 @@ export async function checkoutByCodigo({
           COB_NIT: cobNit,
         }
       );
+    }
+
+    if (extraviado) {
+      await resolveBitacoraTicketExtraviadoEnCobroTx(conn, {
+        vehId: ticket.VEH_ID,
+        ticId: ticket.TIC_ID,
+        fechaPago: ahora,
+      });
     }
 
     const etiPagadoId = await findEstadoPagadoIdTx(conn, ticket.ETI_ID);
@@ -702,7 +837,10 @@ export async function checkoutByCodigo({
       COB_ID: cobId,
       TCO_ID,
       COB_NIT: cobNit,
-      montoTotal: monto,
+      montoEstadia: monto,
+      recargoTicketExtraviado,
+      extraviado,
+      montoTotal: montoTotalCobro,
       horasCobradas,
       COB_MONTO_RECIBIDO: montoRecibido,
       COB_VUELTO: vuelto,
@@ -965,7 +1103,10 @@ export async function create(data) {
   return getById(ticId);
 }
 
-export async function update(id, data) {
+export async function update(id, data, opts = {}) {
+  const prev = await getById(id);
+  if (!prev) throw new Error('Ticket no encontrado');
+
   await executeProcedure(
     `BEGIN SP_TICKET_UPDATE(:id, :TIC_FECHA_HORA_SALIDA, :ETI_ID); END;`,
     {
@@ -974,7 +1115,37 @@ export async function update(id, data) {
       ETI_ID: data.ETI_ID ?? null,
     }
   );
-  return getById(id);
+
+  const rowsEtiEx = await executeSql(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%extrav%'
+      ORDER BY ETI_ID`
+  );
+  const etiExtraviadoId = rowsEtiEx[0]?.ETI_ID ?? rowsEtiEx[0]?.eti_id ?? null;
+  const updated = await getById(id);
+  const nuevoEti = updated?.ETI_ID ?? updated?.eti_id ?? null;
+  const prevEti = prev?.ETI_ID ?? prev?.eti_id ?? null;
+
+  if (
+    etiExtraviadoId != null
+    && nuevoEti != null
+    && String(nuevoEti) === String(etiExtraviadoId)
+    && String(prevEti || '') !== String(etiExtraviadoId)
+  ) {
+    const vehId = updated?.VEH_ID ?? updated?.veh_id ?? prev?.VEH_ID ?? prev?.veh_id;
+    const codigo = updated?.TIC_CODIGO ?? updated?.tic_codigo ?? prev?.TIC_CODIGO ?? prev?.tic_codigo;
+    if (vehId != null && codigo) {
+      await insertBitacoraTicketExtraviadoDesdeGestionStandalone({
+        vehId,
+        ticId: id,
+        ticCodigo: String(codigo),
+        usuId: opts.usuIdBitacoraExtraviado ?? null,
+      });
+    }
+  }
+
+  return updated;
 }
 
 async function findEstadoTicketExtraviadoTx(conn) {

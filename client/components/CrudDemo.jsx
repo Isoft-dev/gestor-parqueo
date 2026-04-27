@@ -126,7 +126,7 @@ const SECTIONS = {
         fields: [{ k:'INC_ID',l:'ID',req:true },{ k:'INC_TIPO',l:'Tipo',req:true },{ k:'INC_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:true,d:true} },
       { key: 'bitacora-incidente-vehiculo', label: 'Bitácora Incidente', id: 'BIV_ID',
-        fields: [{ k:'BIV_ID',l:'ID',req:true },{ k:'BIV_DESCRIPCION',l:'Descripción',req:true },{ k:'BIV_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'INC_ID',l:'INC_ID',req:true },{ k:'BIV_RESUELTO',l:'Resuelto',t:'checkbox' },{ k:'BIV_FECHA_RESOLUCION',l:'Fecha Resolución',t:'datetime-local' },{ k:'USU_ID',l:'USU_ID' }],
+        fields: [{ k:'BIV_ID',l:'ID',req:true },{ k:'BIV_DESCRIPCION',l:'Descripción',req:true },{ k:'BIV_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'VEH_ID',l:'VEH_ID',req:true },{ k:'INC_ID',l:'INC_ID',req:true },{ k:'BIV_RESUELTO',l:'Resuelto',t:'checkbox' },{ k:'BIV_FECHA_RESOLUCION',l:'Fecha Resolución',t:'datetime-local' },{ k:'USU_ID',l:'Usuario' }],
         ops:{c:true,u:true,d:false}, updateFields:['BIV_RESUELTO','BIV_FECHA_RESOLUCION'] },
       { key: 'tipo-pago', label: 'Tipo de Pago', id: 'TPA_ID',
         fields: [{ k:'TPA_ID',l:'ID',req:true },{ k:'TPA_TIPO',l:'Tipo',req:true },{ k:'TPA_DESCRIPCION',l:'Descripción' }],
@@ -414,7 +414,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       ),
     ];
     const cats =
-      entity.key === 'alerta' ? [...new Set([...catsBase, 'tipo-maquina', 'tipo-alerta'])] : catsBase;
+      entity.key === 'alerta'
+        ? [...new Set([...catsBase, 'tipo-maquina', 'tipo-alerta'])]
+        : entity.key === 'bitacora-incidente-vehiculo'
+          ? [...new Set([...catsBase, 'usuario'])]
+          : catsBase;
     if (!cats.length) return;
     let cancelled = false;
     (async () => {
@@ -662,6 +666,14 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       delete payload.TIC_ID;
       delete payload.TIC_CODIGO;
       delete payload.TIC_FECHA_HORA_SALIDA;
+    }
+    if (
+      entity.key === 'ticket'
+      && isEdit
+      && sessionUserId != null
+      && String(sessionUserId).trim() !== ''
+    ) {
+      payload.USU_ID_BITACORA_EXTRAVIADO = sessionUserId;
     }
     if (
       entity.key === 'bitacora-incidente-vehiculo' &&
@@ -1168,6 +1180,13 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                       <tr>
                         {Object.keys(rows[0])
                           .filter((c) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
+                          .filter(
+                            (c) =>
+                              !(
+                                entity?.key === 'bitacora-incidente-vehiculo'
+                                && (c === 'USU_PRIMER_NOMBRE' || c === 'USU_PRIMER_APELLIDO' || c === 'INC_ID')
+                              ),
+                          )
                           .map((c) => (
                           <th key={c}>
                             {entity?.key === 'alerta' && c === 'EAL_ID'
@@ -1178,7 +1197,9 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   ? 'Tipo alerta'
                                 : entity?.key === 'alerta' && c === 'ALE_USU_ID_RESOLVIO'
                                   ? 'Persona a cargo'
-                                  : getDbColumnLabel(c, CRUD_COLUMN_LABELS)}
+                                  : entity?.key === 'bitacora-incidente-vehiculo' && c === 'USU_ID'
+                                    ? 'Usuario'
+                                    : getDbColumnLabel(c, CRUD_COLUMN_LABELS)}
                           </th>
                         ))}
                         {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
@@ -1191,6 +1212,13 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         <tr key={i}>
                           {Object.entries(row)
                             .filter(([c]) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
+                            .filter(
+                              ([c]) =>
+                                !(
+                                  entity?.key === 'bitacora-incidente-vehiculo'
+                                  && (c === 'USU_PRIMER_NOMBRE' || c === 'USU_PRIMER_APELLIDO' || c === 'INC_ID')
+                                ),
+                            )
                             .map(([c, v]) => {
                             if (entity?.key === 'alerta' && c === 'ALE_DESCRIPCION') {
                               const text = v == null ? '—' : String(v);
@@ -1246,6 +1274,13 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                               return (
                                 <td key={c} className="crudx-cell-ellipsis">
                                   {labelTipoAlerta(v, catalogOptions)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'bitacora-incidente-vehiculo' && c === 'USU_ID') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {labelUsuario(v, catalogOptions)}
                                 </td>
                               );
                             }
