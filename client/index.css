@@ -1201,11 +1201,11 @@ body {
   font-weight: 600;
 }
 
-/* Dentro del panel admin: anclar al contenedor de la vista (área .admin-main), no al viewport completo. */
+/* Dentro del panel admin: anclar al contenedor (no al viewport), con aire similar al fixed 16px de la vista pública. */
 .admin-main .ops-page-public--entry .ops-entry-config {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: 1rem;
+  left: 1rem;
 }
 
 .ops-entry-kiosk-wrap {
