@@ -5,23 +5,14 @@ const LIST_SELECT = `SELECT v.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
          FROM PAR_VEHICULO v
          LEFT JOIN PAR_TIPO_VEHICULO tv ON v.TVE_ID = tv.TVE_ID`;
 
-/** Tickets / esporádicos: sin cliente, o cliente sin ninguna membresía (p. ej. NIT en cobro sin plan). */
-const WHERE_TICKETS_ESPORADICOS = `WHERE v.CLI_ID IS NULL
-        OR NOT EXISTS (
-             SELECT 1
-               FROM PAR_MEMBRESIA m
-               JOIN PAR_VEHICULO v2 ON m.VEH_ID = v2.VEH_ID
-              WHERE v2.CLI_ID = v.CLI_ID
-           )`;
+/** Tickets / esporádicos: placas creadas en entrada (sin ficha de cliente). Coherente con ticket.js (CLI_ID NULL). */
+const WHERE_TICKETS_ESPORADICOS = `WHERE v.CLI_ID IS NULL`;
 
-/** Clientes mensuales: solo flota de clientes que tienen al menos una membresía registrada. */
-const WHERE_CLIENTE_CON_MEMBRESIA = `WHERE v.CLI_ID IS NOT NULL
-        AND EXISTS (
-             SELECT 1
-               FROM PAR_MEMBRESIA m
-               JOIN PAR_VEHICULO v2 ON m.VEH_ID = v2.VEH_ID
-              WHERE v2.CLI_ID = v.CLI_ID
-           )`;
+/**
+ * Clientes mensuales: toda la flota vinculada a un cliente (CLI_ID), aunque aún no tenga membresía.
+ * Así un vehículo nuevo aparece aquí y no en el listado esporádico.
+ */
+const WHERE_CLIENTE_CON_MEMBRESIA = `WHERE v.CLI_ID IS NOT NULL`;
 
 export async function getAll(options = {}) {
   if (options.soloClienteConMembresia) {
@@ -61,7 +52,7 @@ async function isIdentityAlways() {
 
 export async function create(data) {
   const existingPlaca = await findByPlaca(data.VEH_PLACA);
-  if (existingPlaca) throw new Error('Ya existe un vehiculo con la misma VEH_PLACA');
+  if (existingPlaca) throw new Error('Ya existe un vehículo con la misma placa.');
 
   if ((await isIdentityAlways()) || !data.VEH_ID) {
     await executeSql(
@@ -99,7 +90,7 @@ export async function create(data) {
 
 export async function update(id, data) {
   const existingPlaca = await findByPlaca(data.VEH_PLACA, id);
-  if (existingPlaca) throw new Error('Ya existe otro vehiculo con la misma VEH_PLACA');
+  if (existingPlaca) throw new Error('Ya existe otro vehículo con la misma placa.');
   await executeProcedure(`BEGIN SP_VEHICULO_UPDATE(:id, :VEH_PLACA, :VEH_MODELO, :VEH_COLOR, :TVE_ID, :CLI_ID); END;`, {
     id,
     VEH_PLACA: data.VEH_PLACA ?? null,

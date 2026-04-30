@@ -87,7 +87,9 @@ async function tipoNotificacionSuspensionId() {
 }
 
 /**
- * Suspender membresías con más de 3 días de mora sin pago posterior al vencimiento.
+ * Suspender membresías cuyo periodo ya venció (día calendario siguiente a MEM_FECHA_VENCIMIENTO)
+ * sin un pago registrado que cubra la vigencia (pago con fecha >= vencimiento).
+ * El ingreso con tag queda bloqueado hasta renovar en máquina de cobro («Pagar membresía»).
  */
 export async function suspendMembershipsOverdue() {
   const suspRows = await executeSql(
@@ -110,7 +112,7 @@ export async function suspendMembershipsOverdue() {
   const candidatos = await executeSql(
     `SELECT m.MEM_ID
        FROM PAR_MEMBRESIA m
-      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO) + 3
+      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
         AND m.EME_ID <> :suspId
         AND NOT EXISTS (
           SELECT 1
@@ -126,7 +128,7 @@ export async function suspendMembershipsOverdue() {
     `UPDATE PAR_MEMBRESIA m
         SET EME_ID = :suspId,
             MEM_FECHA_ULTIMO_CAMBIO_ESTADO = SYSDATE
-      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO) + 3
+      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
         AND m.EME_ID <> :suspId
         AND NOT EXISTS (
           SELECT 1
@@ -147,7 +149,7 @@ export async function suspendMembershipsOverdue() {
           SELECT 1 FROM PAR_MEMBRESIA m
            WHERE m.ESP_ID = e.ESP_ID
              AND m.EME_ID = :suspId
-             AND TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO) + 3
+             AND TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
         )`,
       { ees: disponibleEesId, suspId },
       { autoCommit: true },
@@ -174,8 +176,8 @@ export async function suspendMembershipsOverdue() {
         if (to) {
           await sendPlainMail({
             to,
-            subject: 'Membresía suspendida por mora',
-            text: `Hola ${nombre}, tu membresía (MEM_ID ${memId}) fue suspendida automáticamente por mora superior a 3 días. Regulariza tu pago en recepción.`,
+            subject: 'Membresía suspendida por vencimiento',
+            text: `Hola ${nombre}, tu membresía (MEM_ID ${memId}) quedó suspendida por vencimiento del periodo pagado. Puedes renovarla en la máquina de cobro (opción Pagar membresía) o en recepción.`,
           });
           exito = 1;
         }

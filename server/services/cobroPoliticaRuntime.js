@@ -23,6 +23,28 @@ function writeJsonFile(obj) {
   fs.writeFileSync(DATA_PATH, JSON.stringify(obj, null, 2), 'utf8');
 }
 
+export function getCobroPoliticaRuntimeRaw() {
+  return readJsonFile();
+}
+
+export function getTarifaActivaRuntimeId() {
+  const file = readJsonFile();
+  const id = file?.tarifaActiva?.tarId;
+  const n = Number(id);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.trunc(n);
+}
+
+export function updateTarifaActivaRuntime(tarId) {
+  const cur = readJsonFile();
+  const n = Number(tarId);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error('tarId inválido para tarifa activa');
+  }
+  cur.tarifaActiva = { ...(cur.tarifaActiva || {}), tarId: Math.trunc(n) };
+  writeJsonFile(cur);
+}
+
 /**
  * Valores efectivos del mínimo &lt; 1 h: .env por defecto; `minimoSub1H` en JSON sobreescribe (panel admin).
  */
@@ -58,6 +80,21 @@ export function clearMinimoSub1hRuntime() {
   const cur = readJsonFile();
   if (!cur.minimoSub1H) return;
   delete cur.minimoSub1H;
+  if (Object.keys(cur).length === 0) {
+    try {
+      fs.unlinkSync(DATA_PATH);
+    } catch {
+      /* ignore */
+    }
+  } else {
+    writeJsonFile(cur);
+  }
+}
+
+export function clearTarifaActivaRuntime() {
+  const cur = readJsonFile();
+  if (!cur.tarifaActiva) return;
+  delete cur.tarifaActiva;
   if (Object.keys(cur).length === 0) {
     try {
       fs.unlinkSync(DATA_PATH);

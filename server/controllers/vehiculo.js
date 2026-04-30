@@ -3,7 +3,7 @@ import * as service from '../services/vehiculo.js';
 function businessStatus(err) {
   const msg = String(err?.message || '');
   if (/no encontrado/i.test(msg)) return 404;
-  if (/misma VEH_PLACA|requerid/i.test(msg)) return 400;
+  if (/misma placa|misma VEH_PLACA|requerid/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict/i.test(msg)) return 409;
   return 500;
 }
@@ -25,7 +25,7 @@ export async function getAll(req, res) {
       }),
     );
   } catch (err) {
-    const code = /misma VEH_PLACA/i.test(err.message) ? 400 : 500;
+    const code = /misma placa|misma VEH_PLACA/i.test(err.message) ? 400 : 500;
     res.status(code).json({ error: err.message });
   }
 }
@@ -36,7 +36,7 @@ export async function getById(req, res) {
     if (!row) return res.status(404).json({ error: 'Registro no encontrado' });
     res.json(row);
   } catch (err) {
-    const code = /misma VEH_PLACA/i.test(err.message) ? 400 : 500;
+    const code = /misma placa|misma VEH_PLACA/i.test(err.message) ? 400 : 500;
     res.status(code).json({ error: err.message });
   }
 }
@@ -45,7 +45,7 @@ export async function create(req, res) {
   try {
     const { VEH_PLACA, TVE_ID } = req.body;
     if (!VEH_PLACA || !TVE_ID) {
-      return res.status(400).json({ error: 'VEH_PLACA y TVE_ID son requeridos' });
+      return res.status(400).json({ error: 'La placa y el tipo de vehículo son obligatorios.' });
     }
     const created = await service.create(req.body);
     res.status(201).json(created);

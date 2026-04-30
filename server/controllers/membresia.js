@@ -91,7 +91,7 @@ export async function searchPaymentCandidates(req, res) {
   try {
     const q = req.query.q || req.query.query || '';
     if (!q || String(q).trim().length < 2) {
-      return res.status(400).json({ error: 'Debes enviar al menos 2 caracteres en q' });
+      return res.status(400).json({ error: 'Debes enviar al menos 2 caracteres de la placa en q' });
     }
     res.json(await service.searchPaymentCandidates(q));
   } catch (err) {

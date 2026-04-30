@@ -111,6 +111,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const [quote, setQuote] = useState(null);
   const [tipoVehiculo, setTipoVehiculo] = useState([]);
   const [tiposCobro, setTiposCobro] = useState([]);
+  const [tiposPago, setTiposPago] = useState([]);
   const [tiposMaquina, setTiposMaquina] = useState([]);
   const [maquinas, setMaquinas] = useState([]);
   const [maquinasCobro, setMaquinasCobro] = useState([]);
@@ -152,6 +153,19 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const [assistMsg, setAssistMsg] = useState('');
   const onlyKiosk = cobroOnly || entradaOnly || salidaOnly;
   const [denominacionesDisponibles, setDenominacionesDisponibles] = useState([5, 10, 20, 50]);
+  const [memPayQ, setMemPayQ] = useState('');
+  const [memPayList, setMemPayList] = useState([]);
+  const [memPaySelected, setMemPaySelected] = useState(null);
+  const [memPayTpaId, setMemPayTpaId] = useState('');
+  const [memPayRecibido, setMemPayRecibido] = useState('');
+  const [memPayBilletes, setMemPayBilletes] = useState({ 5: 0, 10: 0, 20: 0, 50: 0 });
+  const [memPayCardSim, setMemPayCardSim] = useState({
+    numero: '',
+    nombre: '',
+    exp: '',
+    cvv: '',
+  });
+  const [memPayDone, setMemPayDone] = useState(null);
   const montoTotalCalculado = Number(quote?.montoTotal || 0);
   const horasCalculadas = Number(
     quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
@@ -174,6 +188,28 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const isCashPaymentSelected = /efectivo|cash/i.test(
     String(tipoCobroSeleccionado?.TCO_TIPO || ''),
   );
+
+  const memMontoPlan = Number(memPaySelected?.TME_PRECIO ?? 0);
+  const tipoPagoMemSeleccionado = tiposPago.find((t) => String(t?.TPA_ID) === String(memPayTpaId));
+  const memCardTipoPago = tiposPago.find((t) =>
+    /tarjeta|card|credito|cr[eé]dito|debito|d[eé]bito/i.test(String(t?.TPA_TIPO || '')),
+  );
+  const hasMemPayTpaSeleccionado = String(memPayTpaId || '').trim().length > 0;
+  const isMemPayCardSelected = /tarjeta|card|credito|cr[eé]dito|debito|d[eé]bito/i.test(
+    String(tipoPagoMemSeleccionado?.TPA_TIPO || ''),
+  );
+  const isMemPayCashSelected = /efectivo|cash/i.test(
+    String(tipoPagoMemSeleccionado?.TPA_TIPO || ''),
+  );
+  const memPayRecibidoNum = Number(String(memPayRecibido || '').replace(',', '.'));
+  const sumaMemPayBilletes = denominacionesDisponibles.reduce(
+    (acc, d) => acc + Number(memPayBilletes[d] || 0) * Number(d),
+    0,
+  );
+  const memPayVueltoCalculado =
+    Number.isFinite(memPayRecibidoNum) && memPayRecibidoNum >= memMontoPlan
+      ? Number((memPayRecibidoNum - memMontoPlan).toFixed(2))
+      : 0;
 
   /** Solo dígitos y un punto decimal; nunca negativos (evita que `min` del input sea insuficiente). */
   function onMontoRecibidoChange(raw) {
@@ -216,6 +252,15 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     });
   }
 
+  function resetMemPayCardSimulator() {
+    setMemPayCardSim({
+      numero: '',
+      nombre: '',
+      exp: '',
+      cvv: '',
+    });
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function pollEspacios() {
@@ -239,25 +284,28 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     (async () => {
       setCatalogLoading(true);
       try {
-        const [rTve, rCobro, rMaq, rSdi, rTma] = await Promise.all([
+        const [rTve, rCobro, rMaq, rSdi, rTma, rTpa] = await Promise.all([
           fetch(`${API_BASE}/tipo-vehiculo`),
           fetch(`${API_BASE}/tipo-cobro`),
           fetch(`${API_BASE}/maquina`),
           fetch(`${API_BASE}/saldo-disponible`),
           fetch(`${API_BASE}/tipo-maquina`),
+          fetch(`${API_BASE}/tipo-pago`),
         ]);
-        const [dTve, dCobro, dMaq, dSdi, dTma] = await Promise.all([
+        const [dTve, dCobro, dMaq, dSdi, dTma, dTpa] = await Promise.all([
           rTve.json(),
           rCobro.json(),
           rMaq.json(),
           rSdi.json(),
           rTma.json(),
+          rTpa.json(),
         ]);
         if (!rTve.ok) throw new Error(dTve.error || rTve.statusText);
         if (!rCobro.ok) throw new Error(dCobro.error || rCobro.statusText);
         if (!rMaq.ok) throw new Error(dMaq.error || rMaq.statusText);
         if (!rSdi.ok) throw new Error(dSdi.error || rSdi.statusText);
         if (!rTma.ok) throw new Error(dTma.error || rTma.statusText);
+        setTiposPago(rTpa.ok && Array.isArray(dTpa) ? dTpa : []);
         setTipoVehiculo(Array.isArray(dTve) ? dTve : []);
         setTiposCobro(Array.isArray(dCobro) ? dCobro : []);
         setTiposMaquina(Array.isArray(dTma) ? dTma : []);
@@ -337,6 +385,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       } catch {
         setTipoVehiculo([]);
         setTiposCobro([]);
+        setTiposPago([]);
         setTiposMaquina([]);
         setMaquinas([]);
         setMaquinasCobro([]);
@@ -710,6 +759,123 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     }
   }
 
+  async function buscarMembresiasParaPago() {
+    const q = String(memPayQ || '').trim();
+    if (q.length < 2) {
+      setMsg('Escribe al menos 2 caracteres de la placa.');
+      return;
+    }
+    setLoading(true);
+    setMsg('');
+    try {
+      const res = await fetch(
+        `${API_BASE}/membresia/payment-candidates/search?${new URLSearchParams({ q })}`,
+        { cache: 'no-store' },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      const list = Array.isArray(data) ? data : [];
+      setMemPayList(list);
+      setMemPaySelected(null);
+      setMemPayDone(null);
+      if (!list.length) setMsg('No se encontraron membresías con esa placa.');
+    } catch (e) {
+      setMsg(`Error: ${String(e?.message || e)}`);
+      setMemPayList([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function confirmarPagoMembresia() {
+    if (!memPaySelected?.MEM_ID) {
+      setMsg('Selecciona una membresía de la lista.');
+      return;
+    }
+    if (!memPayTpaId) {
+      setMsg('No hay tipo de pago con tarjeta disponible para membresías.');
+      return;
+    }
+    const monto = Number(memPaySelected.TME_PRECIO ?? 0);
+    if (!(monto > 0)) {
+      setMsg('No se pudo leer el monto del plan.');
+      return;
+    }
+    const tipoPago = tiposPago.find((t) => String(t?.TPA_ID) === String(memPayTpaId));
+    const pagoTarjeta = /tarjeta|card|credito|cr[eé]dito|debito|d[eé]bito/i.test(
+      String(tipoPago?.TPA_TIPO || ''),
+    );
+    if (!pagoTarjeta) {
+      setMsg('Para pago de membresía solo se permite tarjeta.');
+      return;
+    }
+    const recibido = monto;
+    {
+      const numero = String(memPayCardSim.numero || '').replace(/\D/g, '');
+      if (!numero) {
+        setMsg('Ingresa el número de tarjeta.');
+        return;
+      }
+      if (numero.length !== 16) {
+        setMsg('El número de tarjeta debe tener 16 dígitos.');
+        return;
+      }
+      if (!String(memPayCardSim.nombre || '').trim()) {
+        setMsg('Ingresa el nombre del titular de la tarjeta.');
+        return;
+      }
+      const expRaw = String(memPayCardSim.exp || '');
+      const expMatch = expRaw.match(/^(0[1-9]|1[0-2])\/(\d{2})$/);
+      if (!expMatch) {
+        setMsg('La fecha de vencimiento debe tener formato MM/AA válido.');
+        return;
+      }
+      const expMonth = Number(expMatch[1]);
+      const expYear = 2000 + Number(expMatch[2]);
+      const now = new Date();
+      const nowMonth = now.getMonth() + 1;
+      const nowYear = now.getFullYear();
+      if (expYear < nowYear || (expYear === nowYear && expMonth < nowMonth)) {
+        setMsg('La tarjeta está vencida.');
+        return;
+      }
+      const cvv = String(memPayCardSim.cvv || '').replace(/\D/g, '');
+      if (cvv.length !== 3) {
+        setMsg('El CVV debe tener exactamente 3 dígitos.');
+        return;
+      }
+    }
+    setLoading(true);
+    setMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/membresia/${memPaySelected.MEM_ID}/register-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          TPA_ID: Number(memPayTpaId),
+          PAG_MONTO_RECIBIDO: recibido,
+          PAG_VUELTO: Math.max(0, recibido - monto),
+          REACTIVATE_IF_SUSPENDED: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      setMemPayDone(data);
+      setMemPayList([]);
+      setMemPaySelected(null);
+      setMemPayTpaId('');
+      setMemPayRecibido('');
+      setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+      resetMemPayCardSimulator();
+      setMemPayQ('');
+      setMsg('');
+    } catch (e) {
+      setMsg(`Error: ${String(e?.message || e)}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function resetProcess() {
     setQuote(null);
     setCheckoutDone(null);
@@ -727,6 +893,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setShowGenerateForm(entradaOnly);
     setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
     resetCardSimulator();
+    setMemPayQ('');
+    setMemPayList([]);
+    setMemPaySelected(null);
+    setMemPayTpaId('');
+    setMemPayRecibido('');
+    setMemPayDone(null);
+    setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+    resetMemPayCardSimulator();
   }
 
   function downloadReceiptAndReset() {
@@ -781,7 +955,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       </header>
       <p className="admin-page-desc">
         {cobroOnly
-          ? 'Flujo de pago: carga ticket, selecciona tipo de cobro, ingresa NIT o CF, registra efectivo y confirma.'
+          ? 'Cobro de ticket: carga el PDF, tipo de cobro, NIT o CF y confirma. Membresía vencida: queda suspendida y no permite ingreso con tag hasta que renueves aquí en «Pagar membresía».'
           : entradaOnly
             ? 'Flujo de entrada: genera ticket para cliente esporádico o valida tag para cliente mensual.'
             : salidaOnly
@@ -804,6 +978,197 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
           ) : null}
         </div>
       ) : null}
+
+      {cobroOnly && !catalogLoading ? (
+        <section className="admin-panel-block ops-panel-block" style={{ marginTop: 4 }}>
+          <div className="admin-panel-head">
+            <h2>Pagar membresía</h2>
+            <p className="admin-panel-sub">
+              Renueva el plan mensual desde caja: busca por placa, elige la membresía y completa el pago con tarjeta.
+              Si el periodo venció, el sistema la suspende y el ingreso con tag queda bloqueado hasta pagar aquí.
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 10 }}>
+            <input
+              type="text"
+              placeholder="Placa (mín. 2 caracteres)"
+              value={memPayQ}
+              onChange={(e) => setMemPayQ(e.target.value.toUpperCase())}
+              style={{ padding: '8px 10px', minWidth: 220 }}
+            />
+            <button type="button" className="admin-btn-primary" onClick={buscarMembresiasParaPago} disabled={loading}>
+              Buscar
+            </button>
+          </div>
+          {memPayList.length > 0 ? (
+            <div style={{ marginTop: 12, maxHeight: 220, overflow: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+              {memPayList.map((m) => {
+                const id = m.MEM_ID ?? m.mem_id;
+                const sel = String(memPaySelected?.MEM_ID ?? '') === String(id);
+                const nom = [m.CLI_PRIMER_NOMBRE, m.CLI_PRIMER_APELLIDO].filter(Boolean).join(' ');
+                const venc = m.MEM_FECHA_VENCIMIENTO
+                  ? new Date(m.MEM_FECHA_VENCIMIENTO).toLocaleDateString('es-GT')
+                  : '—';
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setMemPaySelected(m);
+                      setMemPayRecibido('');
+                      setMemPayTpaId(String(memCardTipoPago?.TPA_ID || ''));
+                      setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+                      resetMemPayCardSimulator();
+                    }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '10px 12px',
+                      border: 'none',
+                      borderBottom: '1px solid #eee',
+                      background: sel ? '#ecfdf5' : '#fff',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <strong>#{id}</strong> — {m.VEH_PLACA || '—'} — {nom || 'Cliente'} — {m.TME_TIPO || 'Plan'} — Q
+                    {Number(m.TME_PRECIO ?? 0).toFixed(2)} — Vence {venc} — {m.EME_ESTADO || '—'}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {memPaySelected ? (
+            <div style={{ marginTop: 14, padding: 12, border: '1px solid #d1d5db', borderRadius: 8, background: '#fafafa' }}>
+              <p style={{ margin: '0 0 10px', fontSize: 14 }}>
+                Monto del plan: <strong>Q{memMontoPlan.toFixed(2)}</strong>
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                {!hasMemPayTpaSeleccionado ? (
+                  <div
+                    style={{
+                      width: '100%',
+                      marginTop: 8,
+                      border: '1px dashed #cbd5e1',
+                      borderRadius: 8,
+                      padding: 10,
+                      background: '#f8fafc',
+                      color: '#475569',
+                    }}
+                  >
+                    No hay tipo de pago con tarjeta configurado en catálogo.
+                  </div>
+                ) : isMemPayCardSelected ? (
+                  <div
+                    style={{
+                      width: '100%',
+                      marginTop: 8,
+                      border: '1px solid #dbeafe',
+                      borderRadius: 8,
+                      padding: 10,
+                      background: '#f8fbff',
+                    }}
+                  >
+                    <strong>Pago con tarjeta</strong>
+                    <p style={{ margin: '4px 0 8px', fontSize: 12, color: '#374151' }}>
+                      Inserta los datos de tu tarjeta para realizar el cobro.
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Número de tarjeta (16 dígitos)"
+                        value={memPayCardSim.numero}
+                        onChange={(e) =>
+                          setMemPayCardSim((p) => ({
+                            ...p,
+                            numero: e.target.value.replace(/\D/g, '').slice(0, 16),
+                          }))
+                        }
+                        style={{ padding: '8px 10px', minWidth: 220 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nombre en tarjeta"
+                        value={memPayCardSim.nombre}
+                        onChange={(e) =>
+                          setMemPayCardSim((p) => ({ ...p, nombre: e.target.value }))
+                        }
+                        style={{ padding: '8px 10px', minWidth: 180 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="MM/AA"
+                        value={memPayCardSim.exp}
+                        onChange={(e) =>
+                          setMemPayCardSim((p) => ({
+                            ...p,
+                            exp: (() => {
+                              const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+                              if (digits.length <= 2) return digits;
+                              return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+                            })(),
+                          }))
+                        }
+                        style={{ padding: '8px 10px', minWidth: 100 }}
+                      />
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        placeholder="CVV"
+                        value={memPayCardSim.cvv}
+                        onChange={(e) =>
+                          setMemPayCardSim((p) => ({
+                            ...p,
+                            cvv: e.target.value.replace(/\D/g, '').slice(0, 3),
+                          }))
+                        }
+                        style={{ padding: '8px 10px', minWidth: 90 }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      width: '100%',
+                      marginTop: 8,
+                      border: '1px dashed #cbd5e1',
+                      borderRadius: 8,
+                      padding: 10,
+                      background: '#f8fafc',
+                      color: '#475569',
+                    }}
+                  >
+                    El tipo de pago configurado para membresía no corresponde a tarjeta.
+                  </div>
+                )}
+                <button type="button" className="admin-btn-primary" onClick={confirmarPagoMembresia} disabled={loading}>
+                  Registrar pago
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {memPayDone ? (
+            <div
+              style={{
+                marginTop: 12,
+                padding: 10,
+                borderRadius: 8,
+                background: '#f0fdf4',
+                border: '1px solid #86efac',
+                fontSize: 14,
+              }}
+            >
+              <strong>Listo.</strong> Nueva vigencia hasta{' '}
+              {memPayDone.MEM_FECHA_VENCIMIENTO
+                ? new Date(memPayDone.MEM_FECHA_VENCIMIENTO).toLocaleString('es-GT')
+                : '—'}
+              {memPayDone.REACTIVATED ? ' (membresía reactivada).' : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         {!onlyKiosk ? <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span> : null}
         {!onlyKiosk ? (
@@ -1248,7 +1613,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="Monto recibido (manual)"
+                  placeholder="Monto recibido"
                   value={montoRecibido}
                   onChange={(e) => onMontoRecibidoChange(e.target.value)}
                   style={{ padding: '8px 10px', minWidth: 190 }}

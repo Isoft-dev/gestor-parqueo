@@ -62,7 +62,7 @@ const SECTIONS = {
         ops:{c:true,u:true,d:false} },
       { key: 'detalle-saldo', label: 'Detalle Saldo', id: 'DSA_ID',
         fields: [{ k:'DSA_ID',l:'ID',req:true },{ k:'DSA_CANTIDAD',l:'Cantidad',t:'number' },{ k:'DSA_SUBTOTAL',l:'Subtotal',t:'number' },{ k:'DSA_UMBRAL_MINIMO',l:'Umbral mínimo',t:'number' },{ k:'SDI_ID',l:'SDI_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true }],
-        ops:{c:false,u:true,d:false}, updateFields:['DSA_UMBRAL_MINIMO'] },
+        ops:{c:false,u:false,d:false} },
       { key: 'maquina', label: 'Máquina', id: 'MAQ_ID',
         fields: [
           { k:'MAQ_ID',l:'ID',req:true },
@@ -200,11 +200,10 @@ const SECTIONS = {
           { k:'BIV_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },
           { k:'VEH_ID',l:'Vehículo placa',req:true,placeholder:'Ej. P-123ABC' },
           { k:'INC_ID',l:'Incidente',req:true,t:'select',catalog:'incidente',valueKey:'INC_ID',labelKey:'INC_TIPO' },
-          { k:'BIV_RESUELTO',l:'Resuelto',t:'checkbox' },
           { k:'BIV_FECHA_RESOLUCION',l:'Fecha Resolución',t:'datetime-local' },
           { k:'USU_ID',l:'Usuario',t:'select',catalog:'usuario',valueKey:'USU_ID',labelKey:'USU_PRIMER_NOMBRE' },
         ],
-        ops:{c:true,u:true,d:false}, updateFields:['BIV_RESUELTO','BIV_FECHA_RESOLUCION'] },
+        ops:{c:true,u:true,d:false}, updateFields:['BIV_FECHA_RESOLUCION','USU_ID'] },
       { key: 'tipo-pago', label: 'Tipo de Pago', id: 'TPA_ID',
         fields: [{ k:'TPA_ID',l:'ID',req:true },{ k:'TPA_TIPO',l:'Tipo',req:true },{ k:'TPA_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:true,d:true} },
@@ -212,8 +211,8 @@ const SECTIONS = {
         fields: [{ k:'PAG_ID',l:'ID',req:true },{ k:'TPA_ID',l:'TPA_ID',req:true },{ k:'PAG_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'PAG_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'PAG_VUELTO',l:'Vuelto',t:'number' },{ k:'PAG_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true }],
         ops:{c:true,u:false,d:false} },
       { key: 'detalle-pago-membresia', label: 'Det. Pago Membresía', id: 'DPM_ID',
-        fields: [{ k:'DPM_ID',l:'ID',req:true },{ k:'MEM_ID',l:'MEM_ID',req:true },{ k:'PAG_ID',l:'PAG_ID',req:true },{ k:'DPM_MES_CANCELADO',l:'Mes Cancelado',t:'number',req:true }],
-        ops:{c:true,u:false,d:false} },
+        fields: [{ k:'DPM_ID',l:'ID',req:true },{ k:'MEM_ID',l:'MEM_ID',req:true },{ k:'PAG_ID',l:'PAG_ID',req:true }],
+        ops:{c:false,u:false,d:false} },
     ],
   },
 };
@@ -315,24 +314,28 @@ function getAdminListContextHint(sectionPath, entityKey) {
   const HINTS = {
     'clientes-mensuales': {
       cliente:
-        'Clientes dados de alta para el esquema mensual. Desde aquí actualizas datos de contacto y dirección.',
+        'Todas las fichas de cliente (con o sin vehículo/membresía). Usa la búsqueda por nombre, apellido o DPI para acotar.',
       membresia:
         'Contratos mensuales: unen un vehículo con un espacio fijo y el tipo de plan elegido.',
+      'detalle-pago-membresia':
+        'Cada fila representa un pago aplicado a una membresía. Puedes filtrar por placa con la búsqueda.',
       vehiculo:
-        'Solo se muestran vehículos de clientes que ya tienen al menos una membresía (tu flota mensual).',
-      'tipo-vehiculo': 'Catálogo de categorías de vehículo (sedán, SUV, etc.) que asignas a cada placa.',
+        'Vehículos vinculados a un cliente mensual, incluso si todavía no tienen una membresía activa.',
+      'tipo-vehiculo': 'Tipos de vehículo disponibles (sedán, SUV, etc.) para clasificar cada placa.',
       'tipo-membresia': 'Planes disponibles: duración, precio y nombre comercial para nuevas membresías.',
       'estado-membresia': 'Estados posibles del contrato (activa, vencida, suspendida…).',
       'registro-movimiento-membresia':
-        'Movimientos de entrada y salida registrados contra cada membresía.',
+        'Movimientos de entrada y salida por membresía. Opcional: filtra por placa con la búsqueda.',
     },
     'tickets-vehiculos': {
+      cliente:
+        'Clientes esporádicos capturados por NIT en cobro (sin membresía). Puedes buscarlos por nombre, apellido o nombre completo.',
       'estado-ticket':
         'Define en qué etapa va cada ticket (por ejemplo activo o ya pagado).',
       ticket:
-        'Tickets de visitantes sin plan mensual. Consejo: en la barra del navegador puedes añadir ?q= y escribir parte del código o de la placa para acotar la lista.',
+        'Tickets de visitantes sin plan mensual. Usa el buscador para filtrar por código o placa.',
       vehiculo:
-        'Vehículos de visita o factura puntual: ves placas sin cliente, o con cliente pero sin ninguna membresía (típico tras pagar con NIT en caja).',
+        'Vehículos de visita: placas sin cliente (entrada esporádica). Si un vehículo queda vinculado a un cliente, pasa al apartado Clientes mensuales.',
       cobro: 'Historial de cobros al salir: montos, NIT o consumidor final y máquina donde se pagó.',
       'tipo-cobro': 'Tipos de cobro que el cajero elige al cerrar un ticket (efectivo, tarjeta, etc.).',
       'detalle-maquina-ticket':
@@ -368,7 +371,7 @@ function getAdminListContextHint(sectionPath, entityKey) {
     alertas: {
       'tipo-alerta': 'Motivos por los que el sistema genera alertas (saldo bajo, asistencia, etc.).',
       'estado-alerta': 'Etapas de atención de una alerta (pendiente, en curso, cerrada…).',
-      alerta: 'Listado de alertas generadas; revisa prioridad y máquina asociada.',
+      alerta: 'Listado de alertas generadas; revisa su estado y la máquina asociada.',
     },
   };
 
@@ -534,10 +537,15 @@ function openAlertaDetailPopup(row, formatValue) {
  * `sessionUserId`: USU_ID del admin logueado (bitácora: marca quién resolvió el incidente).
  * `sectionPath`: ruta del módulo en `/admin` (muestra textos de ayuda acordes a cada lista).
  */
-const emptyBivFilter = { inc: '', resuelto: '', desde: '', hasta: '' };
+const emptyBivFilter = { placa: '', resuelto: '', desde: '', hasta: '' };
 const emptyAlertaFilter = { eal: '', tal: '', maq: '' };
 const emptyTicketFilter = { eti: '', q: '' };
+const emptyClienteFilter = { q: '' };
+const emptyMembresiaFilter = { q: '', eme: '' };
+const emptyDetalleMaqTicketFilter = { q: '', tx: '' };
 const emptyDetalleSaldoMaqFilter = { maq: '' };
+const emptyRmmPlacaFilter = { placa: '' };
+const emptyDpmPlacaFilter = { placa: '' };
 
 export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null, sectionPath = '' }) {
   const readOnlyFieldStyle = {
@@ -564,7 +572,13 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   const [bivFilter, setBivFilter] = useState(emptyBivFilter);
   const [alertaFilter, setAlertaFilter] = useState(emptyAlertaFilter);
   const [ticketFilter, setTicketFilter] = useState(emptyTicketFilter);
+  const [clienteFilter, setClienteFilter] = useState(emptyClienteFilter);
+  const [membresiaFilter, setMembresiaFilter] = useState(emptyMembresiaFilter);
+  const [detalleMaqTicketFilter, setDetalleMaqTicketFilter] = useState(emptyDetalleMaqTicketFilter);
+  const [detalleMaqTicketTxOptions, setDetalleMaqTicketTxOptions] = useState([]);
   const [detalleSaldoMaqFilter, setDetalleSaldoMaqFilter] = useState(emptyDetalleSaldoMaqFilter);
+  const [rmmPlacaFilter, setRmmPlacaFilter] = useState(emptyRmmPlacaFilter);
+  const [dpmPlacaFilter, setDpmPlacaFilter] = useState(emptyDpmPlacaFilter);
   /** Modal MEM-2: vehículo sin cliente al crear membresía */
   const [vehClienteModal, setVehClienteModal] = useState(null);
   /** Catálogos para campos `t: 'select'` (clave = segmento API, p. ej. tipo-vehiculo). */
@@ -623,7 +637,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     if (entity?.key !== 'bitacora-incidente-vehiculo') return;
     const r = searchParams.get('biv_resuelto');
     setBivFilter({
-      inc: searchParams.get('inc_id') || '',
+      placa: searchParams.get('biv_placa') || '',
       resuelto: r === '0' || r === '1' ? r : '',
       desde: (searchParams.get('biv_desde') || '').slice(0, 10),
       hasta: (searchParams.get('biv_hasta') || '').slice(0, 10),
@@ -648,9 +662,46 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
 
   useEffect(() => {
+    if (entity?.key !== 'cliente') return;
+    setClienteFilter({
+      q: searchParams.get('cli_q') || '',
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
+    if (entity?.key !== 'membresia') return;
+    setMembresiaFilter({
+      q: searchParams.get('mem_q') || '',
+      eme: searchParams.get('mem_eme') || '',
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
+    if (entity?.key !== 'detalle-maquina-ticket') return;
+    setDetalleMaqTicketFilter({
+      q: searchParams.get('dmt_q') || '',
+      tx: searchParams.get('dmt_tx') || '',
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
     if (entity?.key !== 'detalle-saldo') return;
     setDetalleSaldoMaqFilter({
       maq: searchParams.get('ds_maq_id') || '',
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
+    if (entity?.key !== 'registro-movimiento-membresia') return;
+    setRmmPlacaFilter({
+      placa: searchParams.get('rmm_placa') || '',
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
+    if (entity?.key !== 'detalle-pago-membresia') return;
+    setDpmPlacaFilter({
+      placa: searchParams.get('dpm_placa') || '',
     });
   }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
 
@@ -704,9 +755,48 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         }
         listUrl = `${API_BASE}/detalle-saldo/maquina/${encodeURIComponent(String(dsMaq).trim())}`;
       }
+      if (entity.key === 'cliente') {
+        const p = new URLSearchParams();
+        if (sectionPath === 'clientes-mensuales') p.set('mode', 'mensual');
+        if (sectionPath === 'tickets-vehiculos') p.set('mode', 'esporadico');
+        const q = (searchParams.get('cli_q') || '').trim();
+        if (q) p.set('q', q);
+        const qs = p.toString();
+        if (qs) listUrl += `?${qs}`;
+      }
+      if (entity.key === 'registro-movimiento-membresia') {
+        const placa = (searchParams.get('rmm_placa') || '').trim();
+        if (placa) listUrl += `?placa=${encodeURIComponent(placa)}`;
+      }
+      if (entity.key === 'detalle-pago-membresia') {
+        const placa = (searchParams.get('dpm_placa') || '').trim();
+        if (placa) listUrl += `?placa=${encodeURIComponent(placa)}`;
+      }
       const res = await fetch(listUrl, { cache: 'no-store' });
       const data = await res.json();
       let list = Array.isArray(data) ? data : [];
+      if (entity.key === 'detalle-maquina-ticket') {
+        const needsPlacaJoin = list.some((r) => (r.VEH_PLACA == null || String(r.VEH_PLACA).trim() === ''));
+        if (needsPlacaJoin) {
+          try {
+            const tRes = await fetch(`${API_BASE}/ticket`, { cache: 'no-store' });
+            const tData = await tRes.json();
+            const tickets = Array.isArray(tData) ? tData : [];
+            const byTicId = new Map(
+              tickets.map((t) => [String(t.TIC_ID ?? ''), String(t.VEH_PLACA ?? '').trim()]),
+            );
+            list = list.map((r) => ({
+              ...r,
+              VEH_PLACA: String(r.VEH_PLACA ?? '').trim() || byTicId.get(String(r.TIC_ID ?? '')) || '',
+            }));
+          } catch {
+            // Si falla el enrich, seguimos con la data original.
+          }
+        }
+        const txOptions = [...new Set(list.map((r) => String(r.DMT_TRANSACCION ?? '').trim()).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+        setDetalleMaqTicketTxOptions(txOptions);
+      }
       if (entity.key === 'alerta') {
         const eal = searchParams.get('eal_id');
         const tal = searchParams.get('tal_id');
@@ -716,11 +806,13 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         if (maq) list = list.filter((r) => String(r.MAQ_ID ?? r.maq_id) === maq);
       }
       if (entity.key === 'bitacora-incidente-vehiculo') {
-        const inc = searchParams.get('inc_id');
+        const placa = (searchParams.get('biv_placa') || '').trim().toUpperCase();
         const resu = searchParams.get('biv_resuelto');
         const desde = searchParams.get('biv_desde');
         const hasta = searchParams.get('biv_hasta');
-        if (inc) list = list.filter((r) => String(r.INC_ID ?? r.inc_id) === inc);
+        if (placa) {
+          list = list.filter((r) => String(r.VEH_PLACA ?? r.veh_placa ?? '').toUpperCase().includes(placa));
+        }
         if (resu === '0' || resu === '1') {
           const want = resu === '1';
           list = list.filter((r) => {
@@ -761,6 +853,38 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
             const placa = String(r.VEH_PLACA ?? '').toUpperCase();
             return cod.includes(q) || placa.includes(q);
           });
+        }
+      }
+      if (entity.key === 'membresia') {
+        const q = (searchParams.get('mem_q') || '').trim().toUpperCase();
+        const eme = (searchParams.get('mem_eme') || '').trim();
+        if (eme) list = list.filter((r) => String(r.EME_ID ?? r.eme_id) === eme);
+        if (q) {
+          list = list.filter((r) => {
+            const nombre = [
+              r.CLI_PRIMER_NOMBRE,
+              r.CLI_SEGUNDO_NOMBRE,
+              r.CLI_PRIMER_APELLIDO,
+              r.CLI_SEGUNDO_APELLIDO,
+            ]
+              .map((x) => String(x ?? '').trim())
+              .filter(Boolean)
+              .join(' ')
+              .toUpperCase();
+            const cliId = String(r.CLI_ID ?? '').toUpperCase();
+            const placa = String(r.VEH_PLACA ?? '').toUpperCase();
+            return nombre.includes(q) || cliId.includes(q) || placa.includes(q);
+          });
+        }
+      }
+      if (entity.key === 'detalle-maquina-ticket') {
+        const q = (searchParams.get('dmt_q') || '').trim().toUpperCase();
+        const tx = (searchParams.get('dmt_tx') || '').trim().toUpperCase();
+        if (tx) {
+          list = list.filter((r) => String(r.DMT_TRANSACCION ?? '').toUpperCase() === tx);
+        }
+        if (q) {
+          list = list.filter((r) => String(r.VEH_PLACA ?? '').toUpperCase().includes(q));
         }
       }
       if (entity.key === 'vehiculo') {
@@ -823,8 +947,8 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   function applyBivFilters(e) {
     e.preventDefault();
     const p = new URLSearchParams(searchParams);
-    ['inc_id', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
-    if (bivFilter.inc.trim()) p.set('inc_id', bivFilter.inc.trim());
+    ['biv_placa', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
+    if (bivFilter.placa.trim()) p.set('biv_placa', bivFilter.placa.trim());
     if (bivFilter.resuelto === '0' || bivFilter.resuelto === '1') p.set('biv_resuelto', bivFilter.resuelto);
     if (bivFilter.desde.trim()) p.set('biv_desde', bivFilter.desde.trim());
     if (bivFilter.hasta.trim()) p.set('biv_hasta', bivFilter.hasta.trim());
@@ -833,7 +957,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
 
   function clearBivFilters() {
     const p = new URLSearchParams(searchParams);
-    ['inc_id', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
+    ['biv_placa', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
     setSearchParams(p, { replace: true });
     setBivFilter(emptyBivFilter);
   }
@@ -872,6 +996,60 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     setTicketFilter(emptyTicketFilter);
   }
 
+  function applyClienteFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    p.delete('cli_q');
+    const qTrim = clienteFilter.q.trim();
+    if (qTrim) p.set('cli_q', qTrim);
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearClienteFilters() {
+    const p = new URLSearchParams(searchParams);
+    p.delete('cli_q');
+    setSearchParams(p, { replace: true });
+    setClienteFilter(emptyClienteFilter);
+  }
+
+  function applyMembresiaFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    p.delete('mem_q');
+    p.delete('mem_eme');
+    const qTrim = membresiaFilter.q.trim();
+    if (qTrim) p.set('mem_q', qTrim);
+    if (membresiaFilter.eme) p.set('mem_eme', membresiaFilter.eme);
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearMembresiaFilters() {
+    const p = new URLSearchParams(searchParams);
+    p.delete('mem_q');
+    p.delete('mem_eme');
+    setSearchParams(p, { replace: true });
+    setMembresiaFilter(emptyMembresiaFilter);
+  }
+
+  function applyDetalleMaqTicketFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    p.delete('dmt_q');
+    p.delete('dmt_tx');
+    const qTrim = detalleMaqTicketFilter.q.trim();
+    if (qTrim) p.set('dmt_q', qTrim);
+    if (detalleMaqTicketFilter.tx) p.set('dmt_tx', detalleMaqTicketFilter.tx);
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearDetalleMaqTicketFilters() {
+    const p = new URLSearchParams(searchParams);
+    p.delete('dmt_q');
+    p.delete('dmt_tx');
+    setSearchParams(p, { replace: true });
+    setDetalleMaqTicketFilter(emptyDetalleMaqTicketFilter);
+  }
+
   function applyDetalleSaldoMaqFilter(e) {
     e.preventDefault();
     const id = String(detalleSaldoMaqFilter.maq ?? '').trim();
@@ -893,6 +1071,38 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     setDetalleSaldoMaqFilter(emptyDetalleSaldoMaqFilter);
   }
 
+  function applyRmmPlacaFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    p.delete('rmm_placa');
+    const placaTrim = rmmPlacaFilter.placa.trim();
+    if (placaTrim) p.set('rmm_placa', placaTrim);
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearRmmPlacaFilters() {
+    const p = new URLSearchParams(searchParams);
+    p.delete('rmm_placa');
+    setSearchParams(p, { replace: true });
+    setRmmPlacaFilter(emptyRmmPlacaFilter);
+  }
+
+  function applyDpmPlacaFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    p.delete('dpm_placa');
+    const placaTrim = dpmPlacaFilter.placa.trim();
+    if (placaTrim) p.set('dpm_placa', placaTrim);
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearDpmPlacaFilters() {
+    const p = new URLSearchParams(searchParams);
+    p.delete('dpm_placa');
+    setSearchParams(p, { replace: true });
+    setDpmPlacaFilter(emptyDpmPlacaFilter);
+  }
+
   async function showMachineData(maqId, endpoint, title) {
     try {
       setMsg('');
@@ -906,6 +1116,51 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       });
     } catch (err) {
       setMsg('Error: ' + err.message);
+    }
+  }
+
+  async function quickRecargarDetalleSaldo(row) {
+    const maqId = row?.MAQ_ID;
+    const sdiId = row?.SDI_ID;
+    if (maqId == null || sdiId == null) {
+      setMsg('No se pudo identificar máquina o denominación para recargar.');
+      return;
+    }
+    const tipoSaldo = String(row?.SDI_TIPO ?? `SDI ${sdiId}`).trim();
+    const input = window.prompt(`¿Cuántos billetes deseas agregar para ${tipoSaldo}?`, '0');
+    if (input == null) return;
+    const qty = Number(String(input).trim());
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setMsg('Ingresa una cantidad válida mayor a 0.');
+      return;
+    }
+    const cantidad = Math.floor(qty);
+    if (cantidad <= 0) {
+      setMsg('La cantidad debe ser un número entero mayor a 0.');
+      return;
+    }
+    try {
+      setMsg('');
+      const descripcion = `Se recarga la máquina con ${cantidad} billetes de ${tipoSaldo}`;
+      const payload = {
+        MAQ_ID: maqId,
+        RMA_MANTENIMIENTO_FECHA: new Date().toISOString(),
+        RMA_DESCRIPCION: descripcion,
+        RECARGA_DETALLE_SALDO: [
+          { SDI_ID: sdiId, DSA_CANTIDAD: cantidad },
+        ],
+      };
+      const res = await fetch(`${API_BASE}/recargo-maquina`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json?.error || json?.message || res.statusText);
+      setMsg('Recarga aplicada y registrada en Recargo Máquina.');
+      await load();
+    } catch (e) {
+      setMsg(`Error: ${e.message}`);
     }
   }
 
@@ -1001,8 +1256,22 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       sessionUserId != null &&
       String(sessionUserId).trim() !== ''
     ) {
-      const resuelto = Number(payload.BIV_RESUELTO) === 1 || payload.BIV_RESUELTO === true;
-      if (resuelto) payload.USU_ID = sessionUserId;
+      const tieneFechaResolucion =
+        payload.BIV_FECHA_RESOLUCION != null &&
+        String(payload.BIV_FECHA_RESOLUCION).trim() !== '';
+      payload.BIV_RESUELTO = tieneFechaResolucion ? 1 : 0;
+      if (tieneFechaResolucion && (payload.USU_ID == null || String(payload.USU_ID).trim() === '')) {
+        payload.USU_ID = sessionUserId;
+      }
+    }
+    if (entity.key === 'vehiculo' && sectionPath === 'clientes-mensuales') {
+      const cli = payload.CLI_ID;
+      if (cli == null || String(cli).trim() === '') {
+        setMsg(
+          'Indica el CLI_ID del cliente. En Clientes mensuales el vehículo debe quedar vinculado a un cliente para listarse en esta sección.',
+        );
+        return;
+      }
     }
     try {
       const res = await fetch(
@@ -1218,15 +1487,14 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
               {entity.key === 'bitacora-incidente-vehiculo' ? (
                 <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyBivFilters}>
                   <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Incidente</span>
+                    <span className="crudx-ticket-search-estado-label">Placa</span>
                     <input
                       className="admin-search-input crudx-admin-filter-input-compact"
-                      type="text"
-                      inputMode="numeric"
-                      value={bivFilter.inc}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, inc: e.target.value }))}
-                      placeholder="Ej. 1"
-                      aria-label="Incidente por ID"
+                      type="search"
+                      value={bivFilter.placa}
+                      onChange={(e) => setBivFilter((f) => ({ ...f, placa: e.target.value }))}
+                      placeholder="🔍 Placa"
+                      aria-label="Filtrar por placa"
                     />
                   </label>
                   <label className="crudx-ticket-search-estado">
@@ -1378,14 +1646,6 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                 </form>
               ) : entity.key === 'ticket' ? (
                 <div className="crudx-ticket-search-block">
-                  <div className="admin-panel-head admin-panel-head--row">
-                    <div className="admin-panel-head-text">
-                      <h2>{entity.label}</h2>
-                      <p className="admin-panel-sub">
-                        Busca por código de ticket o placa del vehículo. Filtra por estado del ticket si lo necesitas.
-                      </p>
-                    </div>
-                  </div>
                   <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyTicketFilters}>
                     <div className="admin-search-input-wrap">
                       <input
@@ -1427,6 +1687,186 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         onClick={clearTicketFilters}
                         disabled={loading}
                         title="Quitar búsqueda y filtros de la lista"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : entity.key === 'cliente' ? (
+                <div className="crudx-ticket-search-block">
+                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyClienteFilters}>
+                    <div className="admin-search-input-wrap">
+                      <input
+                        className="admin-search-input"
+                        type="search"
+                        value={clienteFilter.q}
+                        onChange={(e) => setClienteFilter((f) => ({ ...f, q: e.target.value }))}
+                        placeholder="🔍 Nombre o DPI"
+                        autoComplete="off"
+                        aria-label="Buscar cliente por nombre, apellido, nombre completo o DPI"
+                      />
+                    </div>
+                    <div className="admin-search-actions">
+                      <button type="submit" className="admin-btn-search" disabled={loading}>
+                        Buscar
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn-search-clear"
+                        onClick={clearClienteFilters}
+                        disabled={loading}
+                        title="Quitar búsqueda de clientes"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : entity.key === 'membresia' ? (
+                <div className="crudx-ticket-search-block">
+                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyMembresiaFilters}>
+                    <div className="admin-search-input-wrap">
+                      <input
+                        className="admin-search-input"
+                        type="search"
+                        value={membresiaFilter.q}
+                        onChange={(e) => setMembresiaFilter((f) => ({ ...f, q: e.target.value }))}
+                        placeholder="🔍 Cliente o placa"
+                        autoComplete="off"
+                        aria-label="Filtrar membresía por cliente o placa"
+                      />
+                    </div>
+                    <label className="crudx-ticket-search-estado">
+                      <span className="crudx-ticket-search-estado-label">Estado membresía</span>
+                      <select
+                        className="admin-search-select"
+                        value={membresiaFilter.eme}
+                        onChange={(e) => setMembresiaFilter((f) => ({ ...f, eme: e.target.value }))}
+                        aria-label="Filtrar membresía por estado"
+                      >
+                        <option value="">Todos</option>
+                        {(catalogOptions?.['estado-membresia'] || []).map((x) => (
+                          <option key={x.EME_ID} value={String(x.EME_ID)}>
+                            {x.EME_ESTADO}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="admin-search-actions">
+                      <button type="submit" className="admin-btn-search" disabled={loading}>
+                        Buscar
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn-search-clear"
+                        onClick={clearMembresiaFilters}
+                        disabled={loading}
+                        title="Quitar filtros de membresías"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : entity.key === 'detalle-pago-membresia' ? (
+                <div className="crudx-ticket-search-block">
+                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyDpmPlacaFilters}>
+                    <div className="admin-search-input-wrap">
+                      <input
+                        className="admin-search-input"
+                        type="search"
+                        value={dpmPlacaFilter.placa}
+                        onChange={(e) => setDpmPlacaFilter((f) => ({ ...f, placa: e.target.value }))}
+                        placeholder="🔍 Placa"
+                        autoComplete="off"
+                        aria-label="Filtrar detalle de pago membresía por placa; deja vacío para ver todos"
+                      />
+                    </div>
+                    <div className="admin-search-actions">
+                      <button type="submit" className="admin-btn-search" disabled={loading}>
+                        Buscar
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn-search-clear"
+                        onClick={clearDpmPlacaFilters}
+                        disabled={loading}
+                        title="Quitar filtro de placa"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : entity.key === 'detalle-maquina-ticket' ? (
+                <div className="crudx-ticket-search-block">
+                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyDetalleMaqTicketFilters}>
+                    <div className="admin-search-input-wrap">
+                      <input
+                        className="admin-search-input"
+                        type="search"
+                        value={detalleMaqTicketFilter.q}
+                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, q: e.target.value }))}
+                        placeholder="🔍 Placa"
+                        autoComplete="off"
+                        aria-label="Filtrar detalle máquina-ticket por placa"
+                      />
+                    </div>
+                    <label className="crudx-ticket-search-estado">
+                      <span className="crudx-ticket-search-estado-label">Transacción</span>
+                      <select
+                        className="admin-search-select"
+                        value={detalleMaqTicketFilter.tx}
+                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, tx: e.target.value }))}
+                        aria-label="Filtrar detalle máquina-ticket por transacción"
+                      >
+                        <option value="">Todas</option>
+                        {detalleMaqTicketTxOptions.map((tx) => (
+                          <option key={tx} value={tx}>{tx}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="admin-search-actions">
+                      <button type="submit" className="admin-btn-search" disabled={loading}>
+                        Buscar
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn-search-clear"
+                        onClick={clearDetalleMaqTicketFilters}
+                        disabled={loading}
+                        title="Quitar filtros de Det. Máq/Ticket"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : entity.key === 'registro-movimiento-membresia' ? (
+                <div className="crudx-ticket-search-block">
+                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyRmmPlacaFilters}>
+                    <div className="admin-search-input-wrap">
+                      <input
+                        className="admin-search-input"
+                        type="search"
+                        value={rmmPlacaFilter.placa}
+                        onChange={(e) => setRmmPlacaFilter((f) => ({ ...f, placa: e.target.value }))}
+                        placeholder="🔍 Placa (opcional, acota la lista)"
+                        autoComplete="off"
+                        aria-label="Filtrar movimientos de membresía por placa; deja vacío para ver todos"
+                      />
+                    </div>
+                    <div className="admin-search-actions">
+                      <button type="submit" className="admin-btn-search" disabled={loading}>
+                        Buscar
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn-search-clear"
+                        onClick={clearRmmPlacaFilters}
+                        disabled={loading}
+                        title="Quitar filtro de placa"
                       >
                         Limpiar
                       </button>
@@ -1619,7 +2059,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                 <p className="crudx-empty" role="status">
                   {entity?.key === 'detalle-saldo'
                     ? 'No hay registros de detalle de saldo para la máquina seleccionada.'
-                    : 'Sin registros en esta entidad.'}
+                    : entity?.key === 'registro-movimiento-membresia'
+                      ? (searchParams.get('rmm_placa') || '').trim()
+                        ? 'No hay movimientos de membresía para la placa indicada.'
+                        : 'No hay movimientos de membresía registrados.'
+                      : entity?.key === 'detalle-pago-membresia'
+                        ? (searchParams.get('dpm_placa') || '').trim()
+                          ? 'No hay detalles de pago de membresía para la placa indicada.'
+                          : 'No hay detalles de pago de membresía registrados.'
+                        : 'Sin registros en esta entidad.'}
                 </p>
               ) : (
                 <div
@@ -1631,11 +2079,53 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                       <tr>
                         {Object.keys(rows[0])
                           .filter((c) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
+                          .filter((c) => !(entity?.key === 'detalle-saldo' && c === 'SDI_ID'))
+                          .filter((c) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_ID'))
+                          .filter((c) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_CODIGO'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'EME_ESTADO'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'TME_TIPO'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'ESP_CODIGO'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'CLI_PRIMER_NOMBRE'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'CLI_SEGUNDO_NOMBRE'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'CLI_PRIMER_APELLIDO'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'CLI_SEGUNDO_APELLIDO'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'VEH_ID'))
+                          .filter((c) => !(entity?.key === 'membresia' && c === 'VEH_MODELO'))
+                          .filter(
+                            (c) =>
+                              !(
+                                entity?.key === 'detalle-pago-membresia'
+                                && (c === 'DPM_MES_CANCELADO' || c === 'dpm_mes_cancelado')
+                              ),
+                          )
+                          .filter(
+                            (c) =>
+                              !(
+                                entity?.key === 'detalle-pago-membresia'
+                                && (
+                                  c === 'CLI_PRIMER_NOMBRE'
+                                  || c === 'CLI_SEGUNDO_NOMBRE'
+                                  || c === 'CLI_PRIMER_APELLIDO'
+                                  || c === 'CLI_SEGUNDO_APELLIDO'
+                                )
+                              ),
+                          )
                           .filter(
                             (c) =>
                               !(
                                 entity?.key === 'bitacora-incidente-vehiculo'
-                                && (c === 'USU_PRIMER_NOMBRE' || c === 'USU_PRIMER_APELLIDO' || c === 'INC_ID')
+                                && (
+                                  c === 'VEH_ID'
+                                  || c === 'VEH_MODELO'
+                                  || c === 'BIV_RESUELTO'
+                                  || c === 'USU_PRIMER_NOMBRE'
+                                  || c === 'USU_PRIMER_APELLIDO'
+                                  || c === 'INC_ID'
+                                  || c === 'CLI_ID'
+                                  || c === 'CLI_PRIMER_NOMBRE'
+                                  || c === 'CLI_PRIMER_APELLIDO'
+                                  || c === 'CLI_CORREO'
+                                )
                               ),
                           )
                           .map((c) => (
@@ -1648,12 +2138,32 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   ? 'Tipo alerta'
                                 : entity?.key === 'alerta' && c === 'ALE_USU_ID_RESOLVIO'
                                   ? 'Persona a cargo'
+                                  : entity?.key === 'membresia' && c === 'EME_ID'
+                                    ? 'Estado membresía'
+                                    : entity?.key === 'membresia' && c === 'TME_ID'
+                                      ? 'Tipo membresía'
+                                      : entity?.key === 'membresia' && c === 'CLI_ID'
+                                        ? 'Cliente'
+                                        : entity?.key === 'membresia' && c === 'ESP_ID'
+                                          ? 'Espacio'
                                   : entity?.key === 'bitacora-incidente-vehiculo' && c === 'USU_ID'
                                     ? 'Usuario'
-                                    : getDbColumnLabel(c, CRUD_COLUMN_LABELS)}
+                                    : entity?.key === 'registro-movimiento-membresia' && c === 'VEH_PLACA'
+                                      ? 'Placa'
+                                      : entity?.key === 'registro-movimiento-membresia' && c === 'MEM_ID'
+                                        ? 'Membresía'
+                                        : entity?.key === 'detalle-pago-membresia' && c === 'VEH_PLACA'
+                                          ? 'Placa'
+                                          : entity?.key === 'detalle-pago-membresia' && c === 'MEM_ID'
+                                            ? 'Membresía'
+                                          : entity?.key === 'detalle-pago-membresia' && c === 'PAG_FECHA_HORA'
+                                            ? 'Fecha pago'
+                                            : entity?.key === 'detalle-pago-membresia' && c === 'PAG_ID'
+                                              ? 'Pago'
+                                              : getDbColumnLabel(c, CRUD_COLUMN_LABELS)}
                           </th>
                         ))}
-                        {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
+                        {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket' || entity.key === 'detalle-saldo') && (
                           <th>Acc.</th>
                         )}
                       </tr>
@@ -1663,11 +2173,53 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         <tr key={i}>
                           {Object.entries(row)
                             .filter(([c]) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
+                            .filter(([c]) => !(entity?.key === 'detalle-saldo' && c === 'SDI_ID'))
+                            .filter(([c]) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_ID'))
+                            .filter(([c]) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_CODIGO'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'EME_ESTADO'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'TME_TIPO'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'ESP_CODIGO'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'CLI_PRIMER_NOMBRE'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'CLI_SEGUNDO_NOMBRE'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'CLI_PRIMER_APELLIDO'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'CLI_SEGUNDO_APELLIDO'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'VEH_ID'))
+                            .filter(([c]) => !(entity?.key === 'membresia' && c === 'VEH_MODELO'))
+                            .filter(
+                              ([c]) =>
+                                !(
+                                  entity?.key === 'detalle-pago-membresia'
+                                  && (c === 'DPM_MES_CANCELADO' || c === 'dpm_mes_cancelado')
+                                ),
+                            )
+                            .filter(
+                              ([c]) =>
+                                !(
+                                  entity?.key === 'detalle-pago-membresia'
+                                  && (
+                                    c === 'CLI_PRIMER_NOMBRE'
+                                    || c === 'CLI_SEGUNDO_NOMBRE'
+                                    || c === 'CLI_PRIMER_APELLIDO'
+                                    || c === 'CLI_SEGUNDO_APELLIDO'
+                                  )
+                                ),
+                            )
                             .filter(
                               ([c]) =>
                                 !(
                                   entity?.key === 'bitacora-incidente-vehiculo'
-                                  && (c === 'USU_PRIMER_NOMBRE' || c === 'USU_PRIMER_APELLIDO' || c === 'INC_ID')
+                                  && (
+                                    c === 'VEH_ID'
+                                    || c === 'VEH_MODELO'
+                                    || c === 'BIV_RESUELTO'
+                                    || c === 'USU_PRIMER_NOMBRE'
+                                    || c === 'USU_PRIMER_APELLIDO'
+                                    || c === 'INC_ID'
+                                    || c === 'CLI_ID'
+                                    || c === 'CLI_PRIMER_NOMBRE'
+                                    || c === 'CLI_PRIMER_APELLIDO'
+                                    || c === 'CLI_CORREO'
+                                  )
                                 ),
                             )
                             .map(([c, v]) => {
@@ -1735,6 +2287,65 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                 </td>
                               );
                             }
+                            if (entity?.key === 'membresia' && c === 'EME_ID') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {row?.EME_ESTADO == null || String(row.EME_ESTADO).trim() === ''
+                                    ? (v == null ? '—' : String(v))
+                                    : String(row.EME_ESTADO)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'membresia' && c === 'TME_ID') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {row?.TME_TIPO == null || String(row.TME_TIPO).trim() === ''
+                                    ? (v == null ? '—' : String(v))
+                                    : String(row.TME_TIPO)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'membresia' && c === 'CLI_ID') {
+                              const nombreCliente = [
+                                row?.CLI_PRIMER_NOMBRE,
+                                row?.CLI_SEGUNDO_NOMBRE,
+                                row?.CLI_PRIMER_APELLIDO,
+                                row?.CLI_SEGUNDO_APELLIDO,
+                              ]
+                                .map((x) => String(x ?? '').trim())
+                                .filter(Boolean)
+                                .join(' ');
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {nombreCliente || (v == null ? '—' : String(v))}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'membresia' && c === 'ESP_ID') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {row?.ESP_CODIGO == null || String(row.ESP_CODIGO).trim() === ''
+                                    ? (v == null ? '—' : String(v))
+                                    : String(row.ESP_CODIGO)}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'detalle-pago-membresia' && c === 'MEM_ID') {
+                              const nombreCliente = [
+                                row?.CLI_PRIMER_NOMBRE,
+                                row?.CLI_SEGUNDO_NOMBRE,
+                                row?.CLI_PRIMER_APELLIDO,
+                                row?.CLI_SEGUNDO_APELLIDO,
+                              ]
+                                .map((x) => String(x ?? '').trim())
+                                .filter(Boolean)
+                                .join(' ');
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  {nombreCliente || (v == null ? '—' : String(v))}
+                                </td>
+                              );
+                            }
                             return (
                               <td key={c} className="crudx-cell-ellipsis">
                                 {v == null ? '—'
@@ -1744,7 +2355,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                               </td>
                             );
                           })}
-                          {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket') && (
+                          {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket' || entity.key === 'detalle-saldo') && (
                             <td className="crudx-actions-cell">
                               {entity.ops.u && (
                                 <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">
@@ -1752,6 +2363,10 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                     ? (labelEstadoAlerta(row?.EAL_ID, catalogOptions).trim().toLowerCase() === 'atendida'
                                       ? 'Editar'
                                       : 'Resolver')
+                                    : entity.key === 'bitacora-incidente-vehiculo'
+                                      ? ((Number(row?.BIV_RESUELTO ?? 0) === 1 || row?.BIV_RESUELTO === true || row?.BIV_RESUELTO === '1')
+                                        ? 'Editar'
+                                        : 'Resolver')
                                     : 'Editar'}
                                 </button>
                               )}
@@ -1800,6 +2415,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   className="crudx-btn-secondary crudx-btn-xs"
                                 >
                                   Descargar Tag
+                                </button>
+                              )}
+                              {entity.key === 'detalle-saldo' && (
+                                <button
+                                  type="button"
+                                  onClick={() => quickRecargarDetalleSaldo(row)}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  Agregar
                                 </button>
                               )}
                               {entity.key === 'maquina' && (

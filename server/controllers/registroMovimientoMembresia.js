@@ -1,8 +1,9 @@
 import * as service from '../services/registroMovimientoMembresia.js';
 
-export async function getAll(_req, res) {
+export async function getAll(req, res) {
   try {
-    res.json(await service.getAll());
+    const placa = String(req.query.placa ?? req.query.q ?? '').trim();
+    res.json(await service.getAll({ placa }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

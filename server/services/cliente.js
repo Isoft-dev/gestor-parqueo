@@ -1,10 +1,66 @@
 import oracledb from 'oracledb';
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
-export async function getAll() {
-  return executeCursor(
-    `BEGIN SP_CLIENTE_GET_ALL(:cursor); END;`
-  );
+export async function getAll(opts = {}) {
+  const mode = String(opts.mode || '').trim().toLowerCase(); // mensual | esporadico | ''
+  const qRaw = String(opts.q || '').trim();
+  const binds = {};
+  const where = [];
+
+  if (mode === 'mensual') {
+    // Sin filtro por membresía/vehículo: en admin "Clientes mensuales" debe verse cualquier ficha
+    // (alta de cliente, flota sin plan aún, o ya con membresía). El listado esporádico sigue acotado aparte.
+  } else if (mode === 'esporadico') {
+    where.push(
+      `EXISTS (SELECT 1 FROM PAR_VEHICULO v WHERE v.CLI_ID = c.CLI_ID)`
+    );
+    where.push(
+      `NOT EXISTS (
+         SELECT 1
+           FROM PAR_VEHICULO v
+           JOIN PAR_MEMBRESIA m ON m.VEH_ID = v.VEH_ID
+          WHERE v.CLI_ID = c.CLI_ID
+       )`
+    );
+  }
+
+  if (qRaw) {
+    const q = `%${qRaw.toUpperCase().replace(/\s+/g, ' ')}%`;
+    binds.q = q;
+    where.push(
+      `(
+        UPPER(NVL(c.CLI_PRIMER_NOMBRE, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_SEGUNDO_NOMBRE, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_PRIMER_APELLIDO, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_SEGUNDO_APELLIDO, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_DPI, '')) LIKE :q
+        OR UPPER(
+          REGEXP_REPLACE(
+            TRIM(
+              NVL(c.CLI_PRIMER_NOMBRE, '') || ' ' ||
+              NVL(c.CLI_SEGUNDO_NOMBRE, '') || ' ' ||
+              NVL(c.CLI_PRIMER_APELLIDO, '') || ' ' ||
+              NVL(c.CLI_SEGUNDO_APELLIDO, '')
+            ),
+            '\\s+',
+            ' '
+          )
+        ) LIKE :q
+      )`
+    );
+  }
+
+  const sql = `SELECT
+      c.CLI_ID, c.CLI_PRIMER_NOMBRE, c.CLI_SEGUNDO_NOMBRE,
+      c.CLI_PRIMER_APELLIDO, c.CLI_SEGUNDO_APELLIDO,
+      c.CLI_DPI, c.CLI_NIT, c.CLI_CORREO, c.CLI_TELEFONO,
+      c.CLI_ZONA, c.CLI_CALLE, c.CLI_NUMERO, c.CLI_COLONIA,
+      c.CLI_CIUDAD, c.CLI_CODIGO_POSTAL, c.CLI_ACTIVO
+    FROM PAR_CLIENTE c
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY c.CLI_ID DESC`;
+
+  return executeSql(sql, binds);
 }
 
 export async function getById(id) {

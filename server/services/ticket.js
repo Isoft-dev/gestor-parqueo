@@ -1,7 +1,7 @@
 import oracledb from 'oracledb';
 import PDFDocument from 'pdfkit/js/pdfkit.js';
 import QRCode from 'qrcode';
-import { getCobroMinimoSub1hEffective } from './cobroPoliticaRuntime.js';
+import { getCobroMinimoSub1hEffective, getTarifaActivaRuntimeId } from './cobroPoliticaRuntime.js';
 import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
 import { ensureClienteFromTicketNitTx } from './cliente.js';
 import { applyCashMovementTx } from './cashMachine.js';
@@ -49,7 +49,7 @@ export async function getByCodigo(codigo) {
             t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
             t.TIC_FECHA_HORA_ENTRADA, t.TIC_FECHA_HORA_SALIDA,
             t.ETI_ID, e.ETI_ESTADO,
-            c.COB_ID AS COB_ID
+            c.COB_ID AS COB_ID, c.COB_MONTO_TOTAL AS COB_MONTO_TOTAL
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON t.VEH_ID = v.VEH_ID
        JOIN PAR_ESTADO_TICKET e ON t.ETI_ID = e.ETI_ID
@@ -77,6 +77,11 @@ async function getTarifaVigente() {
            FROM PAR_TARIFA
           ORDER BY TAR_ID DESC`
   );
+  const selectedTarId = getTarifaActivaRuntimeId();
+  if (selectedTarId != null) {
+    const selected = rows.find((r) => String(r.TAR_ID) === String(selectedTarId));
+    if (selected) return selected;
+  }
   return rows[0] || null;
 }
 
@@ -96,13 +101,23 @@ async function getTarifaVigenteTx(conn) {
            FROM PAR_TARIFA
           ORDER BY TAR_ID DESC`
   );
-  return rows.rows?.[0] || null;
+  const list = rows.rows || [];
+  const selectedTarId = getTarifaActivaRuntimeId();
+  if (selectedTarId != null) {
+    const selected = list.find((r) => String(r.TAR_ID) === String(selectedTarId));
+    if (selected) return selected;
+  }
+  return list[0] || null;
 }
 
 export async function quoteByCodigo(codigo) {
   const ticket = await getByCodigo(codigo);
   if (!ticket) throw new Error('Ticket no reconocido');
-  if (ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '') {
+  const estadoTicketNorm = String(ticket.ETI_ESTADO || '').toLowerCase();
+  const isVencido = estadoTicketNorm.includes('venc');
+  const isVolverCobrar = estadoTicketNorm.includes('volver') && estadoTicketNorm.includes('cobr');
+  const hasCobro = ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '';
+  if (hasCobro && !isVencido && !isVolverCobrar) {
     throw new Error('Ticket ya saldado');
   }
 
@@ -123,7 +138,23 @@ export async function quoteByCodigo(codigo) {
   const { monto, politica } = aplicarMinimoSub1h(montoBruto, minsFacturables);
   const extraviado = ticketEstadoIndicaExtraviado(ticket.ETI_ESTADO);
   const recargoTicketExtraviado = extraviado ? RECARGO_TICKET_EXTRAVIADO_Q : 0;
-  const montoTotal = Number((monto + recargoTicketExtraviado).toFixed(2));
+  const recargoPorVencimiento =
+    isVencido && hasCobro
+      ? Number(ticket.COB_MONTO_TOTAL || 0)
+      : 0;
+  const recargoPorVolverCobrar =
+    isVolverCobrar && hasCobro
+      ? Number((monto + recargoTicketExtraviado).toFixed(2))
+      : 0;
+  const montoTotal = Number(
+    (
+      (isVencido && hasCobro
+        ? recargoPorVencimiento
+        : isVolverCobrar && hasCobro
+          ? recargoPorVolverCobrar
+          : monto + recargoTicketExtraviado)
+    ).toFixed(2)
+  );
 
   return {
     ticket: {
@@ -148,6 +179,8 @@ export async function quoteByCodigo(codigo) {
     },
     montoEstadia: monto,
     recargoTicketExtraviado,
+    recargoPorVencimiento,
+    recargoPorVolverCobrar,
     extraviado,
     montoTotal,
     montoMinimoAplicado: monto > montoBruto,
@@ -305,6 +338,114 @@ async function findEstadoPagadoIdTx(conn, fallback) {
   return r.rows?.[0]?.ETI_ID ?? fallback ?? null;
 }
 
+async function findEstadoVencidoIdTx(conn, fallback = null) {
+  const r = await conn.execute(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%venc%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? fallback ?? null;
+}
+
+async function findEstadoVolverCobrarIdTx(conn) {
+  const r = await conn.execute(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%volver%'
+        AND LOWER(ETI_ESTADO) LIKE '%cobr%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? null;
+}
+
+async function findEstadoValidadoIdTx(conn) {
+  const r = await conn.execute(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%valid%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? null;
+}
+
+function normText(s) {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+async function findEstadoAlertaAtendidaId() {
+  const rows = await executeSql(
+    `SELECT EAL_ID
+       FROM PAR_ESTADO_ALERTA
+      WHERE LOWER(EAL_ESTADO) LIKE '%atendid%'
+         OR LOWER(EAL_ESTADO) LIKE '%resuelt%'
+         OR LOWER(EAL_ESTADO) LIKE '%cerrad%'
+      ORDER BY EAL_ID`
+  );
+  if (rows?.[0]?.EAL_ID != null) return rows[0].EAL_ID;
+  const fb = await executeSql(
+    `SELECT EAL_ID
+       FROM PAR_ESTADO_ALERTA
+      WHERE LOWER(EAL_ESTADO) NOT LIKE '%pend%'
+      ORDER BY EAL_ID`
+  );
+  return fb?.[0]?.EAL_ID ?? null;
+}
+
+async function hasAlertaColumn(columnName) {
+  const rows = await executeSql(
+    `SELECT COUNT(*) AS TOTAL
+       FROM USER_TAB_COLUMNS
+      WHERE TABLE_NAME = 'PAR_ALERTA' AND COLUMN_NAME = :c`,
+    { c: String(columnName || '').toUpperCase() }
+  );
+  return Number(rows?.[0]?.TOTAL || 0) > 0;
+}
+
+async function markGraceAlertAttendedByTicketCode(ticketCode, usuId = null) {
+  if (!ticketCode) return;
+  const ealAtendidaId = await findEstadoAlertaAtendidaId();
+  if (!ealAtendidaId) return;
+  const rows = await executeSql(
+    `SELECT ALE_ID
+       FROM PAR_ALERTA
+      WHERE UPPER(NVL(ALE_DESCRIPCION, '')) LIKE UPPER(:descLike)
+        AND (
+          UPPER(NVL(ALE_MOTIVO, '')) LIKE '%GRACIA%'
+          OR UPPER(NVL(ALE_DESCRIPCION, '')) LIKE '%GRACIA%'
+        )
+      ORDER BY ALE_FECHA_HORA_GENERACION DESC, ALE_ID DESC`,
+    { descLike: `%TICKET ${String(ticketCode).trim()}%` }
+  );
+  const aleId = rows?.[0]?.ALE_ID ?? null;
+  if (!aleId) return;
+  const hasUsuResolvio = await hasAlertaColumn('ALE_USU_ID_RESOLVIO');
+  const hasDescSolucion = await hasAlertaColumn('ALE_DESCRIPCION_SOLUCION');
+  const sets = [
+    'EAL_ID = :ealId',
+    'ALE_FECHA_ATENCION = NVL(ALE_FECHA_ATENCION, SYSDATE)',
+  ];
+  const binds = { ealId: ealAtendidaId, aleId };
+  if (hasUsuResolvio && usuId != null && String(usuId).trim() !== '') {
+    sets.push('ALE_USU_ID_RESOLVIO = :usuId');
+    binds.usuId = Number(usuId);
+  }
+  if (hasDescSolucion) {
+    sets.push('ALE_DESCRIPCION_SOLUCION = :descSol');
+    binds.descSol = 'Se le cambió el estado de vencido a volver a cobrar desde el panel de admin.';
+  }
+  await executeSql(
+    `UPDATE PAR_ALERTA
+        SET ${sets.join(', ')}
+      WHERE ALE_ID = :aleId`,
+    binds,
+    { autoCommit: true }
+  );
+}
+
 function buildPdfBuffer({ ticket, cobro }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -437,7 +578,7 @@ export async function generateEntryTicket({
   VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, MAQ_ID,
 }) {
   const placa = String(VEH_PLACA || '').trim().toUpperCase();
-  if (!placa) throw new Error('VEH_PLACA es requerido');
+  if (!placa) throw new Error('La placa es obligatoria.');
   if (!TVE_ID) throw new Error('TVE_ID es requerido');
   if (!MAQ_ID) throw new Error('MAQ_ID es requerido');
 
@@ -449,7 +590,7 @@ export async function generateEntryTicket({
       { placa }
     );
     if (placaExist.rows?.length) {
-      throw new Error('Ya existe un vehiculo con la misma VEH_PLACA');
+      throw new Error('Ya existe un vehículo con la misma placa.');
     }
 
     const tipoVehiculo = await conn.execute(
@@ -639,7 +780,7 @@ export async function checkoutByCodigo({
     const tRes = await conn.execute(
       `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA, t.ETI_ID, t.VEH_ID,
               et.ETI_ESTADO,
-              c.COB_ID AS COB_ID
+              c.COB_ID AS COB_ID, c.COB_MONTO_TOTAL AS COB_MONTO_TOTAL
          FROM PAR_TICKET t
          JOIN PAR_ESTADO_TICKET et ON et.ETI_ID = t.ETI_ID
          LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
@@ -649,7 +790,11 @@ export async function checkoutByCodigo({
     );
     const ticket = tRes.rows?.[0];
     if (!ticket) throw new Error('Ticket no reconocido');
-    if (ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '') throw new Error('Ticket ya saldado');
+    const estadoTicketNorm = String(ticket.ETI_ESTADO || '').toLowerCase();
+    const isVencido = estadoTicketNorm.includes('venc');
+    const isVolverCobrar = estadoTicketNorm.includes('volver') && estadoTicketNorm.includes('cobr');
+    const hasCobro = ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '';
+    if (hasCobro && !isVencido && !isVolverCobrar) throw new Error('Ticket ya saldado');
 
     const tipoCobro = await conn.execute(
       `SELECT TCO_ID FROM PAR_TIPO_COBRO WHERE TCO_ID = :id`,
@@ -674,7 +819,23 @@ export async function checkoutByCodigo({
     const { monto } = aplicarMinimoSub1h(montoBruto, minsFacturables);
     const extraviado = ticketEstadoIndicaExtraviado(ticket.ETI_ESTADO);
     const recargoTicketExtraviado = extraviado ? RECARGO_TICKET_EXTRAVIADO_Q : 0;
-    const montoTotalCobro = Number((monto + recargoTicketExtraviado).toFixed(2));
+    const recargoPorVencimiento =
+      isVencido && hasCobro
+        ? Number(ticket.COB_MONTO_TOTAL || 0)
+        : 0;
+    const recargoPorVolverCobrar =
+      isVolverCobrar && hasCobro
+        ? Number((monto + recargoTicketExtraviado).toFixed(2))
+        : 0;
+    const montoTotalCobro = Number(
+      (
+        (isVencido && hasCobro
+          ? recargoPorVencimiento
+          : isVolverCobrar && hasCobro
+            ? recargoPorVolverCobrar
+            : monto + recargoTicketExtraviado)
+      ).toFixed(2)
+    );
 
     const maqTipo = await conn.execute(
       `SELECT tm.TMA_TIPO
@@ -712,7 +873,26 @@ export async function checkoutByCodigo({
     }
 
     let cobId;
-    if (await cobroIdentityAlwaysTx(conn)) {
+    if ((isVencido || isVolverCobrar) && hasCobro) {
+      cobId = Number(ticket.COB_ID);
+      await conn.execute(
+        `UPDATE PAR_COBRO
+            SET COB_MONTO_TOTAL = NVL(COB_MONTO_TOTAL, 0) + :extra,
+                COB_MONTO_RECIBIDO = NVL(COB_MONTO_RECIBIDO, 0) + :recibido,
+                COB_VUELTO = NVL(COB_VUELTO, 0) + :vuelto,
+                COB_FECHA_HORA = :fecha,
+                COB_PROCESADO_MAQUINA = :procesado
+          WHERE COB_ID = :cobId`,
+        {
+          extra: montoTotalCobro,
+          recibido: montoRecibido,
+          vuelto,
+          fecha: ahora,
+          procesado: Number(COB_PROCESADO_MAQUINA) ? 1 : 0,
+          cobId,
+        }
+      );
+    } else if (await cobroIdentityAlwaysTx(conn)) {
       const ins = await conn.execute(
         `INSERT INTO PAR_COBRO
           (COB_HORAS_TOTALES, TCO_ID, TIC_ID, COB_MONTO_TOTAL, COB_MONTO_RECIBIDO, COB_VUELTO,
@@ -839,6 +1019,8 @@ export async function checkoutByCodigo({
       COB_NIT: cobNit,
       montoEstadia: monto,
       recargoTicketExtraviado,
+      recargoPorVencimiento,
+      recargoPorVolverCobrar,
       extraviado,
       montoTotal: montoTotalCobro,
       horasCobradas,
@@ -919,6 +1101,14 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
     const withinGrace = minsDesdePago <= graceMins;
 
     if (!withinGrace) {
+      const etiVencidoId = await findEstadoVencidoIdTx(conn, ticket.ETI_ID);
+      await conn.execute(
+        `UPDATE PAR_TICKET
+            SET ETI_ID = :etiId
+          WHERE TIC_ID = :ticId`,
+        { etiId: etiVencidoId, ticId: ticket.TIC_ID }
+      );
+
       const ealId = await findEstadoAlertaPendienteIdTx(conn);
       const talId = await findTipoAlertaTiempoGraciaIdTx(conn);
       if (!ealId || !talId) {
@@ -954,8 +1144,20 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
         );
       }
       await conn.commit();
-      throw new Error('Salida bloqueada: tiempo de gracia superado, solicita asistencia');
+      throw new Error('Salida bloqueada: tiempo de gracia superado, ticket vencido; dirigete a la maquina de cobro');
     }
+
+    const etiValidadoId = await findEstadoValidadoIdTx(conn);
+    if (!etiValidadoId) {
+      throw new Error('No existe estado de ticket «Validado» en PAR_ESTADO_TICKET');
+    }
+    await conn.execute(
+      `UPDATE PAR_TICKET
+          SET TIC_FECHA_HORA_SALIDA = :fhSalida,
+              ETI_ID = :etiId
+        WHERE TIC_ID = :ticId`,
+      { fhSalida: now, etiId: etiValidadoId, ticId: ticket.TIC_ID }
+    );
 
     const dmtIdentity = await detalleMaquinaTicketIdentityAlwaysTx(conn);
     if (dmtIdentity) {
@@ -1126,6 +1328,8 @@ export async function update(id, data, opts = {}) {
   const updated = await getById(id);
   const nuevoEti = updated?.ETI_ID ?? updated?.eti_id ?? null;
   const prevEti = prev?.ETI_ID ?? prev?.eti_id ?? null;
+  const prevEstadoNorm = normText(prev?.ETI_ESTADO ?? prev?.eti_estado);
+  const nextEstadoNorm = normText(updated?.ETI_ESTADO ?? updated?.eti_estado);
 
   if (
     etiExtraviadoId != null
@@ -1145,6 +1349,15 @@ export async function update(id, data, opts = {}) {
     }
   }
 
+  if (
+    prevEstadoNorm.includes('venc')
+    && nextEstadoNorm.includes('volver')
+    && nextEstadoNorm.includes('cobr')
+  ) {
+    const codigo = updated?.TIC_CODIGO ?? updated?.tic_codigo ?? prev?.TIC_CODIGO ?? prev?.tic_codigo ?? null;
+    await markGraceAlertAttendedByTicketCode(codigo, opts?.usuIdAlertaAtendida ?? null);
+  }
+
   return updated;
 }
 
@@ -1160,7 +1373,7 @@ async function findEstadoTicketExtraviadoTx(conn) {
 /** Protocolo ticket extraviado: marca estado y devuelve cotización vigente. */
 export async function prepararTicketExtraviadoPorPlaca(vehPlaca) {
   const placa = String(vehPlaca || '').trim().toUpperCase();
-  if (!placa) throw new Error('VEH_PLACA es requerido');
+  if (!placa) throw new Error('La placa es obligatoria.');
   let conn;
   try {
     conn = await getConnection();

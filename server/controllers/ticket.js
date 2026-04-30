@@ -7,7 +7,7 @@ function businessStatus(err) {
   if (/ya saldado/i.test(msg)) return 409;
   if (/salida bloqueada|solicita asistencia/i.test(msg)) return 403;
   if (/efectivo suficiente|suma de billetes|vuelto/i.test(msg)) return 400;
-  if (/requerid|tipo de cobro|tipo entrada|tipo salida|tipo cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|fk|ORA-02291|ORA-01400|UK_PAR_COBRO_TIC_ID|FK_PAR_COBRO_TICKET/i.test(msg)) return 400;
+  if (/requerid|tipo de cobro|tipo entrada|tipo salida|tipo cobro|NIT|CF|COB_NIT|columna|monto recibido|MAQ_ID|TVE_ID|placa|comprobante|validado|vencid|fk|ORA-02291|ORA-01400|UK_PAR_COBRO_TIC_ID|FK_PAR_COBRO_TICKET/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict|unico|ORA-00001/i.test(msg)) return 409;
   return 500;
 }
@@ -48,6 +48,7 @@ export async function update(req, res) {
     res.json(
       await service.update(req.params.id, clean, {
         usuIdBitacoraExtraviado: usuBit,
+        usuIdAlertaAtendida: usuBit,
       }),
     );
   } catch (err) {
@@ -92,7 +93,7 @@ export async function checkout(req, res) {
 export async function prepararExtraviado(req, res) {
   try {
     const placa = (req.body?.VEH_PLACA ?? '').trim();
-    if (!placa) return res.status(400).json({ error: 'VEH_PLACA es requerido' });
+    if (!placa) return res.status(400).json({ error: 'La placa es obligatoria.' });
     const result = await service.prepararTicketExtraviadoPorPlaca(placa);
     res.json(result);
   } catch (err) {
