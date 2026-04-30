@@ -9,6 +9,7 @@ import {
   setMembresiaEspacioReservadoOcupadoTx,
 } from './espacioCapacity.js';
 import { insertSystemAlerta } from '../utils/systemAlert.js';
+import { isTipoMaquinaEntrada } from '../utils/tipoMaquinaRules.js';
 
 function norm(s) {
   return String(s ?? '')
@@ -599,9 +600,28 @@ async function suspendMembershipIfPastVencimientoForEntry(memId) {
   );
 }
 
-export async function validateTagAndRegisterEntry(memCodigoRaw) {
+export async function validateTagAndRegisterEntry(memCodigoRaw, opts = {}) {
   const memCodigo = String(memCodigoRaw || '').trim().toUpperCase();
   if (!memCodigo) throw new Error('MEM_CODIGO es requerido');
+
+  let maqIdAutoriza = null;
+  const rawMaq = opts?.MAQ_ID;
+  if (rawMaq != null && String(rawMaq).trim() !== '') {
+    const mid = Number(String(rawMaq).trim());
+    if (!Number.isFinite(mid) || mid <= 0) throw new Error('MAQ_ID inválido');
+    const mrows = await executeSql(
+      `SELECT m.MAQ_ID, t.TMA_TIPO
+         FROM PAR_MAQUINA m
+         JOIN PAR_TIPO_MAQUINA t ON t.TMA_ID = m.TMA_ID
+        WHERE m.MAQ_ID = :id`,
+      { id: mid },
+    );
+    if (!mrows[0]) throw new Error('Máquina no encontrada');
+    if (!isTipoMaquinaEntrada(mrows[0].TMA_TIPO)) {
+      throw new Error('La máquina indicada no es de entrada');
+    }
+    maqIdAutoriza = mid;
+  }
 
   const withColumn = await hasMemCodigoColumn();
   const row = withColumn
@@ -724,6 +744,7 @@ export async function validateTagAndRegisterEntry(memCodigoRaw) {
     MEM_CODIGO: memCodigo,
     VEH_PLACA: membership.VEH_PLACA,
     EME_ESTADO: membership.EME_ESTADO,
+    MAQ_ID: maqIdAutoriza,
   };
 }
 

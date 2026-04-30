@@ -100,6 +100,31 @@ function generateVehicleData() {
   };
 }
 
+function getTagWelcomeName(data) {
+  const full = [
+    data?.CLI_PRIMER_NOMBRE,
+    data?.CLI_SEGUNDO_NOMBRE,
+    data?.CLI_PRIMER_APELLIDO,
+    data?.CLI_SEGUNDO_APELLIDO,
+  ]
+    .map((v) => String(v ?? '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  if (full) return full;
+  return String(data?.CLI_NOMBRE ?? data?.CLI_NOMBRE_COMPLETO ?? 'cliente').trim() || 'cliente';
+}
+
+/** Máquina de entrada por defecto: la 1 si existe en el catálogo de entrada; si no, la de menor MAQ_ID. */
+function pickDefaultEntradaMaqId(entradaList, maqList) {
+  const pool = Array.isArray(entradaList) && entradaList.length > 0 ? entradaList : (Array.isArray(maqList) ? maqList : []);
+  if (!pool.length) return '';
+  const hasOne = pool.some((m) => String(m?.MAQ_ID) === '1');
+  if (hasOne) return '1';
+  const sorted = [...pool].sort((a, b) => Number(a?.MAQ_ID) - Number(b?.MAQ_ID));
+  return String(sorted[0]?.MAQ_ID ?? '');
+}
+
 export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = false, entradaOnly = false, salidaOnly = false }) {
   const { user, logout } = useAuth();
   const fileRef = useRef(null);
@@ -119,6 +144,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const [maquinasSalida, setMaquinasSalida] = useState([]);
   const [showGenerateForm, setShowGenerateForm] = useState(false);
   const [entryTicketDone, setEntryTicketDone] = useState(null);
+  const [entryKioskState, setEntryKioskState] = useState('idle'); // idle | ticket_ready | notice | tag_welcome
+  const [entryNotice, setEntryNotice] = useState({ text: '', severity: 'warn' }); // warn | error
+  const [entryWelcomeName, setEntryWelcomeName] = useState('');
+  const [showEntryVehicleModal, setShowEntryVehicleModal] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
     VEH_PLACA: '',
     VEH_MODELO: '',
@@ -142,7 +171,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const [defaultCobroMaqId, setDefaultCobroMaqId] = useState('');
   const [defaultEntradaMaqId, setDefaultEntradaMaqId] = useState('');
   const [defaultSalidaMaqId, setDefaultSalidaMaqId] = useState('');
-  const [entradaAutoMaqIndex, setEntradaAutoMaqIndex] = useState(0);
   const [billetes, setBilletes] = useState({ 5: 0, 10: 0, 20: 0, 50: 0 });
   const [cardSim, setCardSim] = useState({
     numero: '',
@@ -332,21 +360,12 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         );
         setDefaultCobroMaqId(pickedCobroMaqId);
 
-        const entradaMaq = maqList.find((m) => {
-          const tipo = tipoById.get(String(m.TMA_ID));
-          return isTipoMaquinaEntrada(tipo?.TMA_TIPO);
-        });
         const entradaList = maqList.filter((m) => {
           const tipo = tipoById.get(String(m.TMA_ID));
           return isTipoMaquinaEntrada(tipo?.TMA_TIPO);
         });
         setMaquinasEntrada(entradaList);
-        const entradaByCode = maqList.find((m) =>
-          String(m.MAQ_CODIGO || '').toLowerCase().includes('ent'),
-        );
-        const pickedEntradaMaqId = String(
-          entradaMaq?.MAQ_ID ?? entradaByCode?.MAQ_ID ?? maqList[0]?.MAQ_ID ?? '',
-        );
+        const pickedEntradaMaqId = pickDefaultEntradaMaqId(entradaList, maqList);
         setDefaultEntradaMaqId(pickedEntradaMaqId);
         const salidaMaq = maqList.find((m) => {
           const tipo = tipoById.get(String(m.TMA_ID));
@@ -376,7 +395,15 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
           setAssistMaqId((prev) => prev || defaultAssist);
           if (cobroOnly) setMaqId(pickedCobroMaqId);
           if (entradaOnly) {
-            setVehicleForm((prev) => ({ ...prev, MAQ_ID: pickedEntradaMaqId }));
+            setVehicleForm((prev) => ({
+              ...prev,
+              MAQ_ID: String(prev.MAQ_ID || '').trim() ? prev.MAQ_ID : pickedEntradaMaqId,
+            }));
+          } else if (!cobroOnly && !salidaOnly && pickedEntradaMaqId) {
+            setVehicleForm((prev) => ({
+              ...prev,
+              MAQ_ID: String(prev.MAQ_ID || '').trim() ? prev.MAQ_ID : pickedEntradaMaqId,
+            }));
           }
           if (salidaOnly) {
             setExitMaqId((prev) => prev || pickedSalidaMaqId);
@@ -436,28 +463,41 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     }
   }
 
+  /** Limpia solo los datos del vehículo del modal de entrada; mantiene la máquina seleccionada. */
+  function clearEntryVehicleFormInputs() {
+    setVehicleForm((p) => ({
+      ...p,
+      VEH_PLACA: '',
+      VEH_MODELO: '',
+      VEH_COLOR: '',
+      TVE_ID: '',
+    }));
+  }
+
   function applyAutocompletado() {
     const generated = generateVehicleData();
     const defaultTve = String(tipoVehiculo?.[0]?.TVE_ID ?? '');
     const poolEntrada = maquinasEntrada.length > 0 ? maquinasEntrada : maquinas;
-    let selectedMaqId = String(defaultEntradaMaqId || (poolEntrada?.[0]?.MAQ_ID ?? ''));
-    if (entradaOnly && poolEntrada.length > 0) {
-      const idx = entradaAutoMaqIndex % poolEntrada.length;
-      selectedMaqId = String(poolEntrada[idx]?.MAQ_ID ?? selectedMaqId);
-      setEntradaAutoMaqIndex((prev) => prev + 1);
-    }
+    const currentMaq = String(vehicleForm.MAQ_ID || '').trim();
+    const selectedMaqId =
+      currentMaq ||
+      String(defaultEntradaMaqId || pickDefaultEntradaMaqId(maquinasEntrada, maquinas));
     setVehicleForm({
       VEH_PLACA: generated.VEH_PLACA,
       VEH_MODELO: generated.VEH_MODELO,
       VEH_COLOR: generated.VEH_COLOR,
       TVE_ID: defaultTve,
-      MAQ_ID: selectedMaqId,
+      MAQ_ID: selectedMaqId || String(poolEntrada?.[0]?.MAQ_ID ?? ''),
     });
   }
 
   async function submitGenerateTicket() {
     if (!vehicleForm.VEH_PLACA || !vehicleForm.TVE_ID || !vehicleForm.MAQ_ID) {
       setMsg('Para generar ticket debes ingresar placa, tipo de vehículo y máquina.');
+      if (entradaOnly) {
+        setEntryNotice({ text: 'Completa placa, tipo de vehículo y máquina de entrada.', severity: 'warn' });
+        setEntryKioskState('notice');
+      }
       return;
     }
     setLoading(true);
@@ -478,16 +518,23 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       if (!res.ok) throw new Error(data.error || res.statusText);
       setEntryTicketDone(data);
       setShowGenerateForm(false);
+      setShowEntryVehicleModal(false);
       setVehicleForm({
         VEH_PLACA: '',
         VEH_MODELO: '',
         VEH_COLOR: '',
         TVE_ID: '',
-        MAQ_ID: '',
+        MAQ_ID: pickDefaultEntradaMaqId(maquinasEntrada, maquinas),
       });
       setMsg('Ticket de entrada generado correctamente.');
+      if (entradaOnly) setEntryKioskState('ticket_ready');
     } catch (err) {
       setMsg(`Error: ${String(err?.message || err)}`);
+      if (entradaOnly) {
+        setEntryNotice({ text: String(err?.message || err), severity: 'error' });
+        setEntryKioskState('notice');
+        setShowEntryVehicleModal(false);
+      }
     } finally {
       setLoading(false);
     }
@@ -541,6 +588,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setMsg('');
     setTagValidationDone(null);
     try {
+      if (entradaOnly && !String(vehicleForm.MAQ_ID || '').trim()) {
+        setMsg('Selecciona la máquina de entrada antes de cargar el tag.');
+        if (entradaOnly) {
+          setEntryNotice({ text: 'Selecciona la máquina de entrada antes de cargar el tag.', severity: 'warn' });
+          setEntryKioskState('notice');
+        }
+        return;
+      }
       const buffer = await file.arrayBuffer();
       const pdfText = await decodePdfText(buffer);
       const memCodigo = extractMemCodeFromPdfText(pdfText);
@@ -551,12 +606,20 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       const res = await fetch(`${API_BASE}/membresia/validate-tag`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ MEM_CODIGO: memCodigo }),
+        body: JSON.stringify(
+          entradaOnly
+            ? { MEM_CODIGO: memCodigo, MAQ_ID: vehicleForm.MAQ_ID }
+            : { MEM_CODIGO: memCodigo },
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
       setTagValidationDone(data);
       setMsg('Acceso concedido.');
+      if (entradaOnly) {
+        setEntryWelcomeName(getTagWelcomeName(data));
+        setEntryKioskState('tag_welcome');
+      }
     } catch (err) {
       const txt = String(err?.message || '');
       if (/tag no reconocido/i.test(txt)) {
@@ -569,6 +632,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         setMsg(`Error: ${txt}`);
       }
       setTagValidationDone(null);
+      if (entradaOnly) {
+        setEntryNotice({ text: txt || 'No se pudo validar el tag.', severity: 'error' });
+        setEntryKioskState('notice');
+      }
     } finally {
       setLoading(false);
       if (tagFileRef.current) tagFileRef.current.value = '';
@@ -891,6 +958,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setExitValidationDone(null);
     setExitMaqId('');
     setShowGenerateForm(entradaOnly);
+    setShowEntryVehicleModal(false);
+    setEntryKioskState('idle');
+    setEntryNotice({ text: '', severity: 'warn' });
+    setEntryWelcomeName('');
     setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
     resetCardSimulator();
     setMemPayQ('');
@@ -909,73 +980,125 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     resetProcess();
   }
 
+  function downloadEntryTicketAndResetKiosk() {
+    if (!entryTicketDone?.TIC_ID) return;
+    window.open(`${API_BASE}/ticket/${entryTicketDone.TIC_ID}/entrada.pdf`, '_blank');
+    setEntryTicketDone(null);
+    setEntryKioskState('idle');
+  }
+
+  useEffect(() => {
+    if (!entradaOnly || entryKioskState !== 'notice') return;
+    const t = setTimeout(() => {
+      setEntryKioskState('idle');
+      setEntryNotice({ text: '', severity: 'warn' });
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [entradaOnly, entryKioskState]);
+
+  useEffect(() => {
+    if (!entradaOnly || entryKioskState !== 'tag_welcome') return;
+    const t = setTimeout(() => {
+      setTagValidationDone(null);
+      setEntryWelcomeName('');
+      setEntryKioskState('idle');
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [entradaOnly, entryKioskState]);
+
   return (
     <div
-      className={embeddedInAdmin ? 'ops-shell ops-shell--embedded' : 'admin-page ops-page-public'}
+      className={
+        embeddedInAdmin
+          ? 'ops-shell ops-shell--embedded'
+          : `admin-page ops-page-public${entradaOnly ? ' ops-page-public--entry' : ''}`
+      }
       style={{ maxWidth: embeddedInAdmin ? '100%' : 1040, margin: '12px auto', padding: 16 }}
     >
-      <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
-        <h1 className="admin-page-title">
-          {embeddedInAdmin
-            ? 'Operación en cabina'
-            : cobroOnly
-              ? 'Máquina de cobro'
+      {!entradaOnly ? (
+        <>
+          <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
+            <h1 className="admin-page-title">
+              {embeddedInAdmin
+                ? 'Operación en cabina'
+                : cobroOnly
+                  ? 'Máquina de cobro'
+                  : entradaOnly
+                    ? 'Máquina de entrada'
+                    : salidaOnly
+                      ? 'Máquina de salida'
+                      : 'Consulta de ticket'}
+            </h1>
+            {!embeddedInAdmin && !onlyKiosk ? (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Link to="/maquina-entrada" className="ops-header-auth-link">
+                  Ir a máquina de entrada
+                </Link>
+                <Link to="/maquina-cobro" className="ops-header-auth-link">
+                  Ir a máquina de cobro
+                </Link>
+                <Link to="/maquina-salida" className="ops-header-auth-link">
+                  Ir a máquina de salida
+                </Link>
+                {user ? (
+                  <button
+                    type="button"
+                    className="ops-header-auth-btn"
+                    onClick={() => logout()}
+                  >
+                    Cerrar sesión
+                  </button>
+                ) : (
+                  <Link to="/login" className="ops-header-auth-link">
+                    Ir al panel de admin
+                  </Link>
+                )}
+              </div>
+            ) : null}
+          </header>
+          <p className="admin-page-desc">
+            {cobroOnly
+              ? 'Cobro de ticket: carga el PDF, tipo de cobro, NIT o CF y confirma. Membresía vencida: queda suspendida y no permite ingreso con tag hasta que renueves aquí en «Pagar membresía».'
               : entradaOnly
-                ? 'Máquina de entrada'
-              : salidaOnly
-                ? 'Máquina de salida'
-              : 'Consulta de ticket'}
-        </h1>
-        {!embeddedInAdmin && !onlyKiosk ? (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Link to="/maquina-entrada" className="ops-header-auth-link">
-              Ir a máquina de entrada
-            </Link>
-            <Link to="/maquina-cobro" className="ops-header-auth-link">
-              Ir a máquina de cobro
-            </Link>
-            <Link to="/maquina-salida" className="ops-header-auth-link">
-              Ir a máquina de salida
-            </Link>
-            {user ? (
-              <button
-                type="button"
-                className="ops-header-auth-btn"
-                onClick={() => logout()}
-              >
-                Cerrar sesión
-              </button>
-            ) : (
-              <Link to="/login" className="ops-header-auth-link">
-                Ir al panel de admin
-              </Link>
-            )}
-          </div>
-        ) : null}
-      </header>
-      <p className="admin-page-desc">
-        {cobroOnly
-          ? 'Cobro de ticket: carga el PDF, tipo de cobro, NIT o CF y confirma. Membresía vencida: queda suspendida y no permite ingreso con tag hasta que renueves aquí en «Pagar membresía».'
-          : entradaOnly
-            ? 'Flujo de entrada: genera ticket para cliente esporádico o valida tag para cliente mensual.'
-            : salidaOnly
-              ? 'Flujo de salida: valida tag de cliente mensual o verifica ticket pagado de cliente esporádico.'
-          : 'Puedes generar ticket de entrada o cargar ticket para continuar con el cobro.'}
-      </p>
-      {espacioResumen ? (
-        <div
-          style={{
-            marginBottom: 12,
-            padding: 10,
-            borderRadius: 8,
-            background: espacioResumen.parqueoLleno ? '#fff4f4' : '#f0fdf4',
-            border: `1px solid ${espacioResumen.parqueoLleno ? '#f5c2c2' : '#86efac'}`,
-          }}
-        >
-          <strong>Espacios disponibles:</strong> {espacioResumen.disponibles ?? '—'} de {espacioResumen.total ?? '—'}
-          {espacioResumen.parqueoLleno ? (
-            <span style={{ color: '#991b1b', marginLeft: 8 }}>Parqueo lleno — no se puede generar ticket.</span>
+                ? 'Flujo de entrada: genera ticket para cliente esporádico o valida tag para cliente mensual.'
+                : salidaOnly
+                  ? 'Flujo de salida: valida tag de cliente mensual o verifica ticket pagado de cliente esporádico.'
+                  : 'Puedes generar ticket de entrada o cargar ticket para continuar con el cobro.'}
+          </p>
+          {espacioResumen ? (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: 10,
+                borderRadius: 8,
+                background: espacioResumen.parqueoLleno ? '#fff4f4' : '#f0fdf4',
+                border: `1px solid ${espacioResumen.parqueoLleno ? '#f5c2c2' : '#86efac'}`,
+              }}
+            >
+              <strong>Espacios disponibles:</strong> {espacioResumen.disponibles ?? '—'} de {espacioResumen.total ?? '—'}
+              {espacioResumen.parqueoLleno ? (
+                <span style={{ color: '#991b1b', marginLeft: 8 }}>Parqueo lleno — no se puede generar ticket.</span>
+              ) : null}
+            </div>
           ) : null}
+        </>
+      ) : null}
+
+      {entradaOnly ? (
+        <div className="ops-entry-config">
+          <label>
+            <span>Máquina de entrada</span>
+            <select
+              value={vehicleForm.MAQ_ID}
+              onChange={(e) => setVehicleForm((p) => ({ ...p, MAQ_ID: e.target.value }))}
+            >
+              {(maquinasEntrada.length ? maquinasEntrada : maquinas).map((m) => (
+                <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                  {machineLabel(m)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       ) : null}
 
@@ -1169,7 +1292,112 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </section>
       ) : null}
 
-      <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {entradaOnly && !catalogLoading ? (
+        <section className="ops-entry-kiosk-wrap" aria-label="Pantalla de máquina de entrada">
+          <input
+            ref={tagFileRef}
+            type="file"
+            accept="application/pdf"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) {
+                setEntryKioskState('idle');
+                return;
+              }
+              onLoadTagPdf(f);
+            }}
+          />
+
+          <div
+            className={`ops-entry-kiosk-screen${
+              entryKioskState === 'notice' && entryNotice.severity === 'error'
+                ? ' ops-entry-kiosk-screen--error'
+                : ''
+            }`}
+          >
+            <div className="ops-entry-kiosk-screen-inner">
+              {entryKioskState === 'idle' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div className="ops-entry-kiosk-icon" aria-hidden="true">P</div>
+                  <h2>Bienvenido al Parqueo</h2>
+                  <p className="ops-entry-kiosk-subtext ops-entry-kiosk-subtext--pulse">
+                    Espacios disponibles: {espacioResumen?.disponibles ?? '—'} de {espacioResumen?.total ?? '—'}
+                  </p>
+                </div>
+              ) : null}
+
+              {entryKioskState === 'ticket_ready' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div className="ops-entry-kiosk-icon" aria-hidden="true">✓</div>
+                  <h2>¡Ticket generado!</h2>
+                  <p className="ops-entry-kiosk-subtext">Por favor, tome su ticket</p>
+                  <button
+                    type="button"
+                    className="admin-btn-primary ops-entry-kiosk-download"
+                    onClick={downloadEntryTicketAndResetKiosk}
+                  >
+                    ⬇ Descargar Ticket
+                  </button>
+                </div>
+              ) : null}
+
+              {entryKioskState === 'tag_welcome' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div className="ops-entry-kiosk-icon" aria-hidden="true">✓</div>
+                  <h2>Bienvenido {entryWelcomeName || 'cliente'}</h2>
+                  <p className="ops-entry-kiosk-subtext">Acceso concedido</p>
+                </div>
+              ) : null}
+
+              {entryKioskState === 'notice' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div className="ops-entry-kiosk-icon" aria-hidden="true">⚠</div>
+                  <h2>Aviso</h2>
+                  <p
+                    className={`ops-entry-kiosk-subtext ${
+                      entryNotice.severity === 'error'
+                        ? 'ops-entry-kiosk-subtext--error'
+                        : 'ops-entry-kiosk-subtext--warn'
+                    }`}
+                  >
+                    {entryNotice.text || 'No se pudo completar la operación.'}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="ops-entry-kiosk-controls">
+            <button
+              type="button"
+              className="admin-btn-primary"
+              disabled={entryKioskState !== 'idle' || loading || catalogLoading}
+              onClick={() => {
+                if (espacioResumen?.parqueoLleno) {
+                  setEntryNotice({ text: 'Sin espacios disponibles.', severity: 'error' });
+                  setEntryKioskState('notice');
+                  return;
+                }
+                clearEntryVehicleFormInputs();
+                setShowEntryVehicleModal(true);
+              }}
+            >
+              Generar Ticket
+            </button>
+            <button
+              type="button"
+              className="admin-btn-primary"
+              disabled={entryKioskState !== 'idle' || loading || catalogLoading}
+              onClick={() => tagFileRef.current?.click()}
+            >
+              Cargar Tag
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {!entradaOnly ? <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         {!onlyKiosk ? <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span> : null}
         {!onlyKiosk ? (
           <select
@@ -1186,7 +1414,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
           </select>
         ) : null}
         {assistMsg ? <span style={{ fontSize: 13, color: '#065f46' }}>{assistMsg}</span> : null}
-      </div>
+      </div> : null}
       {catalogLoading ? (
         <div className="ops-loader-wrap">
           <span className="ops-loader" aria-hidden="true" />
@@ -1194,7 +1422,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       ) : null}
 
-      {!cobroOnly && !salidaOnly ? <section className="admin-panel-block ops-panel-block">
+      {!cobroOnly && !salidaOnly && !entradaOnly ? <section className="admin-panel-block ops-panel-block">
         <div className="admin-panel-head">
           <h2>Cliente mensual (Tag)</h2>
           <p className="admin-panel-sub">Sección exclusiva para validar tag de membresía.</p>
@@ -1311,13 +1539,67 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       />
       {loading ? <span style={{ marginLeft: 10 }}>Procesando...</span> : null}
 
-      {msg ? (
+      {!entradaOnly && msg ? (
         <div style={{ marginTop: 12, padding: 10, border: '1px solid #e2b4b4', background: '#fff4f4', color: '#8a1f1f' }}>
           {msg}
         </div>
       ) : null}
 
-      {!cobroOnly && !salidaOnly && (showGenerateForm || entradaOnly) && (
+      {entradaOnly && showEntryVehicleModal ? (
+        <div className="ops-entry-modal-backdrop" role="dialog" aria-modal="true" aria-label="Ingreso de Vehículo">
+          <div className="ops-entry-modal">
+            <h3>Ingreso de Vehículo</h3>
+            <div className="ops-entry-modal-grid">
+              <input
+                type="text"
+                placeholder="Placa"
+                value={vehicleForm.VEH_PLACA}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: e.target.value.toUpperCase() }))}
+              />
+              <input
+                type="text"
+                placeholder="Modelo"
+                value={vehicleForm.VEH_MODELO}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_MODELO: e.target.value }))}
+              />
+              <input
+                type="text"
+                placeholder="Color"
+                value={vehicleForm.VEH_COLOR}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_COLOR: e.target.value }))}
+              />
+              <select
+                value={vehicleForm.TVE_ID}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, TVE_ID: e.target.value }))}
+              >
+                <option value="">Selecciona tipo de vehículo</option>
+                {tipoVehiculo.map((t) => (
+                  <option key={t.TVE_ID} value={t.TVE_ID}>
+                    {t.TVE_TIPO || `Tipo ${t.TVE_ID}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="ops-entry-modal-actions">
+              <button type="button" className="ops-entry-modal-btn ops-entry-modal-btn--soft" onClick={applyAutocompletado} disabled={loading}>Autocompletar</button>
+              <button
+                type="button"
+                className="ops-entry-modal-btn ops-entry-modal-btn--cancel"
+                onClick={() => {
+                  clearEntryVehicleFormInputs();
+                  setShowEntryVehicleModal(false);
+                }}
+                disabled={loading}
+              >
+                Cancelar
+              </button>
+              <button type="button" className="admin-btn-primary" onClick={submitGenerateTicket} disabled={loading}>Confirmar</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!cobroOnly && !salidaOnly && !entradaOnly && showGenerateForm && (
         <div style={{ marginTop: 14, border: '1px solid #ddd', borderRadius: 8, padding: 14 }}>
           <h2 style={{ marginTop: 0, fontSize: 20 }}>
             {entradaOnly ? 'Generación de ticket' : 'Generar ticket de entrada'}
@@ -1362,7 +1644,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 onChange={(e) => setVehicleForm((p) => ({ ...p, MAQ_ID: e.target.value }))}
                 style={{ padding: '8px 10px', minWidth: 220 }}
               >
-                <option value="">Selecciona máquina de entrada</option>
                 {maquinas.map((m) => (
                   <option key={m.MAQ_ID} value={m.MAQ_ID}>
                     {machineLabel(m)}
@@ -1375,7 +1656,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 onChange={(e) => setVehicleForm((p) => ({ ...p, MAQ_ID: e.target.value }))}
                 style={{ padding: '8px 10px', minWidth: 260 }}
               >
-                <option value="">Selecciona máquina de entrada</option>
                 {(maquinasEntrada.length ? maquinasEntrada : maquinas).map((m) => (
                   <option key={m.MAQ_ID} value={m.MAQ_ID}>
                     {machineLabel(m)}
@@ -1389,7 +1669,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       )}
 
-      {!cobroOnly && !salidaOnly && entryTicketDone && (
+      {!cobroOnly && !salidaOnly && !entradaOnly && entryTicketDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Ticket generado</strong>
           <p style={{ margin: '6px 0' }}>Ticket: {entryTicketDone.TIC_CODIGO}</p>
@@ -1404,7 +1684,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       )}
 
-      {!cobroOnly && !salidaOnly && tagValidationDone && (
+      {!cobroOnly && !salidaOnly && !entradaOnly && tagValidationDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Acceso concedido</strong>
           <p style={{ margin: '6px 0' }}>Membresía: {tagValidationDone.MEM_ID}</p>

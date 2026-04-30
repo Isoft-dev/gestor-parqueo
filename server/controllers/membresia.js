@@ -123,7 +123,8 @@ export async function validateTag(req, res) {
     if (!String(memCodigo || '').trim()) {
       return res.status(400).json({ error: 'MEM_CODIGO es requerido' });
     }
-    const result = await service.validateTagAndRegisterEntry(memCodigo);
+    const maqId = req.body?.MAQ_ID;
+    const result = await service.validateTagAndRegisterEntry(memCodigo, { MAQ_ID: maqId });
     res.status(201).json(result);
   } catch (err) {
     res.status(businessStatus(err)).json({ error: err.message });

@@ -285,6 +285,7 @@ body {
 
 /* ── Panel de administración ───────────────────────────────── */
 :root {
+  --admin-sidebar-width: 260px;
   --admin-sidebar-bg: #0f172a;
   --admin-sidebar-border: rgba(255, 255, 255, 0.08);
   --admin-sidebar-text: #e2e8f0;
@@ -309,7 +310,7 @@ body {
 }
 
 .admin-sidebar {
-  width: 260px;
+  width: var(--admin-sidebar-width);
   flex-shrink: 0;
   background: var(--admin-sidebar-bg);
   color: var(--admin-sidebar-text);
@@ -1043,6 +1044,14 @@ body {
   max-width: 1180px;
 }
 
+.ops-page-public--entry {
+  position: relative;
+  min-height: 100vh;
+  max-width: 100% !important;
+  margin: 0 !important;
+  background: linear-gradient(180deg, #e5e7eb 0%, #d1d5db 100%);
+}
+
 .ops-page-header {
   display: flex;
   justify-content: space-between;
@@ -1152,6 +1161,229 @@ body {
 
 @keyframes ops-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ── Kiosco entrada (rediseño UI) ───────────────────────────── */
+.ops-entry-config {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 60;
+  background: rgba(31, 41, 55, 0.92);
+  border: 1px solid #4b5563;
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 20px rgba(17, 24, 39, 0.35);
+}
+
+.ops-entry-config label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ops-entry-config label span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #e5e7eb;
+  text-transform: uppercase;
+}
+
+.ops-entry-config select {
+  min-width: 260px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #9ca3af;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Dentro del panel admin: anclar al contenedor de la vista (área .admin-main), no al viewport completo. */
+.admin-main .ops-page-public--entry .ops-entry-config {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.ops-entry-kiosk-wrap {
+  min-height: calc(100vh - 260px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.ops-entry-kiosk-screen {
+  width: min(600px, calc(100vw - 40px));
+  height: 340px;
+  border-radius: 14px;
+  border: 1px solid #2f3b57;
+  background: #1a1a2e;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.35);
+  transition: all 0.3s ease;
+}
+
+.ops-entry-kiosk-screen--error {
+  background: linear-gradient(180deg, #2b1b1b 0%, #1f1414 100%);
+  border-color: #7f1d1d;
+}
+
+.ops-entry-kiosk-screen-inner {
+  height: 100%;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: all 0.3s ease;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+.ops-entry-kiosk-state {
+  width: 100%;
+  color: #f8fafc;
+}
+
+.ops-entry-kiosk-state h2 {
+  margin: 4px 0 10px;
+  font-size: 1.65rem;
+  line-height: 1.15;
+}
+
+.ops-entry-kiosk-icon {
+  margin: 0 auto 8px;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: 2px solid #93c5fd;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.3rem;
+  color: #93c5fd;
+}
+
+.ops-entry-kiosk-subtext {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #cbd5e1;
+}
+
+.ops-entry-kiosk-subtext--pulse {
+  animation: ops-pulse 1.6s ease-in-out infinite;
+}
+
+.ops-entry-kiosk-subtext--warn {
+  color: #facc15;
+}
+
+.ops-entry-kiosk-subtext--error {
+  color: #fca5a5;
+}
+
+.ops-entry-kiosk-download {
+  margin-top: 14px;
+}
+
+.ops-entry-kiosk-controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.ops-entry-kiosk-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ops-entry-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(2, 6, 23, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.ops-entry-modal {
+  width: 100%;
+  max-width: 420px;
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.28);
+  padding: 14px;
+}
+
+.ops-entry-modal h3 {
+  margin: 0 0 10px;
+}
+
+.ops-entry-modal-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.ops-entry-modal-grid input,
+.ops-entry-modal-grid select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+
+.ops-entry-modal-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ops-entry-modal-btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ops-entry-modal-btn--soft {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.ops-entry-modal-btn--soft:hover:not(:disabled) {
+  background: #eef2f7;
+  border-color: #94a3b8;
+}
+
+.ops-entry-modal-btn--cancel {
+  background: #ffffff;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.ops-entry-modal-btn--cancel:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.ops-entry-modal-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@keyframes ops-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
 }
 
 /* ── Formulario CRUD (inserción/edición) ───────────────────── */
