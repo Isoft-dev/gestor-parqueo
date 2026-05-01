@@ -212,8 +212,13 @@ export default function ReportesMembresiasClientesSection() {
                         <thead><tr><th>Cliente</th><th>Correo</th><th>Teléfono</th><th>Placa</th><th>Vencimiento</th><th>Días mora</th></tr></thead>
                         <tbody>
                           {data.detalle.map((r) => (
-                            <tr key={String(r.memId)} style={r.alertaSuspension ? { background: '#fff7ed' } : undefined}>
-                              <td>{r.nombreCompleto}</td><td>{r.correo}</td><td>{r.telefono}</td><td>{r.placa}</td><td>{r.fechaVencimiento || '—'}</td><td>{r.diasMora}</td>
+                            <tr key={String(r.memId)}>
+                              <td>{r.nombreCompleto}</td>
+                              <td>{r.correo}</td>
+                              <td>{r.telefono}</td>
+                              <td>{r.placa}</td>
+                              <td>{r.fechaVencimiento || '—'}</td>
+                              <td>{r.diasMora}</td>
                             </tr>
                           ))}
                         </tbody>
