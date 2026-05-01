@@ -446,17 +446,24 @@ async function markGraceAlertAttendedByTicketCode(ticketCode, usuId = null) {
   );
 }
 
+/** Comprobante compacto (~148 mm × alto justo al contenido, sin A4). */
+const RECEIPT_PAGE_W = Math.round((105 / 25.4) * 72);
+const RECEIPT_PAGE_H = 340;
+
 function buildPdfBuffer({ ticket, cobro }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const doc = new PDFDocument({ margin: 42, size: 'A4' });
+    const doc = new PDFDocument({
+      size: [RECEIPT_PAGE_W, RECEIPT_PAGE_H],
+      margin: 36,
+    });
     doc.on('data', (c) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(18).text('Comprobante de pago', { align: 'center' });
-    doc.moveDown(1);
-    doc.fontSize(11);
+    doc.fontSize(16).text('Comprobante de pago', { align: 'center' });
+    doc.moveDown(0.6);
+    doc.fontSize(10);
     doc.text(`Ticket: ${ticket.TIC_CODIGO} (ID ${ticket.TIC_ID})`);
     doc.text(`Vehiculo: ${ticket.VEH_PLACA || 'N/D'}`);
     doc.text(`Hora entrada: ${new Date(ticket.TIC_FECHA_HORA_ENTRADA).toLocaleString('es-GT')}`);
@@ -467,8 +474,8 @@ function buildPdfBuffer({ ticket, cobro }) {
     doc.text(`Vuelto: Q${Number(cobro.COB_VUELTO || 0).toFixed(2)}`);
     doc.text(`NIT/CF: ${cobro.COB_NIT || 'N/D'}`);
     doc.text(`Tipo cobro (TCO_ID): ${cobro.TCO_ID}`);
-    doc.moveDown(1);
-    doc.text('Gracias por su visita.', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(10).text('Gracias por su visita.', { align: 'center' });
     doc.end();
   });
 }
@@ -546,30 +553,90 @@ async function alertaIdentityAlwaysTx(conn) {
   return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
 }
 
-async function buildEntryTicketPdfBuffer({ ticket, vehiculo }) {
-  const qrDataUrl = await QRCode.toDataURL(ticket.TIC_CODIGO, { margin: 1, scale: 6 });
+/** ~80 mm ticket térmico (puntos @72 dpi). */
+const ENTRY_TICKET_PAGE_W = Math.round((80 / 25.4) * 72);
+/** Alto acotado al contenido; el pie va pegado a la última línea (sin hueco grande abajo). */
+const ENTRY_TICKET_PAGE_H = 400;
+
+function formatTicketThermalDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${String(date.getFullYear()).slice(-2)} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function drawThermalGrupo8Mark(doc, cx, cy, boxW, boxH) {
+  doc.save();
+  doc.rect(cx - boxW / 2, cy - boxH / 2, boxW, boxH).fill('#000000');
+  doc.fillColor('#ffffff').font('Courier-Bold').fontSize(6.2);
+  doc.text('Grupo 8', cx - boxW / 2, cy - 3.2, { width: boxW, align: 'center' });
+  doc.restore();
+}
+
+async function buildEntryTicketPdfBuffer({ ticket, maquinaEntradaLabel }) {
+  const qrDataUrl = await QRCode.toDataURL(String(ticket.TIC_CODIGO || ''), {
+    margin: 1,
+    errorCorrectionLevel: 'M',
+    width: 320,
+  });
   const qrBase64 = qrDataUrl.split(',')[1];
   const qrBuffer = Buffer.from(qrBase64, 'base64');
 
+  const machineLabel = String(maquinaEntradaLabel || '').trim() || 'N/D';
+  const fechaLine = formatTicketThermalDate(ticket.TIC_FECHA_HORA_ENTRADA);
+
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const doc = new PDFDocument({ margin: 42, size: 'A4' });
+    const doc = new PDFDocument({
+      size: [ENTRY_TICKET_PAGE_W, ENTRY_TICKET_PAGE_H],
+      margin: 14,
+      autoFirstPage: true,
+    });
     doc.on('data', (c) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(18).text('Ticket de entrada', { align: 'center' });
-    doc.moveDown(0.8);
-    doc.fontSize(11);
-    doc.text(`Codigo ticket: ${ticket.TIC_CODIGO}`);
-    doc.text(`Ticket ID: ${ticket.TIC_ID}`);
-    doc.text(`Placa: ${vehiculo.VEH_PLACA || 'N/D'}`);
-    doc.text(`Modelo: ${vehiculo.VEH_MODELO || 'N/D'}`);
-    doc.text(`Color: ${vehiculo.VEH_COLOR || 'N/D'}`);
-    doc.text(`Hora entrada: ${new Date(ticket.TIC_FECHA_HORA_ENTRADA).toLocaleString('es-GT')}`);
-    doc.moveDown(0.8);
-    doc.text('QR para lectura en salida/cobro:');
-    doc.image(qrBuffer, { fit: [220, 220], align: 'center' });
+    const margin = 14;
+    const leftX = margin;
+    const innerW = ENTRY_TICKET_PAGE_W - margin * 2;
+
+    doc.fillColor('#000000');
+    doc.font('Courier').fontSize(9);
+
+    const qrSize = Math.min(168, innerW);
+    const qrX = leftX + (innerW - qrSize) / 2;
+    doc.image(qrBuffer, qrX, doc.y, { width: qrSize, height: qrSize });
+    doc.y += qrSize + 18;
+
+    const centerBlock = (size, text, gapAfter = 6) => {
+      doc.font('Courier').fontSize(size);
+      doc.text(text, leftX, doc.y, { width: innerW, align: 'center' });
+      doc.y += gapAfter;
+    };
+
+    centerBlock(9, 'Tarifa de Parqueo', 5);
+    centerBlock(11, 'BIENVENIDOS', 6);
+    centerBlock(9, 'Gestor de Parqueo', 7);
+    centerBlock(8, 'Ticket No.', 5);
+    doc.font('Courier-Bold').fontSize(10);
+    doc.text(String(ticket.TIC_CODIGO || ''), leftX, doc.y, { width: innerW, align: 'center' });
+    doc.y += 6;
+    doc.font('Courier').fontSize(8.5);
+    doc.text(fechaLine, leftX, doc.y, { width: innerW, align: 'center' });
+    doc.y += 10;
+
+    doc.font('Courier').fontSize(7.5);
+    const markBoxW = 52;
+    const markBoxH = 14;
+    const gapMark = 8;
+    const leftColW = Math.max(28, innerW - markBoxW - gapMark);
+    const footerY = doc.y;
+    const markCx = leftX + leftColW + gapMark + markBoxW / 2;
+
+    doc.text(machineLabel, leftX, footerY, { width: leftColW, align: 'left' });
+    drawThermalGrupo8Mark(doc, markCx, footerY + markBoxH / 2, markBoxW, markBoxH);
+    doc.fillColor('#000000').font('Courier').fontSize(7.5);
+
     doc.end();
   });
 }
@@ -738,15 +805,32 @@ export async function generateEntryTicket({
 export async function generateEntryTicketPdfByTicketId(ticketId) {
   const rows = await executeSql(
     `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA,
-            v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR
+            v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+            m.MAQ_CODIGO AS MAQ_ENTRADA_CODIGO
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
+       LEFT JOIN PAR_DETALLE_MAQUINA_TICKET d
+         ON d.TIC_ID = t.TIC_ID
+        AND d.DMT_TRANSACCION = 'GENERACION_TICKET'
+        AND d.DMT_ID = (
+              SELECT MIN(d2.DMT_ID)
+                FROM PAR_DETALLE_MAQUINA_TICKET d2
+               WHERE d2.TIC_ID = t.TIC_ID
+                 AND d2.DMT_TRANSACCION = 'GENERACION_TICKET'
+            )
+       LEFT JOIN PAR_MAQUINA m ON m.MAQ_ID = d.MAQ_ID
       WHERE t.TIC_ID = :ticketId`,
     { ticketId }
   );
   const row = rows[0];
   if (!row) throw new Error('Ticket no encontrado');
-  const pdfBuffer = await buildEntryTicketPdfBuffer({ ticket: row, vehiculo: row });
+  const maquinaEntradaLabel = row.MAQ_ENTRADA_CODIGO != null && String(row.MAQ_ENTRADA_CODIGO).trim()
+    ? String(row.MAQ_ENTRADA_CODIGO).trim()
+    : 'N/D';
+  const pdfBuffer = await buildEntryTicketPdfBuffer({
+    ticket: row,
+    maquinaEntradaLabel,
+  });
   return {
     pdfBuffer,
     fileName: `ticket-entrada-${row.TIC_ID}.pdf`,
