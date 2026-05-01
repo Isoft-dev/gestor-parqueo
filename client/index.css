@@ -1574,6 +1574,7 @@ body {
 }
 
 .ops-cobro-screen {
+  position: relative;
   width: 100%;
   min-height: 340px;
   border-radius: 14px;
@@ -1581,6 +1582,21 @@ body {
   background: #1a1a2e;
   box-shadow: 0 10px 28px rgba(2, 6, 23, 0.35);
   transition: all 0.3s ease;
+}
+
+.ops-cobro-card-error-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  text-align: center;
+  border-radius: 14px;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #2b1b1b 0%, #1f1414 100%);
+  border: 1px solid #7f1d1d;
 }
 
 .ops-cobro-screen--error {
@@ -1645,6 +1661,11 @@ body {
   color: #facc15;
 }
 
+.ops-cobro-icon--error {
+  border-color: #f87171;
+  color: #f87171;
+}
+
 .ops-cobro-subtext {
   margin: 0;
   font-size: 1.05rem;
@@ -1657,6 +1678,11 @@ body {
 
 .ops-cobro-subtext--error {
   color: #fca5a5;
+}
+
+.ops-cobro-subtext--hint {
+  color: #fbbf24;
+  font-weight: 500;
 }
 
 .ops-cobro-receipt {
@@ -1841,6 +1867,52 @@ body {
   flex-direction: column;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* Búsqueda por placa — pago membresía (panel oscuro ops-cobro-right) */
+.ops-cobro-mem-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.ops-cobro-mem-search-input {
+  flex: 1 1 160px;
+  min-width: 140px;
+  min-height: 52px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ops-cobro-mem-search-input::placeholder {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.ops-cobro-mem-search-input:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+}
+
+.ops-cobro-mem-search-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .ops-cobro-mem-list {

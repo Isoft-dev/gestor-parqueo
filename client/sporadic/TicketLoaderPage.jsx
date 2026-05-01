@@ -206,6 +206,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   /** Flujo UI máquina de cobro (solo presentación; la lógica sigue en quote / submitCheckout / membresía). */
   const [cobroUiStep, setCobroUiStep] = useState('idle');
   const [cobroErrorText, setCobroErrorText] = useState('');
+  /** Validación de tarjeta (simulador): overlay rojo en la pantallita, mismo patrón que errores del kiosco. */
+  const [cobroCardScreenError, setCobroCardScreenError] = useState(null);
   /** Kiosco máquina de salida (solo presentación). */
   const [salidaKioskState, setSalidaKioskState] = useState('idle'); // idle | processing | success | error
   const [salidaKioskNotice, setSalidaKioskNotice] = useState({ text: '', severity: 'error' }); // warn | error
@@ -326,6 +328,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
     setCobroUiStep('pago_efectivo');
     setMsg('');
+    setCobroCardScreenError(null);
   }
 
   function cobroGoTarjeta() {
@@ -339,6 +342,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     resetCardSimulator();
     setCobroUiStep('pago_tarjeta');
     setMsg('');
+    setCobroCardScreenError(null);
   }
 
   function cobroCancelToPaymentMethod() {
@@ -348,6 +352,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setTcoId('');
     setCobroUiStep('pago_metodo');
     setMsg('');
+    setCobroCardScreenError(null);
   }
 
   /** Solo dígitos y un punto decimal; nunca negativos (evita que `min` del input sea insuficiente). */
@@ -647,6 +652,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   async function onLoadPdf(file) {
     setLoading(true);
     setMsg('');
+    setCobroCardScreenError(null);
     setQuote(null);
     try {
       const buffer = await file.arrayBuffer();
@@ -927,21 +933,21 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     } else {
       const numero = String(cardSim.numero || '').replace(/\D/g, '');
       if (!numero) {
-        setMsg('Ingresa el número de tarjeta.');
+        setCobroCardScreenError('Ingresa el número de tarjeta.');
         return;
       }
       if (numero.length !== 16) {
-        setMsg('El número de tarjeta debe tener 16 dígitos.');
+        setCobroCardScreenError('El número de tarjeta debe tener 16 dígitos.');
         return;
       }
       if (!String(cardSim.nombre || '').trim()) {
-        setMsg('Ingresa el nombre del titular de la tarjeta.');
+        setCobroCardScreenError('Ingresa el nombre del titular de la tarjeta.');
         return;
       }
       const expRaw = String(cardSim.exp || '');
       const expMatch = expRaw.match(/^(0[1-9]|1[0-2])\/(\d{2})$/);
       if (!expMatch) {
-        setMsg('La fecha de vencimiento debe tener formato MM/AA válido.');
+        setCobroCardScreenError('La fecha de vencimiento debe tener formato MM/AA válido.');
         return;
       }
       const expMonth = Number(expMatch[1]);
@@ -950,17 +956,18 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       const nowMonth = now.getMonth() + 1;
       const nowYear = now.getFullYear();
       if (expYear < nowYear || (expYear === nowYear && expMonth < nowMonth)) {
-        setMsg('La tarjeta está vencida.');
+        setCobroCardScreenError('La tarjeta está vencida.');
         return;
       }
       const cvv = String(cardSim.cvv || '').replace(/\D/g, '');
       if (cvv.length !== 3) {
-        setMsg('El CVV debe tener exactamente.');
+        setCobroCardScreenError('El CVV debe tener exactamente 3 dígitos.');
         return;
       }
     }
     setLoading(true);
     setMsg('');
+    setCobroCardScreenError(null);
     try {
       const payload = {
         TIC_CODIGO: quote.ticket.TIC_CODIGO,
@@ -1014,6 +1021,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     }
     setLoading(true);
     setMsg('');
+    setCobroCardScreenError(null);
     try {
       const res = await fetch(
         `${API_BASE}/membresia/payment-candidates/search?${new URLSearchParams({ q })}`,
@@ -1060,21 +1068,21 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     {
       const numero = String(memPayCardSim.numero || '').replace(/\D/g, '');
       if (!numero) {
-        setMsg('Ingresa el número de tarjeta.');
+        setCobroCardScreenError('Ingresa el número de tarjeta.');
         return;
       }
       if (numero.length !== 16) {
-        setMsg('El número de tarjeta debe tener 16 dígitos.');
+        setCobroCardScreenError('El número de tarjeta debe tener 16 dígitos.');
         return;
       }
       if (!String(memPayCardSim.nombre || '').trim()) {
-        setMsg('Ingresa el nombre del titular de la tarjeta.');
+        setCobroCardScreenError('Ingresa el nombre del titular de la tarjeta.');
         return;
       }
       const expRaw = String(memPayCardSim.exp || '');
       const expMatch = expRaw.match(/^(0[1-9]|1[0-2])\/(\d{2})$/);
       if (!expMatch) {
-        setMsg('La fecha de vencimiento debe tener formato MM/AA válido.');
+        setCobroCardScreenError('La fecha de vencimiento debe tener formato MM/AA válido.');
         return;
       }
       const expMonth = Number(expMatch[1]);
@@ -1083,17 +1091,18 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       const nowMonth = now.getMonth() + 1;
       const nowYear = now.getFullYear();
       if (expYear < nowYear || (expYear === nowYear && expMonth < nowMonth)) {
-        setMsg('La tarjeta está vencida.');
+        setCobroCardScreenError('La tarjeta está vencida.');
         return;
       }
       const cvv = String(memPayCardSim.cvv || '').replace(/\D/g, '');
       if (cvv.length !== 3) {
-        setMsg('El CVV debe tener exactamente 3 dígitos.');
+        setCobroCardScreenError('El CVV debe tener exactamente 3 dígitos.');
         return;
       }
     }
     setLoading(true);
     setMsg('');
+    setCobroCardScreenError(null);
     try {
       const res = await fetch(`${API_BASE}/membresia/${memPaySelected.MEM_ID}/register-payment`, {
         method: 'POST',
@@ -1137,6 +1146,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setQuote(null);
     setCheckoutDone(null);
     setMsg('');
+    setCobroCardScreenError(null);
     setTcoId('');
     setMaqId(cobroOnly ? String(defaultCobroMaqId || '') : '');
     setNit('');
@@ -1205,6 +1215,21 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     }, 4000);
     return () => clearTimeout(t);
   }, [cobroOnly, cobroUiStep]);
+
+  useEffect(() => {
+    if (!cobroOnly || cobroUiStep !== 'success' || !memPayDone || checkoutDone) return;
+    const t = setTimeout(() => {
+      resetProcess();
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [cobroOnly, cobroUiStep, memPayDone, checkoutDone]);
+
+  useEffect(() => {
+    if (!cobroCardScreenError) return;
+    if (cobroUiStep !== 'pago_tarjeta' && cobroUiStep !== 'mem_tarjeta') return;
+    const t = setTimeout(() => setCobroCardScreenError(null), 4000);
+    return () => clearTimeout(t);
+  }, [cobroCardScreenError, cobroUiStep]);
 
   useEffect(() => {
     if (!salidaOnly || salidaKioskState !== 'success') return;
@@ -1571,6 +1596,17 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                     </div>
                   ) : null}
                 </div>
+                {cobroCardScreenError && (cobroUiStep === 'pago_tarjeta' || cobroUiStep === 'mem_tarjeta') ? (
+                  <div className="ops-cobro-card-error-overlay" role="alert" aria-live="assertive">
+                    <div className="ops-cobro-state">
+                      <div className="ops-cobro-icon ops-cobro-icon--error" aria-hidden="true">
+                        ✕
+                      </div>
+                      <h2>No se pudo completar</h2>
+                      <p className="ops-cobro-subtext ops-cobro-subtext--error">{cobroCardScreenError}</p>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="ops-entry-kiosk-controls ops-cobro-bottom-btns">
@@ -1603,6 +1639,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                     setMemPayList([]);
                     setMemPaySelected(null);
                     setMemPayDone(null);
+                    setCheckoutDone(null);
                     setMemPayQ('');
                     setMemPayTpaId('');
                     setMemPayRecibido('');
@@ -1610,6 +1647,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                     resetMemPayCardSimulator();
                     setCobroUiStep('mem_buscar');
                     setMsg('');
+                    setCobroCardScreenError(null);
                   }}
                 >
                   Pagar Membresía
@@ -1645,12 +1683,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
               ) : null}
 
               {cobroUiStep === 'success' && memPayDone && !checkoutDone ? (
-                <>
-                  <p className="ops-cobro-right-hint">Pago de membresía registrado.</p>
-                  <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={() => resetProcess()}>
-                    Volver al inicio
-                  </button>
-                </>
+                <p className="ops-cobro-right-hint">Pago registrado. Volviendo al inicio…</p>
               ) : null}
 
               {cobroUiStep === 'idle' ? (
@@ -1805,15 +1838,16 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
               {cobroUiStep === 'mem_buscar' ? (
                 <>
                   <p className="ops-cobro-right-hint">Cargue la membresía / tag del cliente</p>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div className="ops-cobro-mem-search-row">
                     <input
                       type="text"
+                      className="ops-cobro-mem-search-input"
                       placeholder="Placa (mín. 2 caracteres)"
                       value={memPayQ}
                       onChange={(e) => setMemPayQ(e.target.value.toUpperCase())}
-                      style={{ flex: '1 1 160px', minWidth: 140 }}
+                      autoComplete="off"
                     />
-                    <button type="button" className="ops-cobro-physical-btn" onClick={buscarMembresiasParaPago} disabled={loading}>
+                    <button type="button" className="ops-cobro-physical-btn ops-cobro-mem-search-btn" onClick={buscarMembresiasParaPago} disabled={loading}>
                       Buscar
                     </button>
                   </div>
@@ -1835,6 +1869,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                               setMemPayTpaId(String(memCardTipoPago?.TPA_ID || ''));
                               setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
                               resetMemPayCardSimulator();
+                              setCobroCardScreenError(null);
                               setCobroUiStep('mem_tarjeta');
                             }}
                           >
