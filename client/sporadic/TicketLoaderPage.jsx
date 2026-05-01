@@ -125,6 +125,15 @@ function pickDefaultEntradaMaqId(entradaList, maqList) {
   return String(sorted[0]?.MAQ_ID ?? '');
 }
 
+function pickDefaultCobroMaqId(cobroList, maqList) {
+  const pool = Array.isArray(cobroList) && cobroList.length > 0 ? cobroList : (Array.isArray(maqList) ? maqList : []);
+  if (!pool.length) return '';
+  const hasOne = pool.some((m) => String(m?.MAQ_ID) === '1');
+  if (hasOne) return '1';
+  const sorted = [...pool].sort((a, b) => Number(a?.MAQ_ID) - Number(b?.MAQ_ID));
+  return String(sorted[0]?.MAQ_ID ?? '');
+}
+
 export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = false, entradaOnly = false, salidaOnly = false }) {
   const { user, logout } = useAuth();
   const fileRef = useRef(null);
@@ -194,6 +203,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     cvv: '',
   });
   const [memPayDone, setMemPayDone] = useState(null);
+  /** Flujo UI máquina de cobro (solo presentación; la lógica sigue en quote / submitCheckout / membresía). */
+  const [cobroUiStep, setCobroUiStep] = useState('idle');
+  const [cobroErrorText, setCobroErrorText] = useState('');
   const montoTotalCalculado = Number(quote?.montoTotal || 0);
   const horasCalculadas = Number(
     quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
@@ -238,6 +250,102 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     Number.isFinite(memPayRecibidoNum) && memPayRecibidoNum >= memMontoPlan
       ? Number((memPayRecibidoNum - memMontoPlan).toFixed(2))
       : 0;
+
+  function cobroShortTicketCode(code) {
+    const s = String(code || '');
+    if (s.length <= 20) return s;
+    return `${s.slice(0, 12)}…${s.slice(-6)}`;
+  }
+
+  function cobroPickEfectivoTcoId() {
+    const t = tiposCobro.find((x) => /efectivo|cash/i.test(String(x?.TCO_TIPO || '')));
+    return t ? String(t.TCO_ID) : '';
+  }
+
+  function cobroPickTarjetaTcoId() {
+    const t = tiposCobro.find((x) =>
+      /tarjeta|card|credito|cr[eé]dito|debito|d[eé]bito/i.test(String(x?.TCO_TIPO || '')),
+    );
+    return t ? String(t.TCO_ID) : '';
+  }
+
+  function cobroAddDenominacion(d) {
+    setBilletes((b) => {
+      const currentSum = denominacionesDisponibles.reduce(
+        (acc, x) => acc + Number(b[x] || 0) * Number(x),
+        0,
+      );
+      if (currentSum >= montoTotalCalculado) return b;
+      const nb = { ...b, [d]: Number(b[d] || 0) + 1 };
+      const sum = denominacionesDisponibles.reduce(
+        (acc, x) => acc + Number(nb[x] || 0) * Number(x),
+        0,
+      );
+      setMontoRecibido(sum.toFixed(2));
+      return nb;
+    });
+  }
+
+  function cobroNitKeypadDigit(ch) {
+    setCf(false);
+    setNit((prev) => `${String(prev || '')}${ch}`.replace(/\D/g, '').slice(0, 15));
+  }
+
+  function cobroNitKeypadDel() {
+    setNit((prev) => String(prev || '').slice(0, -1));
+  }
+
+  function cobroConfirmNitKiosk() {
+    if (cf) return;
+    if (!String(nit || '').trim()) {
+      setMsg('Ingrese NIT o seleccione CF.');
+      return;
+    }
+    setCobroUiStep('pago_metodo');
+    setMsg('');
+  }
+
+  function cobroPressCf() {
+    setCf(true);
+    setNit('');
+    setCobroUiStep('pago_metodo');
+    setMsg('');
+  }
+
+  function cobroGoEfectivo() {
+    const id = cobroPickEfectivoTcoId();
+    if (!id) {
+      setMsg('No hay tipo de cobro en efectivo configurado.');
+      return;
+    }
+    setTcoId(id);
+    setMontoRecibido('');
+    setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+    setCobroUiStep('pago_efectivo');
+    setMsg('');
+  }
+
+  function cobroGoTarjeta() {
+    const id = cobroPickTarjetaTcoId();
+    if (!id) {
+      setMsg('No hay tipo de cobro con tarjeta configurado.');
+      return;
+    }
+    setTcoId(id);
+    setMontoRecibido(String(montoTotalCalculado.toFixed(2)));
+    resetCardSimulator();
+    setCobroUiStep('pago_tarjeta');
+    setMsg('');
+  }
+
+  function cobroCancelToPaymentMethod() {
+    resetCardSimulator();
+    setMontoRecibido('');
+    setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+    setTcoId('');
+    setCobroUiStep('pago_metodo');
+    setMsg('');
+  }
 
   /** Solo dígitos y un punto decimal; nunca negativos (evita que `min` del input sea insuficiente). */
   function onMontoRecibidoChange(raw) {
@@ -343,21 +451,12 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         const tipoById = new Map(
           (Array.isArray(dTma) ? dTma : []).map((t) => [String(t.TMA_ID), t]),
         );
-        const cobroMaq = maqList.find((m) => {
-          const tipo = tipoById.get(String(m.TMA_ID));
-          return isTipoMaquinaCobro(tipo?.TMA_TIPO);
-        });
         const cobroList = maqList.filter((m) => {
           const tipo = tipoById.get(String(m.TMA_ID));
           return isTipoMaquinaCobro(tipo?.TMA_TIPO);
         });
         setMaquinasCobro(cobroList);
-        const fallbackByCode = maqList.find((m) =>
-          String(m.MAQ_CODIGO || '').toLowerCase().includes('cob'),
-        );
-        const pickedCobroMaqId = String(
-          cobroMaq?.MAQ_ID ?? fallbackByCode?.MAQ_ID ?? maqList[0]?.MAQ_ID ?? '',
-        );
+        const pickedCobroMaqId = pickDefaultCobroMaqId(cobroList, maqList);
         setDefaultCobroMaqId(pickedCobroMaqId);
 
         const entradaList = maqList.filter((m) => {
@@ -393,7 +492,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             ? pickedCobroMaqId
             : (entradaOnly ? pickedEntradaMaqId : (salidaOnly ? pickedSalidaMaqId : pickedCobroMaqId));
           setAssistMaqId((prev) => prev || defaultAssist);
-          if (cobroOnly) setMaqId(pickedCobroMaqId);
+          if (cobroOnly) {
+            setMaqId((prev) => (String(prev || '').trim() ? prev : pickedCobroMaqId));
+          }
           if (entradaOnly) {
             setVehicleForm((prev) => ({
               ...prev,
@@ -550,6 +651,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       const ticCodigo = extractTicketCodeFromPdfText(pdfText);
       if (!ticCodigo) {
         setMsg('Ticket no reconocido: no se pudo extraer TIC_CODIGO del PDF.');
+        if (cobroOnly) {
+          setCobroUiStep('error');
+          setCobroErrorText('No se pudo extraer el código del ticket del PDF.');
+        }
         return;
       }
 
@@ -563,20 +668,36 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       setQuote(data);
       setCheckoutDone(null);
       setMsg('');
+      if (cobroOnly) {
+        setCobroUiStep('ticket_nit');
+        setCobroErrorText('');
+      }
     } catch (err) {
       const txt = String(err?.message || '');
       if (/ya saldado/i.test(txt)) {
         setMsg('El ticket ya está saldado. Carga un ticket diferente para continuar.');
         setQuote(null);
+        if (cobroOnly) {
+          setCobroUiStep('error');
+          setCobroErrorText('El ticket ya está saldado.');
+        }
         return;
       }
       if (/no reconocido/i.test(txt)) {
         setMsg('Ticket no reconocido.');
         setQuote(null);
+        if (cobroOnly) {
+          setCobroUiStep('error');
+          setCobroErrorText('Ticket no reconocido.');
+        }
         return;
       }
       setMsg(`Error: ${txt}`);
       setQuote(null);
+      if (cobroOnly) {
+        setCobroUiStep('error');
+        setCobroErrorText(txt || 'No se pudo cargar el ticket.');
+      }
     } finally {
       setLoading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -812,6 +933,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       setCheckoutDone(data);
       setQuote(null);
       setMsg('Cobro registrado correctamente.');
+      if (cobroOnly) {
+        setCobroUiStep('success');
+        setCobroErrorText('');
+      }
       setNit('');
       setCf(false);
       setTcoId('');
@@ -821,6 +946,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       resetCardSimulator();
     } catch (err) {
       setMsg(`Error: ${String(err?.message || err)}`);
+      if (cobroOnly) {
+        setCobroUiStep('error');
+        setCobroErrorText(String(err?.message || err));
+      }
     } finally {
       setLoading(false);
     }
@@ -936,14 +1065,24 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       resetMemPayCardSimulator();
       setMemPayQ('');
       setMsg('');
+      if (cobroOnly) {
+        setCobroUiStep('success');
+        setCobroErrorText('');
+      }
     } catch (e) {
       setMsg(`Error: ${String(e?.message || e)}`);
+      if (cobroOnly) {
+        setCobroUiStep('error');
+        setCobroErrorText(String(e?.message || e));
+      }
     } finally {
       setLoading(false);
     }
   }
 
   function resetProcess() {
+    setCobroUiStep('idle');
+    setCobroErrorText('');
     setQuote(null);
     setCheckoutDone(null);
     setMsg('');
@@ -1006,16 +1145,43 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     return () => clearTimeout(t);
   }, [entradaOnly, entryKioskState]);
 
+  useEffect(() => {
+    if (!cobroOnly || cobroUiStep !== 'error') return;
+    const t = setTimeout(() => {
+      resetProcess();
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [cobroOnly, cobroUiStep]);
+
+  const cobroBottomDisabled =
+    cobroOnly && (cobroUiStep !== 'idle' || loading || catalogLoading);
+  const cobroCashIngresado = sumaBilletes;
+  const cobroCashVuelto =
+    cobroCashIngresado >= montoTotalCalculado
+      ? Number((cobroCashIngresado - montoTotalCalculado).toFixed(2))
+      : 0;
+
   return (
     <div
       className={
         embeddedInAdmin
-          ? 'ops-shell ops-shell--embedded'
-          : `admin-page ops-page-public${entradaOnly ? ' ops-page-public--entry' : ''}`
+          ? `ops-shell ops-shell--embedded${cobroOnly ? ' ops-shell--cobro' : ''}`
+          : `admin-page ops-page-public${entradaOnly ? ' ops-page-public--entry' : cobroOnly ? ' ops-page-public--cobro' : ''}`
       }
-      style={{ maxWidth: embeddedInAdmin ? '100%' : 1040, margin: '12px auto', padding: 16 }}
+      style={{
+        maxWidth: embeddedInAdmin ? '100%' : entradaOnly || cobroOnly ? '100%' : 1040,
+        margin: embeddedInAdmin || entradaOnly || cobroOnly ? 0 : '12px auto',
+        padding:
+          entradaOnly || cobroOnly
+            ? embeddedInAdmin
+              ? 16
+              : cobroOnly
+                ? undefined
+                : 0
+            : 16,
+      }}
     >
-      {!entradaOnly ? (
+      {!entradaOnly && !cobroOnly ? (
         <>
           <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
             <h1 className="admin-page-title">
@@ -1103,193 +1269,586 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       ) : null}
 
       {cobroOnly && !catalogLoading ? (
-        <section className="admin-panel-block ops-panel-block" style={{ marginTop: 4 }}>
-          <div className="admin-panel-head">
-            <h2>Pagar membresía</h2>
-            <p className="admin-panel-sub">
-              Renueva el plan mensual desde caja: busca por placa, elige la membresía y completa el pago con tarjeta.
-              Si el periodo venció, el sistema la suspende y el ingreso con tag queda bloqueado hasta pagar aquí.
-            </p>
+        <>
+          {/* Mismo patrón que máquina de entrada: hijo directo de la página para que en admin el absolute sea respecto al panel, no al bloque centrado. */}
+          <div className="ops-cobro-config">
+            <label>
+              <span>Máquina de cobro</span>
+              <select value={maqId} onChange={(e) => setMaqId(e.target.value)}>
+                <option value="">—</option>
+                {(maquinasCobro.length ? maquinasCobro : maquinas).map((m) => (
+                  <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                    {machineLabel(m)}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 10 }}>
-            <input
-              type="text"
-              placeholder="Placa (mín. 2 caracteres)"
-              value={memPayQ}
-              onChange={(e) => setMemPayQ(e.target.value.toUpperCase())}
-              style={{ padding: '8px 10px', minWidth: 220 }}
-            />
-            <button type="button" className="admin-btn-primary" onClick={buscarMembresiasParaPago} disabled={loading}>
-              Buscar
-            </button>
-          </div>
-          {memPayList.length > 0 ? (
-            <div style={{ marginTop: 12, maxHeight: 220, overflow: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
-              {memPayList.map((m) => {
-                const id = m.MEM_ID ?? m.mem_id;
-                const sel = String(memPaySelected?.MEM_ID ?? '') === String(id);
-                const nom = [m.CLI_PRIMER_NOMBRE, m.CLI_PRIMER_APELLIDO].filter(Boolean).join(' ');
-                const venc = m.MEM_FECHA_VENCIMIENTO
-                  ? new Date(m.MEM_FECHA_VENCIMIENTO).toLocaleDateString('es-GT')
-                  : '—';
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      setMemPaySelected(m);
-                      setMemPayRecibido('');
-                      setMemPayTpaId(String(memCardTipoPago?.TPA_ID || ''));
-                      setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
-                      resetMemPayCardSimulator();
-                    }}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      border: 'none',
-                      borderBottom: '1px solid #eee',
-                      background: sel ? '#ecfdf5' : '#fff',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <strong>#{id}</strong> — {m.VEH_PLACA || '—'} — {nom || 'Cliente'} — {m.TME_TIPO || 'Plan'} — Q
-                    {Number(m.TME_PRECIO ?? 0).toFixed(2)} — Vence {venc} — {m.EME_ESTADO || '—'}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {memPaySelected ? (
-            <div style={{ marginTop: 14, padding: 12, border: '1px solid #d1d5db', borderRadius: 8, background: '#fafafa' }}>
-              <p style={{ margin: '0 0 10px', fontSize: 14 }}>
-                Monto del plan: <strong>Q{memMontoPlan.toFixed(2)}</strong>
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                {!hasMemPayTpaSeleccionado ? (
-                  <div
-                    style={{
-                      width: '100%',
-                      marginTop: 8,
-                      border: '1px dashed #cbd5e1',
-                      borderRadius: 8,
-                      padding: 10,
-                      background: '#f8fafc',
-                      color: '#475569',
-                    }}
-                  >
-                    No hay tipo de pago con tarjeta configurado en catálogo.
-                  </div>
-                ) : isMemPayCardSelected ? (
-                  <div
-                    style={{
-                      width: '100%',
-                      marginTop: 8,
-                      border: '1px solid #dbeafe',
-                      borderRadius: 8,
-                      padding: 10,
-                      background: '#f8fbff',
-                    }}
-                  >
-                    <strong>Pago con tarjeta</strong>
-                    <p style={{ margin: '4px 0 8px', fontSize: 12, color: '#374151' }}>
-                      Inserta los datos de tu tarjeta para realizar el cobro.
-                    </p>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="Número de tarjeta (16 dígitos)"
-                        value={memPayCardSim.numero}
-                        onChange={(e) =>
-                          setMemPayCardSim((p) => ({
-                            ...p,
-                            numero: e.target.value.replace(/\D/g, '').slice(0, 16),
-                          }))
-                        }
-                        style={{ padding: '8px 10px', minWidth: 220 }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="Nombre en tarjeta"
-                        value={memPayCardSim.nombre}
-                        onChange={(e) =>
-                          setMemPayCardSim((p) => ({ ...p, nombre: e.target.value }))
-                        }
-                        style={{ padding: '8px 10px', minWidth: 180 }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="MM/AA"
-                        value={memPayCardSim.exp}
-                        onChange={(e) =>
-                          setMemPayCardSim((p) => ({
-                            ...p,
-                            exp: (() => {
-                              const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
-                              if (digits.length <= 2) return digits;
-                              return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-                            })(),
-                          }))
-                        }
-                        style={{ padding: '8px 10px', minWidth: 100 }}
-                      />
-                      <input
-                        type="password"
-                        inputMode="numeric"
-                        placeholder="CVV"
-                        value={memPayCardSim.cvv}
-                        onChange={(e) =>
-                          setMemPayCardSim((p) => ({
-                            ...p,
-                            cvv: e.target.value.replace(/\D/g, '').slice(0, 3),
-                          }))
-                        }
-                        style={{ padding: '8px 10px', minWidth: 90 }}
-                      />
+
+          <div className="ops-cobro-kiosk-root">
+          <div className="ops-cobro-split">
+            <div className="ops-cobro-left">
+              <div
+                className={`ops-cobro-screen${
+                  cobroUiStep === 'error'
+                    ? ' ops-cobro-screen--error'
+                    : cobroUiStep === 'success'
+                      ? ' ops-cobro-screen--success'
+                      : ''
+                }`}
+              >
+                <div
+                  className={`ops-cobro-screen-inner${
+                    quote && (cobroUiStep === 'ticket_nit' || cobroUiStep === 'pago_metodo' || cobroUiStep === 'pago_efectivo' || cobroUiStep === 'pago_tarjeta')
+                      ? ' ops-cobro-screen-inner--receipt'
+                      : memPaySelected && (cobroUiStep === 'mem_tarjeta' || cobroUiStep === 'success')
+                        ? ' ops-cobro-screen-inner--receipt'
+                        : ''
+                  }`}
+                >
+                  {cobroUiStep === 'idle' ? (
+                    <div className="ops-cobro-state">
+                      <div className="ops-cobro-icon" aria-hidden="true">
+                        C
+                      </div>
+                      <h2>Bienvenido a Caja</h2>
+                      <p className="ops-cobro-subtext ops-cobro-subtext--pulse">
+                        Espacios disponibles: {espacioResumen?.disponibles ?? '—'} de {espacioResumen?.total ?? '—'}
+                      </p>
                     </div>
-                  </div>
+                  ) : null}
+
+                  {cobroUiStep === 'error' ? (
+                    <div className="ops-cobro-state">
+                      <div className="ops-cobro-icon ops-cobro-icon--warn" aria-hidden="true">
+                        ⚠
+                      </div>
+                      <h2>No se pudo completar</h2>
+                      <p className="ops-cobro-subtext ops-cobro-subtext--error">
+                        {cobroErrorText || msg || 'Intente de nuevo.'}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {cobroUiStep === 'success' ? (
+                    <div className="ops-cobro-state">
+                      <div className="ops-cobro-icon ops-cobro-icon--success" aria-hidden="true">
+                        ✓
+                      </div>
+                      <h2>¡Pago exitoso!</h2>
+                      {checkoutDone && Number(checkoutDone.COB_VUELTO) > 0 ? (
+                        <p className="ops-cobro-subtext">Vuelto: Q{Number(checkoutDone.COB_VUELTO).toFixed(2)}</p>
+                      ) : null}
+                      {memPayDone?.MEM_FECHA_VENCIMIENTO ? (
+                        <p className="ops-cobro-subtext">
+                          Vigencia hasta {new Date(memPayDone.MEM_FECHA_VENCIMIENTO).toLocaleString('es-GT')}
+                          {memPayDone.REACTIVATED ? ' (reactivada).' : null}
+                        </p>
+                      ) : null}
+                      {checkoutDone?.TIC_ID ? (
+                        <p className="ops-cobro-subtext" style={{ marginTop: 12 }}>
+                          Use el panel derecho para descargar el comprobante.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {cobroUiStep === 'ticket_nit' && quote ? (
+                    String(nit || '').length > 0 && !cf ? (
+                      <div className="ops-cobro-state">
+                        <h2>¿Cómo desea facturar?</h2>
+                        <p className="ops-cobro-subtext">Ingrese NIT con el teclado o seleccione CF</p>
+                        <p className="ops-cobro-nit-live">NIT: {nit}_</p>
+                      </div>
+                    ) : (
+                      <div className="ops-cobro-receipt">
+                        <div className="ops-cobro-receipt-title">🎫 DETALLE DEL TICKET</div>
+                        <hr />
+                        <div className="ops-cobro-receipt-row">
+                          <span>Ticket</span>
+                          <span>{cobroShortTicketCode(quote.ticket?.TIC_CODIGO)}</span>
+                        </div>
+                        <div className="ops-cobro-receipt-row">
+                          <span>Placa</span>
+                          <span>{quote.ticket?.VEH_PLACA || 'N/D'}</span>
+                        </div>
+                        <div className="ops-cobro-receipt-row">
+                          <span>Entrada</span>
+                          <span>
+                            {quote.ticket?.TIC_FECHA_HORA_ENTRADA
+                              ? new Date(quote.ticket.TIC_FECHA_HORA_ENTRADA).toLocaleString('es-GT')
+                              : 'N/D'}
+                          </span>
+                        </div>
+                        <div className="ops-cobro-receipt-row">
+                          <span>Estadía</span>
+                          <span>
+                            {quote.estadia?.horasFacturables} h ({quote.estadia?.minutosFacturables} min)
+                          </span>
+                        </div>
+                        <div className="ops-cobro-receipt-row">
+                          <span>Tarifa</span>
+                          <span>
+                            Q{quote.tarifa?.TAR_PRECIO} / hora ({quote.tarifa?.TAR_TIPO || '—'})
+                          </span>
+                        </div>
+                        {Number(quote.recargoTicketExtraviado) > 0 ? (
+                          <div className="ops-cobro-receipt-row" style={{ color: '#fbbf24' }}>
+                            <span>Recargo extraviado</span>
+                            <span>Q{Number(quote.recargoTicketExtraviado).toFixed(2)}</span>
+                          </div>
+                        ) : null}
+                        <div className="ops-cobro-receipt-total">TOTAL A PAGAR: Q{montoTotalCalculado.toFixed(2)}</div>
+                      </div>
+                    )
+                  ) : null}
+
+                  {cobroUiStep === 'pago_metodo' && quote ? (
+                    <div className="ops-cobro-state">
+                      <h2>Seleccione forma de pago</h2>
+                      <p className="ops-cobro-subtext">Efectivo o Tarjeta</p>
+                      <div className="ops-cobro-receipt" style={{ marginTop: 14 }}>
+                        <div className="ops-cobro-receipt-row">
+                          <span>Total</span>
+                          <span>Q{montoTotalCalculado.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {cobroUiStep === 'pago_efectivo' && quote ? (
+                    <div className="ops-cobro-receipt">
+                      <div className="ops-cobro-receipt-title">EFECTIVO</div>
+                      <hr />
+                      <div className="ops-cobro-receipt-row">
+                        <span>Total a pagar</span>
+                        <span>Q{montoTotalCalculado.toFixed(2)}</span>
+                      </div>
+                      <div className="ops-cobro-receipt-row">
+                        <span>Ingresado</span>
+                        <span>Q{cobroCashIngresado.toFixed(2)}</span>
+                      </div>
+                      <div className="ops-cobro-receipt-row">
+                        <span>Vuelto</span>
+                        <span>Q{cobroCashVuelto.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {cobroUiStep === 'pago_tarjeta' && quote ? (
+                    <div className="ops-cobro-state">
+                      <h2>Pago con tarjeta</h2>
+                      <p className="ops-cobro-subtext">Complete los datos en el panel derecho</p>
+                      <p className="ops-cobro-receipt-total" style={{ marginTop: 16 }}>
+                        TOTAL: Q{montoTotalCalculado.toFixed(2)}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {cobroUiStep === 'mem_buscar' ? (
+                    <div className="ops-cobro-state">
+                      <div className="ops-cobro-icon" aria-hidden="true">
+                        M
+                      </div>
+                      <h2>Pagar membresía</h2>
+                      <p className="ops-cobro-subtext">Busque por placa en el panel derecho</p>
+                    </div>
+                  ) : null}
+
+                  {cobroUiStep === 'mem_tarjeta' && memPaySelected ? (
+                    <div className="ops-cobro-receipt">
+                      <div className="ops-cobro-receipt-title">MEMBRESÍA</div>
+                      <hr />
+                      <div className="ops-cobro-receipt-row">
+                        <span>Titular</span>
+                        <span>
+                          {[memPaySelected.CLI_PRIMER_NOMBRE, memPaySelected.CLI_PRIMER_APELLIDO]
+                            .filter(Boolean)
+                            .join(' ') || '—'}
+                        </span>
+                      </div>
+                      <div className="ops-cobro-receipt-row">
+                        <span>Placa</span>
+                        <span>{memPaySelected.VEH_PLACA || '—'}</span>
+                      </div>
+                      <div className="ops-cobro-receipt-row">
+                        <span>Plan</span>
+                        <span>{memPaySelected.TME_TIPO || '—'}</span>
+                      </div>
+                      <div className="ops-cobro-receipt-row">
+                        <span>Estado</span>
+                        <span>{memPaySelected.EME_ESTADO || '—'}</span>
+                      </div>
+                      <div className="ops-cobro-receipt-total">TOTAL: Q{memMontoPlan.toFixed(2)}</div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="ops-entry-kiosk-controls ops-cobro-bottom-btns">
+                <input
+                  id="cobro-ticket-upload"
+                  ref={fileRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="ops-cobro-sr-file"
+                  aria-label="Seleccionar PDF del ticket"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onLoadPdf(f);
+                  }}
+                />
+                {cobroBottomDisabled ? (
+                  <button type="button" className="admin-btn-primary ops-cobro-bottom-action" disabled>
+                    Pagar Ticket
+                  </button>
                 ) : (
-                  <div
-                    style={{
-                      width: '100%',
-                      marginTop: 8,
-                      border: '1px dashed #cbd5e1',
-                      borderRadius: 8,
-                      padding: 10,
-                      background: '#f8fafc',
-                      color: '#475569',
-                    }}
-                  >
-                    El tipo de pago configurado para membresía no corresponde a tarjeta.
-                  </div>
+                  <label htmlFor="cobro-ticket-upload" className="admin-btn-primary ops-cobro-upload-label ops-cobro-bottom-action">
+                    Pagar Ticket
+                  </label>
                 )}
-                <button type="button" className="admin-btn-primary" onClick={confirmarPagoMembresia} disabled={loading}>
-                  Registrar pago
+                <button
+                  type="button"
+                  className="admin-btn-primary ops-cobro-bottom-action"
+                  disabled={cobroBottomDisabled}
+                  onClick={() => {
+                    setMemPayList([]);
+                    setMemPaySelected(null);
+                    setMemPayDone(null);
+                    setMemPayQ('');
+                    setMemPayTpaId('');
+                    setMemPayRecibido('');
+                    setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+                    resetMemPayCardSimulator();
+                    setCobroUiStep('mem_buscar');
+                    setMsg('');
+                  }}
+                >
+                  Pagar Membresía
                 </button>
               </div>
             </div>
+
+            <div className="ops-cobro-right">
+              {cobroUiStep === 'success' && checkoutDone ? (
+                checkoutDone.TIC_ID ? (
+                  <>
+                    <p className="ops-cobro-right-hint">
+                      Pulse «Descargar comprobante» para abrir el PDF y volver al inicio.
+                    </p>
+                    <div className="ops-cobro-card-actions">
+                      <button
+                        type="button"
+                        className="ops-cobro-physical-btn ops-cobro-physical-btn--wide"
+                        onClick={() => downloadReceiptAndReset()}
+                      >
+                        ⬇ Descargar comprobante
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="ops-cobro-right-hint">No hay referencia de ticket para generar el comprobante.</p>
+                    <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={() => resetProcess()}>
+                      Volver al inicio
+                    </button>
+                  </>
+                )
+              ) : null}
+
+              {cobroUiStep === 'success' && memPayDone && !checkoutDone ? (
+                <>
+                  <p className="ops-cobro-right-hint">Pago de membresía registrado.</p>
+                  <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={() => resetProcess()}>
+                    Volver al inicio
+                  </button>
+                </>
+              ) : null}
+
+              {cobroUiStep === 'idle' ? (
+                <p className="ops-cobro-right-hint">Seleccione una opción en los botones inferiores</p>
+              ) : null}
+
+              {cobroUiStep === 'ticket_nit' && quote ? (
+                <>
+                  <p className="ops-cobro-right-hint">Facturación: CF o NIT</p>
+                  <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroPressCf}>
+                    CF — Consumidor final
+                  </button>
+                  <div className="ops-cobro-keypad" role="group" aria-label="Teclado NIT">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        className="ops-cobro-physical-btn"
+                        onClick={() => cobroNitKeypadDigit(d)}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                    <button type="button" className="ops-cobro-physical-btn" onClick={cobroNitKeypadDel}>
+                      DEL
+                    </button>
+                    <button type="button" className="ops-cobro-physical-btn" onClick={() => cobroNitKeypadDigit('0')}>
+                      0
+                    </button>
+                    <button type="button" className="ops-cobro-physical-btn" onClick={cobroConfirmNitKiosk}>
+                      OK
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              {cobroUiStep === 'pago_metodo' && quote ? (
+                <div className="ops-cobro-pay-row">
+                  <p className="ops-cobro-right-hint">Forma de pago</p>
+                  <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroGoEfectivo}>
+                    💵 Efectivo
+                  </button>
+                  <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroGoTarjeta}>
+                    💳 Tarjeta
+                  </button>
+                </div>
+              ) : null}
+
+              {cobroUiStep === 'pago_efectivo' && quote ? (
+                <>
+                  <p className="ops-cobro-right-hint">Seleccione billetes / monedas</p>
+                  <div className="ops-cobro-bill-grid">
+                    {denominacionesDisponibles.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        className="ops-cobro-physical-btn"
+                        disabled={cobroCashIngresado >= montoTotalCalculado}
+                        onClick={() => cobroAddDenominacion(d)}
+                      >
+                        Q{d}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="ops-cobro-cash-totals">
+                    <div>
+                      <span>Ingresado</span>
+                      <span>Q{cobroCashIngresado.toFixed(2)}</span>
+                    </div>
+                    <div>
+                      <span>Vuelto</span>
+                      <span>Q{cobroCashVuelto.toFixed(2)}</span>
+                    </div>
+                  </div>
+                  <div className="ops-cobro-card-actions">
+                    <button
+                      type="button"
+                      className="ops-cobro-physical-btn ops-cobro-physical-btn--wide"
+                      disabled={loading || cobroCashIngresado < montoTotalCalculado}
+                      onClick={() => submitCheckout()}
+                    >
+                      ✓ Confirmar pago
+                    </button>
+                    <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroCancelToPaymentMethod}>
+                      ✕ Cancelar
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              {cobroUiStep === 'pago_tarjeta' && quote ? (
+                <>
+                  <p className="ops-cobro-right-hint">Datos de tarjeta</p>
+                  <div className="ops-cobro-card-form">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="Número de tarjeta (16 dígitos)"
+                      value={cardSim.numero}
+                      onChange={(e) =>
+                        setCardSim((p) => ({
+                          ...p,
+                          numero: e.target.value.replace(/\D/g, '').slice(0, 16),
+                        }))
+                      }
+                    />
+                    <input
+                      type="text"
+                      placeholder="Nombre en tarjeta"
+                      value={cardSim.nombre}
+                      onChange={(e) => setCardSim((p) => ({ ...p, nombre: e.target.value }))}
+                    />
+                    <input
+                      type="text"
+                      placeholder="MM/AA"
+                      value={cardSim.exp}
+                      onChange={(e) =>
+                        setCardSim((p) => ({
+                          ...p,
+                          exp: (() => {
+                            const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+                            if (digits.length <= 2) return digits;
+                            return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+                          })(),
+                        }))
+                      }
+                    />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      placeholder="CVV"
+                      value={cardSim.cvv}
+                      onChange={(e) =>
+                        setCardSim((p) => ({
+                          ...p,
+                          cvv: e.target.value.replace(/\D/g, '').slice(0, 3),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="ops-cobro-card-actions">
+                    <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" disabled={loading} onClick={() => submitCheckout()}>
+                      ✓ Confirmar pago
+                    </button>
+                    <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroCancelToPaymentMethod}>
+                      ✕ Cancelar
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              {cobroUiStep === 'mem_buscar' ? (
+                <>
+                  <p className="ops-cobro-right-hint">Cargue la membresía / tag del cliente</p>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Placa (mín. 2 caracteres)"
+                      value={memPayQ}
+                      onChange={(e) => setMemPayQ(e.target.value.toUpperCase())}
+                      style={{ flex: '1 1 160px', minWidth: 140 }}
+                    />
+                    <button type="button" className="ops-cobro-physical-btn" onClick={buscarMembresiasParaPago} disabled={loading}>
+                      Buscar
+                    </button>
+                  </div>
+                  {memPayList.length > 0 ? (
+                    <div className="ops-cobro-mem-list" role="listbox" aria-label="Membresías encontradas">
+                      {memPayList.map((m) => {
+                        const id = m.MEM_ID ?? m.mem_id;
+                        const nom = [m.CLI_PRIMER_NOMBRE, m.CLI_PRIMER_APELLIDO].filter(Boolean).join(' ');
+                        const venc = m.MEM_FECHA_VENCIMIENTO
+                          ? new Date(m.MEM_FECHA_VENCIMIENTO).toLocaleDateString('es-GT')
+                          : '—';
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => {
+                              setMemPaySelected(m);
+                              setMemPayRecibido('');
+                              setMemPayTpaId(String(memCardTipoPago?.TPA_ID || ''));
+                              setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+                              resetMemPayCardSimulator();
+                              setCobroUiStep('mem_tarjeta');
+                            }}
+                          >
+                            <strong>#{id}</strong> — {m.VEH_PLACA || '—'} — {nom || 'Cliente'} — {m.TME_TIPO || 'Plan'} — Q
+                            {Number(m.TME_PRECIO ?? 0).toFixed(2)} — Vence {venc} — {m.EME_ESTADO || '—'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <div className="ops-cobro-card-actions" style={{ marginTop: 12 }}>
+                    <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={() => resetProcess()}>
+                      ✕ Cancelar
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              {cobroUiStep === 'mem_tarjeta' && memPaySelected ? (
+                <>
+                  {!hasMemPayTpaSeleccionado ? (
+                    <p className="ops-cobro-right-hint">No hay tipo de pago con tarjeta en catálogo.</p>
+                  ) : isMemPayCardSelected ? (
+                    <>
+                      <p className="ops-cobro-right-hint">Pago con tarjeta</p>
+                      <div className="ops-cobro-card-form">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="Número de tarjeta (16 dígitos)"
+                          value={memPayCardSim.numero}
+                          onChange={(e) =>
+                            setMemPayCardSim((p) => ({
+                              ...p,
+                              numero: e.target.value.replace(/\D/g, '').slice(0, 16),
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          placeholder="Nombre en tarjeta"
+                          value={memPayCardSim.nombre}
+                          onChange={(e) => setMemPayCardSim((p) => ({ ...p, nombre: e.target.value }))}
+                        />
+                        <input
+                          type="text"
+                          placeholder="MM/AA"
+                          value={memPayCardSim.exp}
+                          onChange={(e) =>
+                            setMemPayCardSim((p) => ({
+                              ...p,
+                              exp: (() => {
+                                const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                if (digits.length <= 2) return digits;
+                                return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+                              })(),
+                            }))
+                          }
+                        />
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          placeholder="CVV"
+                          value={memPayCardSim.cvv}
+                          onChange={(e) =>
+                            setMemPayCardSim((p) => ({
+                              ...p,
+                              cvv: e.target.value.replace(/\D/g, '').slice(0, 3),
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="ops-cobro-card-actions">
+                        <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" disabled={loading} onClick={confirmarPagoMembresia}>
+                          ✓ Confirmar pago
+                        </button>
+                        <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={() => resetProcess()}>
+                          ✕ Cancelar
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="ops-cobro-right-hint">El tipo de pago configurado no es tarjeta.</p>
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          {cobroOnly && msg && cobroUiStep !== 'error' && cobroUiStep !== 'success' ? (
+            <p className="ops-cobro-msg-banner" role="status">
+              {msg}
+            </p>
           ) : null}
-          {memPayDone ? (
-            <div
-              style={{
-                marginTop: 12,
-                padding: 10,
-                borderRadius: 8,
-                background: '#f0fdf4',
-                border: '1px solid #86efac',
-                fontSize: 14,
-              }}
-            >
-              <strong>Listo.</strong> Nueva vigencia hasta{' '}
-              {memPayDone.MEM_FECHA_VENCIMIENTO
-                ? new Date(memPayDone.MEM_FECHA_VENCIMIENTO).toLocaleString('es-GT')
-                : '—'}
-              {memPayDone.REACTIVATED ? ' (membresía reactivada).' : null}
+          {loading ? (
+            <div className="ops-loader-wrap" style={{ justifyContent: 'center', width: '100%' }}>
+              <span className="ops-loader" aria-hidden="true" />
+              <span>Procesando…</span>
             </div>
           ) : null}
-        </section>
+          </div>
+        </>
       ) : null}
 
       {entradaOnly && !catalogLoading ? (
@@ -1397,7 +1956,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </section>
       ) : null}
 
-      {!entradaOnly ? <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {!entradaOnly && !cobroOnly ? <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         {!onlyKiosk ? <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span> : null}
         {!onlyKiosk ? (
           <select
@@ -1503,8 +2062,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       </section> : null}
 
+      {!cobroOnly ? (
       <div className="ops-main-ticket-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {!cobroOnly && !entradaOnly && !salidaOnly ? (
+        {!entradaOnly && !salidaOnly && !cobroOnly ? (
           <button
             type="button"
             className="admin-btn-primary"
@@ -1517,16 +2077,18 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         {!entradaOnly && !salidaOnly ? (
           <button
             type="button"
-            className={cobroOnly ? 'admin-btn-primary' : 'admin-btn-ghost'}
+            className="admin-btn-ghost"
             onClick={() => fileRef.current?.click()}
             disabled={loading || catalogLoading}
             title="Selecciona el PDF del ticket para cotizar y completar el pago en el detalle de cobro."
           >
-            {cobroOnly ? '1) Cargar ticket' : 'Pagar ticket'}
+            Pagar ticket
           </button>
         ) : null}
       </div>
+      ) : null}
 
+      {!cobroOnly ? (
       <input
         ref={fileRef}
         type="file"
@@ -1537,9 +2099,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
           if (f) onLoadPdf(f);
         }}
       />
-      {loading ? <span style={{ marginLeft: 10 }}>Procesando...</span> : null}
+      ) : null}
+      {loading && !cobroOnly ? <span style={{ marginLeft: 10 }}>Procesando...</span> : null}
 
-      {!entradaOnly && msg ? (
+      {!entradaOnly && !cobroOnly && msg ? (
         <div style={{ marginTop: 12, padding: 10, border: '1px solid #e2b4b4', background: '#fff4f4', color: '#8a1f1f' }}>
           {msg}
         </div>
@@ -1714,14 +2277,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       )}
 
-      {quote && (
+      {quote && !cobroOnly ? (
         <div style={{ marginTop: 14, border: '1px solid #ddd', borderRadius: 8, padding: 14 }}>
           <h2 style={{ marginTop: 0, fontSize: 20 }}>Detalle de pago</h2>
-          {cobroOnly ? (
-            <p style={{ margin: '6px 0', fontSize: 13, color: '#4b5563' }}>
-              2) Selecciona tipo de cobro, 3) ingresa NIT o CF, 4) registra efectivo, 5) confirma pago.
-            </p>
-          ) : null}
           <p style={{ margin: '6px 0' }}>
             <strong>Ticket:</strong> {quote.ticket?.TIC_CODIGO} ({quote.ticket?.TIC_ID})
           </p>
@@ -1765,9 +2323,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             </p>
           ) : null}
           <hr />
-          <h3 style={{ marginBottom: 8 }}>
-            {cobroOnly ? 'Pasos de cobro' : 'Facturación (campos automáticos y manuales)'}
-          </h3>
+          <h3 style={{ marginBottom: 8 }}>Facturación (campos automáticos y manuales)</h3>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={tcoId} onChange={(e) => setTcoId(e.target.value)} style={{ padding: '8px 10px', minWidth: 260 }}>
               <option value="">Selecciona tipo de cobro</option>
@@ -1777,29 +2333,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 </option>
               ))}
             </select>
-            {!cobroOnly ? (
-              <select value={maqId} onChange={(e) => setMaqId(e.target.value)} style={{ padding: '8px 10px', minWidth: 220 }}>
-                <option value="">Selecciona máquina de cobro</option>
-                {maquinas.map((m) => (
-                  <option key={m.MAQ_ID} value={m.MAQ_ID}>
-                    {machineLabel(m)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <select
-                value={maqId}
-                onChange={(e) => setMaqId(e.target.value)}
-                style={{ padding: '8px 10px', minWidth: 260 }}
-              >
-                <option value="">Selecciona máquina de cobro</option>
-                {(maquinasCobro.length ? maquinasCobro : maquinas).map((m) => (
-                  <option key={m.MAQ_ID} value={m.MAQ_ID}>
-                    {machineLabel(m)}
-                  </option>
-                ))}
-              </select>
-            )}
+            <select value={maqId} onChange={(e) => setMaqId(e.target.value)} style={{ padding: '8px 10px', minWidth: 220 }}>
+              <option value="">Selecciona máquina de cobro</option>
+              {maquinas.map((m) => (
+                <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                  {machineLabel(m)}
+                </option>
+              ))}
+            </select>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
@@ -1983,14 +2524,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
               </div>
             )}
             <button type="button" onClick={submitCheckout} disabled={loading}>
-              {cobroOnly ? 'Confirmar pago' : 'Continuar'}
+              Continuar
             </button>
           </div>
           <p style={{ marginTop: 8, fontSize: 12, color: '#4b5563' }}>
             Campos automáticos: horas, monto total y vuelto. Campo manual: monto recibido.
           </p>
         </div>
-      )}
+      ) : null}
 
       <button
         type="button"
@@ -2013,7 +2554,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         Asistencia
       </button>
 
-      {checkoutDone && (
+      {checkoutDone && !cobroOnly ? (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Cobro registrado</strong>
           <p style={{ margin: '6px 0' }}>Ticket: {checkoutDone.TIC_CODIGO}</p>
@@ -2027,7 +2568,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             <button type="button" onClick={resetProcess}>Rechazar comprobante</button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

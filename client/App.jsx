@@ -26,11 +26,11 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/" element={<TicketLoaderPage />} />
-      <Route path="/cargar-ticket" element={<TicketLoaderPage />} />
-      <Route path="/maquina-cobro" element={<TicketLoaderPage cobroOnly />} />
-      <Route path="/maquina-entrada" element={<TicketLoaderPage entradaOnly />} />
-      <Route path="/maquina-salida" element={<TicketLoaderPage salidaOnly />} />
+      <Route path="/" element={<TicketLoaderPage key="ops-consulta" />} />
+      <Route path="/cargar-ticket" element={<TicketLoaderPage key="ops-cargar-ticket" />} />
+      <Route path="/maquina-cobro" element={<TicketLoaderPage key="kiosk-cobro" cobroOnly />} />
+      <Route path="/maquina-entrada" element={<TicketLoaderPage key="kiosk-entrada" entradaOnly />} />
+      <Route path="/maquina-salida" element={<TicketLoaderPage key="kiosk-salida" salidaOnly />} />
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/admin"
@@ -56,9 +56,9 @@ export default function App() {
             }
           />
         ))}
-        <Route path="maquina-entrada" element={<TicketLoaderPage entradaOnly />} />
-        <Route path="maquina-cobro" element={<TicketLoaderPage cobroOnly />} />
-        <Route path="maquina-salida" element={<TicketLoaderPage salidaOnly />} />
+        <Route path="maquina-entrada" element={<TicketLoaderPage key="admin-kiosk-entrada" entradaOnly />} />
+        <Route path="maquina-cobro" element={<TicketLoaderPage key="admin-kiosk-cobro" cobroOnly />} />
+        <Route path="maquina-salida" element={<TicketLoaderPage key="admin-kiosk-salida" salidaOnly />} />
         <Route path="operacion-cabina" element={<AdminOperationsPage />} />
         <Route path="reportes" element={<ReportesIncidentesPage />} />
       </Route>
