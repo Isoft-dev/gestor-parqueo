@@ -5,6 +5,7 @@ import { API_BASE } from '../config.js';
 import ReportesOperativosMaquinasSection from './ReportesOperativosMaquinasSection.jsx';
 import ReportesFinancierosSection from './ReportesFinancierosSection.jsx';
 import ReportesMembresiasClientesSection from './ReportesMembresiasClientesSection.jsx';
+import ReportesAfluenciaSection from './ReportesAfluenciaSection.jsx';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -191,7 +192,7 @@ export default function ReportesPage() {
       <header className="admin-page-header">
         <h1 className="admin-page-title">Reportes</h1>
         <p className="admin-page-desc">
-          Estructura de 5 secciones. Secciones activas: movimiento vehicular, operativos de máquinas, financieros y membresías/clientes.
+          Estructura de 5 secciones. Secciones activas: movimiento vehicular, operativos de máquinas, financieros, membresías/clientes y afluencia.
         </p>
       </header>
 
@@ -208,8 +209,8 @@ export default function ReportesPage() {
         <button type="button" role="tab" aria-selected={seccion === 'membresias_clientes'} className={`reporte-tab-btn${seccion === 'membresias_clientes' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('membresias_clientes')}>
           4) Membresías y clientes
         </button>
-        <button type="button" role="tab" aria-selected={false} className="reporte-tab-btn" disabled>
-          5) Sección pendiente
+        <button type="button" role="tab" aria-selected={seccion === 'afluencia'} className={`reporte-tab-btn${seccion === 'afluencia' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('afluencia')}>
+          5) Reporte de afluencia
         </button>
       </div>
 
@@ -431,6 +432,7 @@ export default function ReportesPage() {
       {seccion === 'operativos' ? <ReportesOperativosMaquinasSection /> : null}
       {seccion === 'financieros' ? <ReportesFinancierosSection /> : null}
       {seccion === 'membresias_clientes' ? <ReportesMembresiasClientesSection /> : null}
+      {seccion === 'afluencia' ? <ReportesAfluenciaSection /> : null}
     </div>
   );
 }

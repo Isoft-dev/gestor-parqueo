@@ -5,6 +5,7 @@ import * as serviceMov from '../services/reporteMovimientoVehicular.js';
 import * as serviceOps from '../services/reporteOperativoMaquinas.js';
 import * as serviceFin from '../services/reporteFinanciero.js';
 import * as serviceMemCli from '../services/reporteMembresiasClientes.js';
+import * as serviceAfl from '../services/reporteAfluencia.js';
 
 export async function incidentesPorRango(req, res) {
   try {
@@ -496,6 +497,58 @@ export async function historialPagosClientePdf(req, res) {
     const pdfBuffer = await serviceMemCli.buildHistorialPagosClientePdfBuffer(data);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="reporte-historial-pagos-cli-${cli_id}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function afluenciaDetallada(req, res) {
+  try {
+    const { desde, hasta, agrupacion } = req.query;
+    const data = await serviceAfl.getAfluenciaDetallada({ desde, hasta, agrupacion });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function afluenciaDetalladaPdf(req, res) {
+  try {
+    const { desde, hasta, agrupacion } = req.query;
+    const data = await serviceAfl.getAfluenciaDetallada({ desde, hasta, agrupacion });
+    const pdfBuffer = await serviceAfl.buildAfluenciaDetalladaPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-afluencia-detallado-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function afluenciaAnual(req, res) {
+  try {
+    const { anio_inicio, anio_fin } = req.query;
+    const data = await serviceAfl.getAfluenciaAnualResumen({ anioInicio: anio_inicio, anioFin: anio_fin });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function afluenciaAnualPdf(req, res) {
+  try {
+    const { anio_inicio, anio_fin } = req.query;
+    const data = await serviceAfl.getAfluenciaAnualResumen({ anioInicio: anio_inicio, anioFin: anio_fin });
+    const pdfBuffer = await serviceAfl.buildAfluenciaAnualPdfBuffer(data);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-afluencia-anual-${anio_inicio}-${anio_fin}.pdf"`);
     res.send(pdfBuffer);
   } catch (err) {
     if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });

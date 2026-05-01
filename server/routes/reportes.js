@@ -36,5 +36,9 @@ router.get('/financieros/ingresos-totales', ctrl.ingresosTotalesFinancieros);
 router.get('/membresias-clientes/buscar', ctrl.buscarClientesMembresia);
 router.get('/membresias-clientes/historial-pagos/pdf', ctrl.historialPagosClientePdf);
 router.get('/membresias-clientes/historial-pagos', ctrl.historialPagosCliente);
+router.get('/afluencia/detallado/pdf', ctrl.afluenciaDetalladaPdf);
+router.get('/afluencia/detallado', ctrl.afluenciaDetallada);
+router.get('/afluencia/anual/pdf', ctrl.afluenciaAnualPdf);
+router.get('/afluencia/anual', ctrl.afluenciaAnual);
 
 export default router;
