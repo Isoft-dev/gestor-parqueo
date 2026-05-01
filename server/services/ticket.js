@@ -446,36 +446,129 @@ async function markGraceAlertAttendedByTicketCode(ticketCode, usuId = null) {
   );
 }
 
-/** Comprobante compacto (~148 mm × alto justo al contenido, sin A4). */
+/** Comprobante estilo ticket térmico (~105 mm ancho). */
 const RECEIPT_PAGE_W = Math.round((105 / 25.4) * 72);
-const RECEIPT_PAGE_H = 340;
+const RECEIPT_PAGE_H = 480;
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatReciboFechaLinea(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const yyyy = date.getFullYear();
+  const mm = pad2(date.getMonth() + 1);
+  const dd = pad2(date.getDate());
+  let wd = date.toLocaleDateString('es-GT', { weekday: 'short' });
+  wd = String(wd || '').replace(/\./g, '').trim().toUpperCase();
+  return `${time} ${yyyy}-${mm}-${dd} ${wd}`;
+}
+
+function receiptNitDisplay(cobNit) {
+  const s = String(cobNit ?? '').trim();
+  if (!s || /^cf$/i.test(s)) return 'C / F';
+  return s;
+}
+
+function horasEstadiaAHorasMinutos(decHoras) {
+  const n = Number(decHoras);
+  if (!Number.isFinite(n) || n < 0) return '0 Horas 0 Minutos';
+  const totalMin = Math.round(n * 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${h} Horas ${m} Minutos`;
+}
+
+function receiptRowTwoCol(doc, leftX, innerW, y, label, value) {
+  const gap = 8;
+  const lw = innerW * 0.38;
+  const rw = innerW - lw - gap;
+  doc.fillColor('#000000').font('Helvetica').fontSize(9);
+  const lab = String(label);
+  const val = String(value ?? '—');
+  const hLabel = doc.heightOfString(lab, { width: lw });
+  const hVal = doc.heightOfString(val, { width: rw });
+  const h = Math.max(hLabel, hVal, 11) + 3;
+  doc.text(lab, leftX, y, { width: lw, align: 'left' });
+  doc.text(val, leftX + lw + gap, y, { width: rw, align: 'right' });
+  return y + h;
+}
 
 function buildPdfBuffer({ ticket, cobro }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     const doc = new PDFDocument({
       size: [RECEIPT_PAGE_W, RECEIPT_PAGE_H],
-      margin: 36,
+      margin: 28,
     });
     doc.on('data', (c) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text('Comprobante de pago', { align: 'center' });
-    doc.moveDown(0.6);
-    doc.fontSize(10);
-    doc.text(`Ticket: ${ticket.TIC_CODIGO} (ID ${ticket.TIC_ID})`);
-    doc.text(`Vehiculo: ${ticket.VEH_PLACA || 'N/D'}`);
-    doc.text(`Hora entrada: ${new Date(ticket.TIC_FECHA_HORA_ENTRADA).toLocaleString('es-GT')}`);
-    doc.text(`Hora pago: ${new Date(cobro.COB_FECHA_HORA).toLocaleString('es-GT')}`);
-    doc.text(`Tiempo estadia (horas): ${cobro.COB_HORAS_TOTALES}`);
-    doc.text(`Monto cobrado: Q${Number(cobro.COB_MONTO_TOTAL || 0).toFixed(2)}`);
-    doc.text(`Monto recibido: Q${Number(cobro.COB_MONTO_RECIBIDO || 0).toFixed(2)}`);
-    doc.text(`Vuelto: Q${Number(cobro.COB_VUELTO || 0).toFixed(2)}`);
-    doc.text(`NIT/CF: ${cobro.COB_NIT || 'N/D'}`);
-    doc.text(`Tipo cobro (TCO_ID): ${cobro.TCO_ID}`);
-    doc.moveDown(0.5);
-    doc.fontSize(10).text('Gracias por su visita.', { align: 'center' });
+    const margin = 28;
+    const leftX = margin;
+    const innerW = RECEIPT_PAGE_W - margin * 2;
+    let y = margin;
+
+    doc.fillColor('#000000');
+    doc.font('Helvetica-Bold').fontSize(13);
+    doc.text('GESTOR PARQUEO', leftX, y, { width: innerW, align: 'center' });
+    y += 16;
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Grupo 8', leftX, y, { width: innerW, align: 'center' });
+    y += 14;
+    doc.font('Helvetica').fontSize(8.5);
+    const nitTxt = receiptNitDisplay(cobro.COB_NIT);
+    const clienteNombre = String(cobro.RECEIPT_CLIENTE_NOMBRE || '').trim() || '—';
+    doc.text(`NIT: ${nitTxt}`, leftX, y, { width: innerW, align: 'center' });
+    y += 11;
+    doc.text(`Cliente: ${clienteNombre}`, leftX, y, { width: innerW, align: 'center' });
+    y += 16;
+
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text(`Recibo No: ${cobro.COB_ID}`, leftX, y, { width: innerW, align: 'center' });
+    y += 13;
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.text(`Placa: ${ticket.VEH_PLACA || 'N/D'}`, leftX, y, { width: innerW, align: 'center' });
+    y += 18;
+
+    const tarifaDesc = String(cobro.TAR_TIPO || '—').trim() || '—';
+    const medioPago = String(cobro.TIPO_COBRO_DESC || '').trim() || `Tipo cobro (${cobro.TCO_ID})`;
+    const maqCobro = String(cobro.MAQ_COBRO_CODIGO || '').trim() || 'N/D';
+    const entradaAt = ticket.TIC_FECHA_HORA_ENTRADA;
+    const salidaAt = cobro.COB_FECHA_HORA;
+
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Tarifa:', tarifaDesc);
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Entrada:', formatReciboFechaLinea(entradaAt));
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Salida:', formatReciboFechaLinea(salidaAt));
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Tiempo:', horasEstadiaAHorasMinutos(cobro.COB_HORAS_TOTALES));
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Máquina de cobro:', maqCobro);
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Medio de pago:', medioPago);
+    y = receiptRowTwoCol(
+      doc,
+      leftX,
+      innerW,
+      y,
+      'Monto recibido:',
+      `Q${Number(cobro.COB_MONTO_RECIBIDO || 0).toFixed(2)}`,
+    );
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Vuelto:', `Q${Number(cobro.COB_VUELTO || 0).toFixed(2)}`);
+    y += 8;
+
+    const barH = 22;
+    const totalStr = `Q${Number(cobro.COB_MONTO_TOTAL || 0).toFixed(2)}`;
+    doc.fillColor('#000000').rect(leftX, y, innerW, barH).fill();
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11);
+    doc.text('TOTAL:', leftX + 8, y + 5);
+    doc.text(totalStr, leftX, y + 5, { width: innerW - 8, align: 'right' });
+    doc.fillColor('#000000');
+    y += barH + 14;
+
+    doc.font('Helvetica').fontSize(9);
+    doc.text('Gracias por su visita.', leftX, y, { width: innerW, align: 'center' });
+
     doc.end();
   });
 }
@@ -1301,10 +1394,63 @@ export async function getReceiptDataByTicketId(ticketId) {
     `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA,
             v.VEH_PLACA,
             c.COB_ID, c.COB_HORAS_TOTALES, c.COB_MONTO_TOTAL, c.COB_MONTO_RECIBIDO, c.COB_VUELTO,
-            c.COB_FECHA_HORA, c.COB_NIT, c.TCO_ID
+            c.COB_FECHA_HORA, c.COB_NIT, c.TCO_ID, c.TAR_ID,
+            tar.TAR_TIPO,
+            tp.TCO_TIPO AS TIPO_COBRO_DESC,
+            m.MAQ_CODIGO AS MAQ_COBRO_CODIGO,
+            CASE
+              WHEN UPPER(TRIM(NVL(c.COB_NIT, ''))) = 'CF' OR TRIM(NVL(c.COB_NIT, '')) IS NULL THEN 'Consumidor final'
+              ELSE NVL(
+                NULLIF(
+                  TRIM(
+                    REGEXP_REPLACE(
+                      NVL(cl.CLI_PRIMER_NOMBRE, '') || ' ' || NVL(cl.CLI_SEGUNDO_NOMBRE, '') || ' ' ||
+                      NVL(cl.CLI_PRIMER_APELLIDO, '') || ' ' || NVL(cl.CLI_SEGUNDO_APELLIDO, ''),
+                      '[[:space:]]+',
+                      ' '
+                    )
+                  ),
+                  ''
+                ),
+                NVL(
+                  (SELECT TRIM(
+                            REGEXP_REPLACE(
+                              NVL(c2.CLI_PRIMER_NOMBRE, '') || ' ' || NVL(c2.CLI_SEGUNDO_NOMBRE, '') || ' ' ||
+                              NVL(c2.CLI_PRIMER_APELLIDO, '') || ' ' || NVL(c2.CLI_SEGUNDO_APELLIDO, ''),
+                              '[[:space:]]+',
+                              ' '
+                            )
+                          )
+                     FROM PAR_CLIENTE c2
+                    WHERE c2.CLI_ID = (
+                          SELECT MAX(c3.CLI_ID)
+                            FROM PAR_CLIENTE c3
+                           WHERE c3.CLI_NIT IS NOT NULL
+                             AND REGEXP_REPLACE(UPPER(TRIM(c3.CLI_NIT)), '[^0-9A-Z]', '') =
+                                 REGEXP_REPLACE(UPPER(TRIM(c.COB_NIT)), '[^0-9A-Z]', '')
+                        )),
+                  'Sin datos de cliente'
+                )
+              )
+            END AS RECEIPT_CLIENTE_NOMBRE
        FROM PAR_TICKET t
        LEFT JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
-       JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
+       LEFT JOIN PAR_CLIENTE cl ON cl.CLI_ID = v.CLI_ID
+       JOIN PAR_COBRO c
+         ON c.TIC_ID = t.TIC_ID
+        AND c.COB_ID = (SELECT MAX(c2.COB_ID) FROM PAR_COBRO c2 WHERE c2.TIC_ID = t.TIC_ID)
+       LEFT JOIN PAR_TARIFA tar ON tar.TAR_ID = c.TAR_ID
+       LEFT JOIN PAR_TIPO_COBRO tp ON tp.TCO_ID = c.TCO_ID
+       LEFT JOIN PAR_DETALLE_MAQUINA_TICKET d
+         ON d.TIC_ID = t.TIC_ID
+        AND d.DMT_TRANSACCION = 'PROCESAMIENTO_COBRO'
+        AND d.DMT_ID = (
+              SELECT MAX(d2.DMT_ID)
+                FROM PAR_DETALLE_MAQUINA_TICKET d2
+               WHERE d2.TIC_ID = t.TIC_ID
+                 AND d2.DMT_TRANSACCION = 'PROCESAMIENTO_COBRO'
+            )
+       LEFT JOIN PAR_MAQUINA m ON m.MAQ_ID = d.MAQ_ID
       WHERE t.TIC_ID = :ticketId`,
     { ticketId }
   );
@@ -1314,9 +1460,16 @@ export async function getReceiptDataByTicketId(ticketId) {
 export async function generateReceiptPdfByTicketId(ticketId) {
   const row = await getReceiptDataByTicketId(ticketId);
   if (!row) throw new Error('No se encontró comprobante para el ticket');
+  let data = row;
+  if (!String(data.TAR_TIPO || '').trim()) {
+    const tar = await getTarifaVigente();
+    if (tar?.TAR_TIPO) {
+      data = { ...data, TAR_TIPO: tar.TAR_TIPO };
+    }
+  }
   const pdfBuffer = await buildPdfBuffer({
-    ticket: row,
-    cobro: row,
+    ticket: data,
+    cobro: data,
   });
   return {
     pdfBuffer,
