@@ -206,6 +206,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   /** Flujo UI máquina de cobro (solo presentación; la lógica sigue en quote / submitCheckout / membresía). */
   const [cobroUiStep, setCobroUiStep] = useState('idle');
   const [cobroErrorText, setCobroErrorText] = useState('');
+  /** Kiosco máquina de salida (solo presentación). */
+  const [salidaKioskState, setSalidaKioskState] = useState('idle'); // idle | processing | success | error
+  const [salidaKioskNotice, setSalidaKioskNotice] = useState({ text: '', severity: 'error' }); // warn | error
   const montoTotalCalculado = Number(quote?.montoTotal || 0);
   const horasCalculadas = Number(
     quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
@@ -506,8 +509,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
               MAQ_ID: String(prev.MAQ_ID || '').trim() ? prev.MAQ_ID : pickedEntradaMaqId,
             }));
           }
-          if (salidaOnly) {
-            setExitMaqId((prev) => prev || pickedSalidaMaqId);
+          if (pickedSalidaMaqId) {
+            setExitMaqId((prev) => (String(prev || '').trim() ? prev : pickedSalidaMaqId));
           }
         }
       } catch {
@@ -767,12 +770,21 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setLoading(true);
     setMsg('');
     setTagExitValidationDone(null);
+    if (salidaOnly) {
+      setSalidaKioskState('processing');
+      setSalidaKioskNotice({ text: '', severity: 'error' });
+    }
     try {
       const buffer = await file.arrayBuffer();
       const pdfText = await decodePdfText(buffer);
       const memCodigo = extractMemCodeFromPdfText(pdfText);
       if (!memCodigo) {
-        setMsg('Tag no reconocido: no se pudo extraer MEM_CODIGO del PDF.');
+        const t = 'Tag no reconocido: no se pudo extraer MEM_CODIGO del PDF.';
+        setMsg(t);
+        if (salidaOnly) {
+          setSalidaKioskState('error');
+          setSalidaKioskNotice({ text: t, severity: 'error' });
+        }
         return;
       }
       const res = await fetch(`${API_BASE}/membresia/validate-tag-exit`, {
@@ -784,16 +796,28 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       if (!res.ok) throw new Error(data.error || res.statusText);
       setTagExitValidationDone(data);
       setMsg('Salida mensual registrada.');
+      if (salidaOnly) {
+        setSalidaKioskState('success');
+        setMsg('');
+      }
     } catch (err) {
       const txt = String(err?.message || '');
+      let friendly = '';
       if (/tag no reconocido/i.test(txt)) {
-        setMsg('Tag no reconocido.');
+        friendly = 'Tag no reconocido.';
+        setMsg(friendly);
       } else if (/ingreso activo asociado/i.test(txt)) {
-        setMsg('No se encontró un ingreso activo asociado.');
+        friendly = 'No se encontró un ingreso activo asociado.';
+        setMsg(friendly);
       } else {
-        setMsg(`Error: ${txt}`);
+        friendly = `Error: ${txt}`;
+        setMsg(friendly);
       }
       setTagExitValidationDone(null);
+      if (salidaOnly) {
+        setSalidaKioskState('error');
+        setSalidaKioskNotice({ text: friendly || txt, severity: 'error' });
+      }
     } finally {
       setLoading(false);
       if (tagSalidaFileRef.current) tagSalidaFileRef.current.value = '';
@@ -802,18 +826,32 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
 
   async function onLoadExitPdf(file) {
     if (!exitMaqId) {
-      setMsg('Selecciona la máquina de salida antes de cargar el ticket.');
+      const t = 'Selecciona la máquina de salida antes de cargar el ticket.';
+      setMsg(t);
+      if (salidaOnly) {
+        setSalidaKioskState('error');
+        setSalidaKioskNotice({ text: t, severity: 'warn' });
+      }
       return;
     }
     setLoading(true);
     setMsg('');
     setExitValidationDone(null);
+    if (salidaOnly) {
+      setSalidaKioskState('processing');
+      setSalidaKioskNotice({ text: '', severity: 'error' });
+    }
     try {
       const buffer = await file.arrayBuffer();
       const pdfText = await decodePdfText(buffer);
       const ticCodigo = extractTicketCodeFromPdfText(pdfText);
       if (!ticCodigo) {
-        setMsg('Ticket no reconocido: no se pudo extraer TIC_CODIGO del PDF.');
+        const t = 'Ticket no reconocido: no se pudo extraer TIC_CODIGO del PDF.';
+        setMsg(t);
+        if (salidaOnly) {
+          setSalidaKioskState('error');
+          setSalidaKioskNotice({ text: t, severity: 'error' });
+        }
         return;
       }
       const res = await fetch(`${API_BASE}/ticket/exit-validate`, {
@@ -828,18 +866,31 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       if (!res.ok) throw new Error(data.error || res.statusText);
       setExitValidationDone(data);
       setMsg('Salida autorizada.');
+      if (salidaOnly) {
+        setSalidaKioskState('success');
+        setMsg('');
+      }
     } catch (err) {
       const txt = String(err?.message || '');
+      let friendly = '';
       if (/no reconocido/i.test(txt)) {
-        setMsg('Ticket no reconocido.');
+        friendly = 'Ticket no reconocido.';
+        setMsg(friendly);
       } else if (/no esta pagado/i.test(txt)) {
-        setMsg('Salida bloqueada: el ticket no está pagado. Dirígete a la máquina de cobro.');
+        friendly = 'Salida bloqueada: el ticket no está pagado. Dirígete a la máquina de cobro.';
+        setMsg(friendly);
       } else if (/gracia superado|solicita asistencia/i.test(txt)) {
-        setMsg('Salida bloqueada: superó el tiempo de gracia. Solicita asistencia.');
+        friendly = 'Salida bloqueada: superó el tiempo de gracia. Solicita asistencia.';
+        setMsg(friendly);
       } else {
-        setMsg(`Error: ${txt}`);
+        friendly = `Error: ${txt}`;
+        setMsg(friendly);
       }
       setExitValidationDone(null);
+      if (salidaOnly) {
+        setSalidaKioskState('error');
+        setSalidaKioskNotice({ text: friendly || txt, severity: 'error' });
+      }
     } finally {
       setLoading(false);
       if (salidaFileRef.current) salidaFileRef.current.value = '';
@@ -1095,12 +1146,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setTagValidationDone(null);
     setTagExitValidationDone(null);
     setExitValidationDone(null);
-    setExitMaqId('');
+    setExitMaqId(String(defaultSalidaMaqId || ''));
     setShowGenerateForm(entradaOnly);
     setShowEntryVehicleModal(false);
     setEntryKioskState('idle');
     setEntryNotice({ text: '', severity: 'warn' });
     setEntryWelcomeName('');
+    setSalidaKioskState('idle');
+    setSalidaKioskNotice({ text: '', severity: 'error' });
     setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
     resetCardSimulator();
     setMemPayQ('');
@@ -1153,6 +1206,27 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     return () => clearTimeout(t);
   }, [cobroOnly, cobroUiStep]);
 
+  useEffect(() => {
+    if (!salidaOnly || salidaKioskState !== 'success') return;
+    const t = setTimeout(() => {
+      setSalidaKioskState('idle');
+      setExitValidationDone(null);
+      setTagExitValidationDone(null);
+      setSalidaKioskNotice({ text: '', severity: 'error' });
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [salidaOnly, salidaKioskState]);
+
+  useEffect(() => {
+    if (!salidaOnly || salidaKioskState !== 'error') return;
+    const t = setTimeout(() => {
+      setSalidaKioskState('idle');
+      setSalidaKioskNotice({ text: '', severity: 'error' });
+      setMsg('');
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [salidaOnly, salidaKioskState]);
+
   const cobroBottomDisabled =
     cobroOnly && (cobroUiStep !== 'idle' || loading || catalogLoading);
   const cobroCashIngresado = sumaBilletes;
@@ -1166,13 +1240,13 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       className={
         embeddedInAdmin
           ? `ops-shell ops-shell--embedded${cobroOnly ? ' ops-shell--cobro' : ''}`
-          : `admin-page ops-page-public${entradaOnly ? ' ops-page-public--entry' : cobroOnly ? ' ops-page-public--cobro' : ''}`
+          : `admin-page ops-page-public${entradaOnly ? ' ops-page-public--entry' : cobroOnly ? ' ops-page-public--cobro' : salidaOnly ? ' ops-page-public--salida' : ''}`
       }
       style={{
-        maxWidth: embeddedInAdmin ? '100%' : entradaOnly || cobroOnly ? '100%' : 1040,
-        margin: embeddedInAdmin || entradaOnly || cobroOnly ? 0 : '12px auto',
+        maxWidth: embeddedInAdmin ? '100%' : entradaOnly || cobroOnly || salidaOnly ? '100%' : 1040,
+        margin: embeddedInAdmin || entradaOnly || cobroOnly || salidaOnly ? 0 : '12px auto',
         padding:
-          entradaOnly || cobroOnly
+          entradaOnly || cobroOnly || salidaOnly
             ? embeddedInAdmin
               ? 16
               : cobroOnly
@@ -1181,7 +1255,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             : 16,
       }}
     >
-      {!entradaOnly && !cobroOnly ? (
+      {!entradaOnly && !cobroOnly && !salidaOnly ? (
         <>
           <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
             <h1 className="admin-page-title">
@@ -1268,6 +1342,21 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       ) : null}
 
+      {salidaOnly ? (
+        <div className="ops-entry-config">
+          <label>
+            <span>Máquina de salida</span>
+            <select value={exitMaqId} onChange={(e) => setExitMaqId(e.target.value)}>
+              {(maquinasSalida.length ? maquinasSalida : maquinas).map((m) => (
+                <option key={m.MAQ_ID} value={m.MAQ_ID}>
+                  {machineLabel(m)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
       {cobroOnly && !catalogLoading ? (
         <>
           {/* Mismo patrón que máquina de entrada: hijo directo de la página para que en admin el absolute sea respecto al panel, no al bloque centrado. */}
@@ -1275,7 +1364,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             <label>
               <span>Máquina de cobro</span>
               <select value={maqId} onChange={(e) => setMaqId(e.target.value)}>
-                <option value="">—</option>
                 {(maquinasCobro.length ? maquinasCobro : maquinas).map((m) => (
                   <option key={m.MAQ_ID} value={m.MAQ_ID}>
                     {machineLabel(m)}
@@ -1956,7 +2044,123 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </section>
       ) : null}
 
-      {!entradaOnly && !cobroOnly ? <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {salidaOnly && !catalogLoading ? (
+        <section className="ops-entry-kiosk-wrap" aria-label="Pantalla de máquina de salida">
+          <input
+            ref={salidaFileRef}
+            type="file"
+            accept="application/pdf"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) {
+                setSalidaKioskState('idle');
+                return;
+              }
+              onLoadExitPdf(f);
+            }}
+          />
+          <input
+            ref={tagSalidaFileRef}
+            type="file"
+            accept="application/pdf"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) {
+                setSalidaKioskState('idle');
+                return;
+              }
+              onLoadTagExitPdf(f);
+            }}
+          />
+
+          <div
+            className={`ops-entry-kiosk-screen${
+              salidaKioskState === 'error' && salidaKioskNotice.severity === 'error'
+                ? ' ops-entry-kiosk-screen--error'
+                : ''
+            }`}
+          >
+            <div className="ops-entry-kiosk-screen-inner">
+              {salidaKioskState === 'idle' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div className="ops-entry-kiosk-icon" aria-hidden="true">
+                    ⇨
+                  </div>
+                  <h2>Hasta pronto</h2>
+                  <p className="ops-entry-kiosk-subtext ops-entry-kiosk-subtext--pulse">
+                    Espacios disponibles: {espacioResumen?.disponibles ?? '—'} de {espacioResumen?.total ?? '—'}
+                  </p>
+                </div>
+              ) : null}
+
+              {salidaKioskState === 'processing' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div className="ops-entry-kiosk-loader" aria-hidden="true">
+                    <span className="ops-loader" />
+                  </div>
+                  <h2>Validando…</h2>
+                </div>
+              ) : null}
+
+              {salidaKioskState === 'success' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div className="ops-entry-kiosk-icon ops-entry-kiosk-icon--success" aria-hidden="true">
+                    ✓
+                  </div>
+                  <h2>¡Puede salir!</h2>
+                  <p className="ops-entry-kiosk-subtext">Barrera abierta — Buen viaje</p>
+                </div>
+              ) : null}
+
+              {salidaKioskState === 'error' ? (
+                <div className="ops-entry-kiosk-state">
+                  <div
+                    className={`ops-entry-kiosk-icon${
+                      salidaKioskNotice.severity === 'error' ? ' ops-entry-kiosk-icon--error' : ' ops-entry-kiosk-icon--warn'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {salidaKioskNotice.severity === 'error' ? '✕' : '⚠'}
+                  </div>
+                  <h2>{salidaKioskNotice.severity === 'error' ? 'No se pudo completar' : 'Aviso'}</h2>
+                  <p
+                    className={`ops-entry-kiosk-subtext ${
+                      salidaKioskNotice.severity === 'error'
+                        ? 'ops-entry-kiosk-subtext--error'
+                        : 'ops-entry-kiosk-subtext--warn'
+                    }`}
+                  >
+                    {salidaKioskNotice.text || 'No se pudo completar la operación.'}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="ops-entry-kiosk-controls">
+            <button
+              type="button"
+              className="admin-btn-primary"
+              disabled={salidaKioskState !== 'idle' || loading || catalogLoading}
+              onClick={() => salidaFileRef.current?.click()}
+            >
+              Cargar Ticket
+            </button>
+            <button
+              type="button"
+              className="admin-btn-primary"
+              disabled={salidaKioskState !== 'idle' || loading || catalogLoading}
+              onClick={() => tagSalidaFileRef.current?.click()}
+            >
+              Cargar Tag
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {!entradaOnly && !cobroOnly && !salidaOnly ? <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         {!onlyKiosk ? <span style={{ fontSize: 14 }}>Máquina para alertas de asistencia:</span> : null}
         {!onlyKiosk ? (
           <select
@@ -2001,7 +2205,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </button>
       </section> : null}
 
-      {!cobroOnly && !entradaOnly ? <section className="admin-panel-block ops-panel-block">
+      {!cobroOnly && !entradaOnly && !salidaOnly ? <section className="admin-panel-block ops-panel-block">
         <div className="admin-panel-head">
           <h2>Salida cliente mensual</h2>
           <p className="admin-panel-sub">Carga el tag para cerrar un ingreso activo asociado a la membresía.</p>
@@ -2021,9 +2225,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </button>
       </section> : null}
 
-      {!cobroOnly && !entradaOnly ? <section className="admin-panel-block ops-panel-block">
+      {!cobroOnly && !entradaOnly && !salidaOnly ? <section className="admin-panel-block ops-panel-block">
         <div className="admin-panel-head">
-          <h2>{salidaOnly ? 'Verificación de ticket pagado' : 'Salida cliente esporádico'}</h2>
+          <h2>Salida cliente esporádico</h2>
           <p className="admin-panel-sub">
             Carga el ticket para verificar estado de pago y tiempo de gracia post-pago.
           </p>
@@ -2044,7 +2248,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             onChange={(e) => setExitMaqId(e.target.value)}
             style={{ padding: '8px 10px', minWidth: 250 }}
           >
-            <option value="">Selecciona máquina de salida</option>
             {(maquinasSalida.length ? maquinasSalida : maquinas).map((m) => (
               <option key={m.MAQ_ID} value={m.MAQ_ID}>
                 {machineLabel(m)}
@@ -2100,9 +2303,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         }}
       />
       ) : null}
-      {loading && !cobroOnly ? <span style={{ marginLeft: 10 }}>Procesando...</span> : null}
+      {loading && !cobroOnly && !salidaOnly ? <span style={{ marginLeft: 10 }}>Procesando...</span> : null}
 
-      {!entradaOnly && !cobroOnly && msg ? (
+      {!entradaOnly && !cobroOnly && !salidaOnly && msg ? (
         <div style={{ marginTop: 12, padding: 10, border: '1px solid #e2b4b4', background: '#fff4f4', color: '#8a1f1f' }}>
           {msg}
         </div>
@@ -2256,7 +2459,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       )}
 
-      {!cobroOnly && !entradaOnly && tagExitValidationDone && (
+      {!cobroOnly && !entradaOnly && !salidaOnly && tagExitValidationDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Salida mensual registrada</strong>
           <p style={{ margin: '6px 0' }}>Membresía: {tagExitValidationDone.MEM_ID}</p>
@@ -2268,7 +2471,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         </div>
       )}
 
-      {!cobroOnly && !entradaOnly && exitValidationDone && (
+      {!cobroOnly && !entradaOnly && !salidaOnly && exitValidationDone && (
         <div style={{ marginTop: 14, border: '1px solid #b6dfbc', background: '#f4fff6', borderRadius: 8, padding: 14 }}>
           <strong>Salida autorizada</strong>
           <p style={{ margin: '6px 0' }}>Ticket: {exitValidationDone.TIC_CODIGO}</p>

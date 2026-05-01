@@ -1044,7 +1044,8 @@ body {
   max-width: 1180px;
 }
 
-.ops-page-public--entry {
+.ops-page-public--entry,
+.ops-page-public--salida {
   position: relative;
   min-height: 100vh;
   max-width: 100% !important;
@@ -1202,7 +1203,8 @@ body {
 }
 
 /* Dentro del panel admin: anclar al contenedor (no al viewport), con aire similar al fixed 16px de la vista pública. */
-.admin-main .ops-page-public--entry .ops-entry-config {
+.admin-main .ops-page-public--entry .ops-entry-config,
+.admin-main .ops-page-public--salida .ops-entry-config {
   position: absolute;
   top: 1rem;
   left: 1rem;
@@ -1266,6 +1268,34 @@ body {
   font-weight: 800;
   font-size: 1.3rem;
   color: #93c5fd;
+}
+
+.ops-entry-kiosk-icon--success {
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.ops-entry-kiosk-icon--warn {
+  border-color: #facc15;
+  color: #facc15;
+}
+
+.ops-entry-kiosk-icon--error {
+  border-color: #f87171;
+  color: #f87171;
+}
+
+.ops-entry-kiosk-loader {
+  margin: 0 auto 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.ops-entry-kiosk-loader .ops-loader {
+  width: 22px;
+  height: 22px;
+  border-width: 3px;
 }
 
 .ops-entry-kiosk-subtext {
