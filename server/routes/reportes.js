@@ -25,5 +25,13 @@ router.get('/operativos/mantenimientos/pdf', ctrl.mantenimientosOperativosPdf);
 router.get('/operativos/mantenimientos', ctrl.mantenimientosOperativos);
 router.get('/operativos/recargas/pdf', ctrl.recargasOperativasPdf);
 router.get('/operativos/recargas', ctrl.recargasOperativas);
+router.get('/financieros/cobros-maquina/pdf', ctrl.cobrosMaquinaFinancierosPdf);
+router.get('/financieros/cobros-maquina', ctrl.cobrosMaquinaFinancieros);
+router.get('/financieros/pagos-membresia-mes/pdf', ctrl.pagosMembresiaMesFinancierosPdf);
+router.get('/financieros/pagos-membresia-mes', ctrl.pagosMembresiaMesFinancieros);
+router.get('/financieros/ingresos-tipo-cliente/pdf', ctrl.ingresosTipoClienteFinancierosPdf);
+router.get('/financieros/ingresos-tipo-cliente', ctrl.ingresosTipoClienteFinancieros);
+router.get('/financieros/ingresos-totales/pdf', ctrl.ingresosTotalesFinancierosPdf);
+router.get('/financieros/ingresos-totales', ctrl.ingresosTotalesFinancieros);
 
 export default router;

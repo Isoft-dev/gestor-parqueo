@@ -3,6 +3,7 @@ import * as serviceMem from '../services/reporteMembresias.js';
 import * as serviceMora from '../services/reporteMoraClientes.js';
 import * as serviceMov from '../services/reporteMovimientoVehicular.js';
 import * as serviceOps from '../services/reporteOperativoMaquinas.js';
+import * as serviceFin from '../services/reporteFinanciero.js';
 
 export async function incidentesPorRango(req, res) {
   try {
@@ -353,6 +354,112 @@ export async function recargasOperativasPdf(req, res) {
     const safeHasta = String(hasta || '').replace(/\D/g, '');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="reporte-recargas-maquina-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function cobrosMaquinaFinancieros(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceFin.getCobrosProcesadosPorMaquina({ desde, hasta });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function cobrosMaquinaFinancierosPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceFin.getCobrosProcesadosPorMaquina({ desde, hasta });
+    const pdfBuffer = await serviceFin.buildCobrosMaquinaPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-fin-cobros-maquina-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function pagosMembresiaMesFinancieros(req, res) {
+  try {
+    const { mes_inicio, mes_fin } = req.query;
+    const data = await serviceFin.getPagosMembresiasPorMes({ anioInicio: mes_inicio, anioFin: mes_fin });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function pagosMembresiaMesFinancierosPdf(req, res) {
+  try {
+    const { mes_inicio, mes_fin } = req.query;
+    const data = await serviceFin.getPagosMembresiasPorMes({ anioInicio: mes_inicio, anioFin: mes_fin });
+    const pdfBuffer = await serviceFin.buildPagosMembresiasMesPdfBuffer(data);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-fin-membresias-${mes_inicio}-${mes_fin}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function ingresosTipoClienteFinancieros(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceFin.getIngresosPorTipoCliente({ desde, hasta });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function ingresosTipoClienteFinancierosPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceFin.getIngresosPorTipoCliente({ desde, hasta });
+    const pdfBuffer = await serviceFin.buildIngresosTipoClientePdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-fin-ingresos-tipo-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function ingresosTotalesFinancieros(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceFin.getIngresosTotalesPorRango({ desde, hasta });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function ingresosTotalesFinancierosPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceFin.getIngresosTotalesPorRango({ desde, hasta });
+    const pdfBuffer = await serviceFin.buildIngresosTotalesPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-fin-ingresos-totales-${safeDesde}-${safeHasta}.pdf"`);
     res.send(pdfBuffer);
   } catch (err) {
     if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });

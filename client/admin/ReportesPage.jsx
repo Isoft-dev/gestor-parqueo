@@ -3,6 +3,7 @@ import { Pie } from 'react-chartjs-2';
 import { ArcElement, Chart as ChartJS, Legend, Tooltip } from 'chart.js';
 import { API_BASE } from '../config.js';
 import ReportesOperativosMaquinasSection from './ReportesOperativosMaquinasSection.jsx';
+import ReportesFinancierosSection from './ReportesFinancierosSection.jsx';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -189,7 +190,7 @@ export default function ReportesPage() {
       <header className="admin-page-header">
         <h1 className="admin-page-title">Reportes</h1>
         <p className="admin-page-desc">
-          Estructura de 5 secciones. Sección 1 activa: Reportes de movimiento vehicular.
+          Estructura de 5 secciones. Secciones activas: movimiento vehicular, operativos de máquinas y financieros.
         </p>
       </header>
 
@@ -200,8 +201,8 @@ export default function ReportesPage() {
         <button type="button" role="tab" aria-selected={seccion === 'operativos'} className={`reporte-tab-btn${seccion === 'operativos' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('operativos')}>
           2) Reportes operativos de máquinas
         </button>
-        <button type="button" role="tab" aria-selected={false} className="reporte-tab-btn" disabled>
-          3) Sección pendiente
+        <button type="button" role="tab" aria-selected={seccion === 'financieros'} className={`reporte-tab-btn${seccion === 'financieros' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('financieros')}>
+          3) Reportes financieros
         </button>
         <button type="button" role="tab" aria-selected={false} className="reporte-tab-btn" disabled>
           4) Sección pendiente
@@ -427,6 +428,7 @@ export default function ReportesPage() {
       ) : null}
 
       {seccion === 'operativos' ? <ReportesOperativosMaquinasSection /> : null}
+      {seccion === 'financieros' ? <ReportesFinancierosSection /> : null}
     </div>
   );
 }
