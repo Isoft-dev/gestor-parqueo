@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArcElement,
   BarElement,
@@ -49,6 +49,12 @@ export default function ReportesFinancierosSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+
+  useEffect(() => {
+    // Al cambiar de subpestaña se oculta el reporte anterior.
+    setError('');
+    setData(null);
+  }, [tab]);
 
   const generate = async () => {
     setError('');

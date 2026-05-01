@@ -33,5 +33,8 @@ router.get('/financieros/ingresos-tipo-cliente/pdf', ctrl.ingresosTipoClienteFin
 router.get('/financieros/ingresos-tipo-cliente', ctrl.ingresosTipoClienteFinancieros);
 router.get('/financieros/ingresos-totales/pdf', ctrl.ingresosTotalesFinancierosPdf);
 router.get('/financieros/ingresos-totales', ctrl.ingresosTotalesFinancieros);
+router.get('/membresias-clientes/buscar', ctrl.buscarClientesMembresia);
+router.get('/membresias-clientes/historial-pagos/pdf', ctrl.historialPagosClientePdf);
+router.get('/membresias-clientes/historial-pagos', ctrl.historialPagosCliente);
 
 export default router;

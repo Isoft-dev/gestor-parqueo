@@ -4,6 +4,7 @@ import * as serviceMora from '../services/reporteMoraClientes.js';
 import * as serviceMov from '../services/reporteMovimientoVehicular.js';
 import * as serviceOps from '../services/reporteOperativoMaquinas.js';
 import * as serviceFin from '../services/reporteFinanciero.js';
+import * as serviceMemCli from '../services/reporteMembresiasClientes.js';
 
 export async function incidentesPorRango(req, res) {
   try {
@@ -460,6 +461,41 @@ export async function ingresosTotalesFinancierosPdf(req, res) {
     const safeHasta = String(hasta || '').replace(/\D/g, '');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="reporte-fin-ingresos-totales-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function buscarClientesMembresia(req, res) {
+  try {
+    const { q } = req.query;
+    const data = await serviceMemCli.searchClientesMembresia(q);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error al buscar clientes' });
+  }
+}
+
+export async function historialPagosCliente(req, res) {
+  try {
+    const { cli_id } = req.query;
+    const data = await serviceMemCli.getHistorialPagosCliente(cli_id);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function historialPagosClientePdf(req, res) {
+  try {
+    const { cli_id } = req.query;
+    const data = await serviceMemCli.getHistorialPagosCliente(cli_id);
+    const pdfBuffer = await serviceMemCli.buildHistorialPagosClientePdfBuffer(data);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-historial-pagos-cli-${cli_id}.pdf"`);
     res.send(pdfBuffer);
   } catch (err) {
     if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
