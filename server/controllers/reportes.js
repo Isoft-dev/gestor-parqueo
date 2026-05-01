@@ -1,6 +1,7 @@
 import * as service from '../services/reporteIncidentes.js';
 import * as serviceMem from '../services/reporteMembresias.js';
 import * as serviceMora from '../services/reporteMoraClientes.js';
+import * as serviceMov from '../services/reporteMovimientoVehicular.js';
 
 export async function incidentesPorRango(req, res) {
   try {
@@ -159,6 +160,108 @@ export async function clientesMoraPdf(req, res) {
     );
     res.send(pdfBuffer);
   } catch (err) {
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function vehiculosFrecuentes(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceMov.getVehiculosFrecuentes(desde, hasta);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function vehiculosFrecuentesPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceMov.getVehiculosFrecuentes(desde, hasta);
+    const pdfBuffer = await serviceMov.buildVehiculosFrecuentesPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reporte-vehiculos-frecuencia-${safeDesde}-${safeHasta}.pdf"`
+    );
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function entradasSalidas(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceMov.getEntradasSalidas(desde, hasta);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function entradasSalidasPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceMov.getEntradasSalidas(desde, hasta);
+    const pdfBuffer = await serviceMov.buildEntradasSalidasPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reporte-entradas-salidas-${safeDesde}-${safeHasta}.pdf"`
+    );
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function tiempoPromedioEstadia(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceMov.getTiempoPromedioEstadia(desde, hasta);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function tiempoPromedioEstadiaPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceMov.getTiempoPromedioEstadia(desde, hasta);
+    const pdfBuffer = await serviceMov.buildTiempoPromedioPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reporte-tiempo-estadia-${safeDesde}-${safeHasta}.pdf"`
+    );
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
   }
 }

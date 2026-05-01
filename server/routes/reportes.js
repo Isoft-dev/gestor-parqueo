@@ -13,5 +13,11 @@ router.get('/membresias-estado/pdf', ctrl.membresiasEstadoPdf);
 router.get('/membresias-estado', ctrl.membresiasEstado);
 router.get('/clientes-mora/pdf', ctrl.clientesMoraPdf);
 router.get('/clientes-mora', ctrl.clientesMora);
+router.get('/movimiento-vehicular/frecuencia/pdf', ctrl.vehiculosFrecuentesPdf);
+router.get('/movimiento-vehicular/frecuencia', ctrl.vehiculosFrecuentes);
+router.get('/movimiento-vehicular/entradas-salidas/pdf', ctrl.entradasSalidasPdf);
+router.get('/movimiento-vehicular/entradas-salidas', ctrl.entradasSalidas);
+router.get('/movimiento-vehicular/tiempo-estadia/pdf', ctrl.tiempoPromedioEstadiaPdf);
+router.get('/movimiento-vehicular/tiempo-estadia', ctrl.tiempoPromedioEstadia);
 
 export default router;
