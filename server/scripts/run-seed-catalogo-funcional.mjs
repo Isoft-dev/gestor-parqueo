@@ -13,8 +13,13 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 
-function stripComments(sql) {
-  return sql.replace(/--[^\r\n]*/g, '');
+/** Comentarios `--` y terminador `/` de SQL*Plus (oracledb.execute no admite `/` suelto al final). */
+function prepareSeedSql(raw) {
+  let s = raw.replace(/--[^\r\n]*/g, '');
+  const lines = s.split(/\r?\n/);
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  if (lines.length && lines[lines.length - 1].trim() === '/') lines.pop();
+  return lines.join('\n').trim();
 }
 
 async function main() {
@@ -32,9 +37,8 @@ async function main() {
     process.exit(1);
   }
 
-  let raw = fs.readFileSync(sqlPath, 'utf8');
-  raw = stripComments(raw);
-  const sql = raw.trim();
+  const raw = fs.readFileSync(sqlPath, 'utf8');
+  const sql = prepareSeedSql(raw);
   if (!sql) {
     console.error('Archivo SQL vacío');
     process.exit(1);
