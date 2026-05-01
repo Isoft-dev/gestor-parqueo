@@ -1,8 +1,12 @@
 import * as service from '../services/detallePagoMembresia.js';
 
-export async function getAll(_req, res) {
-  try { res.json(await service.getAll()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+export async function getAll(req, res) {
+  try {
+    const placa = String(req.query.placa ?? req.query.q ?? '').trim();
+    res.json(await service.getAll({ placa }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }
 
 export async function getById(req, res) {

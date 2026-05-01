@@ -76,7 +76,7 @@ export default function DashboardPage() {
           <div className="admin-kpi-value">
             {loading && stats.alertasActivasCatalogo == null ? '—' : stats.alertasActivasCatalogo}
           </div>
-          <div className="admin-kpi-hint">Según catálogo PAR_ESTADO_ALERTA</div>
+          <div className="admin-kpi-hint">Según catálogo de estados de alerta</div>
         </article>
         <article className="admin-kpi admin-kpi--spaces">
           <div className="admin-kpi-label">Espacios reservados (mensuales)</div>
@@ -173,16 +173,6 @@ export default function DashboardPage() {
               <span className="admin-quick-desc">{r.description}</span>
             </Link>
           ))}
-          <Link
-            className="admin-quick-card admin-quick-card--muted"
-            to={adminPath('reportes')}
-          >
-            <span className="admin-quick-icon" aria-hidden="true">
-              📘
-            </span>
-            <span className="admin-quick-title">Reportes</span>
-            <span className="admin-quick-desc">Disponible en un sprint posterior</span>
-          </Link>
         </div>
       </section>
     </div>

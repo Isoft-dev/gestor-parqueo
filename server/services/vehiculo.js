@@ -1,6 +1,26 @@
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
-export async function getAll() {
+const LIST_SELECT = `SELECT v.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+              v.TVE_ID, tv.TVE_TIPO, v.CLI_ID
+         FROM PAR_VEHICULO v
+         LEFT JOIN PAR_TIPO_VEHICULO tv ON v.TVE_ID = tv.TVE_ID`;
+
+/** Tickets / esporádicos: placas creadas en entrada (sin ficha de cliente). Coherente con ticket.js (CLI_ID NULL). */
+const WHERE_TICKETS_ESPORADICOS = `WHERE v.CLI_ID IS NULL`;
+
+/**
+ * Clientes mensuales: toda la flota vinculada a un cliente (CLI_ID), aunque aún no tenga membresía.
+ * Así un vehículo nuevo aparece aquí y no en el listado esporádico.
+ */
+const WHERE_CLIENTE_CON_MEMBRESIA = `WHERE v.CLI_ID IS NOT NULL`;
+
+export async function getAll(options = {}) {
+  if (options.soloClienteConMembresia) {
+    return executeSql(`${LIST_SELECT} ${WHERE_CLIENTE_CON_MEMBRESIA} ORDER BY v.VEH_ID`);
+  }
+  if (options.soloEsporadicos) {
+    return executeSql(`${LIST_SELECT} ${WHERE_TICKETS_ESPORADICOS} ORDER BY v.VEH_ID`);
+  }
   return executeCursor(`BEGIN SP_VEHICULO_GET_ALL(:cursor); END;`);
 }
 
@@ -32,7 +52,7 @@ async function isIdentityAlways() {
 
 export async function create(data) {
   const existingPlaca = await findByPlaca(data.VEH_PLACA);
-  if (existingPlaca) throw new Error('Ya existe un vehiculo con la misma VEH_PLACA');
+  if (existingPlaca) throw new Error('Ya existe un vehículo con la misma placa.');
 
   if ((await isIdentityAlways()) || !data.VEH_ID) {
     await executeSql(
@@ -70,7 +90,7 @@ export async function create(data) {
 
 export async function update(id, data) {
   const existingPlaca = await findByPlaca(data.VEH_PLACA, id);
-  if (existingPlaca) throw new Error('Ya existe otro vehiculo con la misma VEH_PLACA');
+  if (existingPlaca) throw new Error('Ya existe otro vehículo con la misma placa.');
   await executeProcedure(`BEGIN SP_VEHICULO_UPDATE(:id, :VEH_PLACA, :VEH_MODELO, :VEH_COLOR, :TVE_ID, :CLI_ID); END;`, {
     id,
     VEH_PLACA: data.VEH_PLACA ?? null,

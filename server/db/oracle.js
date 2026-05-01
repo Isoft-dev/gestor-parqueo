@@ -98,8 +98,15 @@ export async function executeCursor(sql, binds = {}) {
       cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR },
     });
     cursor = result.outBinds.cursor;
-    const rows = await cursor.getRows();
-    return serializeOracleRows(rows);
+    /** Leer hasta agotar el cursor. No usar `batch.length < batchSize` para salir: el primer fetch puede traer pocas filas (p. ej. prefetch 2) y aún quedan más en el servidor. */
+    const allRows = [];
+    const batchSize = 500;
+    for (;;) {
+      const batch = await cursor.getRows(batchSize);
+      if (!batch || batch.length === 0) break;
+      allRows.push(...batch);
+    }
+    return serializeOracleRows(allRows);
   } finally {
     if (cursor) {
       try {

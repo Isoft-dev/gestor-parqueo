@@ -38,7 +38,7 @@ function pick(row, ...names) {
 }
 
 async function fetchJsonAll(path) {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   const text = await res.text();
   let data = null;
   try {

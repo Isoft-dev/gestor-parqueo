@@ -20,6 +20,7 @@ export const ADMIN_NAV_ROUTES = [
     entityKeys: [
       'cliente',
       'membresia',
+      'detalle-pago-membresia',
       'vehiculo',
       'tipo-vehiculo',
       'tipo-membresia',
@@ -36,6 +37,7 @@ export const ADMIN_NAV_ROUTES = [
     entityKeys: [
       'estado-ticket',
       'ticket',
+      'cliente',
       'vehiculo',
       'cobro',
       'tipo-cobro',
@@ -67,7 +69,7 @@ export const ADMIN_NAV_ROUTES = [
   },
   {
     path: 'tarifas',
-    label: 'Gestión de tarifas',
+    label: 'Gestión de cobro',
     description: 'Tarifas del parqueo, tipos de cobro y formas de pago.',
     icon: 'Q',
     entityKeys: ['tarifa', 'tipo-cobro', 'tipo-pago'],
@@ -95,9 +97,9 @@ export const ADMIN_NAV_ROUTES = [
   {
     path: 'reportes',
     label: 'Reportes',
-    description: 'Consolidados y exportaciones (programado para sprint posterior).',
+    description:
+      'Incidentes, membresías por estado, clientes en mora (vista actual) y PDF.',
     icon: '📘',
-    isPlaceholder: true,
   },
 ];
 
