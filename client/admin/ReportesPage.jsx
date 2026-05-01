@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Pie } from 'react-chartjs-2';
+import { ArcElement, Chart as ChartJS, Legend, Tooltip } from 'chart.js';
 import { API_BASE } from '../config.js';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -34,75 +38,91 @@ function TiempoEstadiaPieChart({ rows }) {
     .filter((r) => r.valor > 0);
 
   const total = items.reduce((s, x) => s + x.valor, 0);
-  const w = 460;
-  const h = 210;
-  const cx = 92;
-  const cy = 102;
-  const r = 68;
   const palette = ['#2563eb', '#0ea5e9', '#14b8a6', '#22c55e', '#84cc16', '#eab308', '#f97316'];
 
   if (!total) {
     return (
-      <svg className="reporte-chart-svg" viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Sin datos para gráfica circular">
-        <text x={w / 2} y={h / 2} textAnchor="middle" fontSize="12" fill="var(--color-text-muted, #64748b)">
-          Sin datos para graficar
-        </text>
-      </svg>
+      <p className="admin-muted" style={{ margin: 0 }}>Sin datos para graficar</p>
     );
   }
 
-  let angleStart = -Math.PI / 2;
-  const paths = items.map((item, idx) => {
-    const frac = item.valor / total;
-    const angle = frac * 2 * Math.PI;
-    const angleEnd = angleStart + angle;
-    const x0 = cx + r * Math.cos(angleStart);
-    const y0 = cy + r * Math.sin(angleStart);
-    const x1 = cx + r * Math.cos(angleEnd);
-    const y1 = cy + r * Math.sin(angleEnd);
-    const largeArc = angle > Math.PI ? 1 : 0;
-    const d = `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1} Z`;
-    const out = {
-      d,
-      color: palette[idx % palette.length],
-      dia: item.dia,
-      valor: item.valor,
-      porcentaje: (frac * 100).toFixed(0),
-      labelX: cx + r * 0.62 * Math.cos(angleStart + angle / 2),
-      labelY: cy + r * 0.62 * Math.sin(angleStart + angle / 2),
-    };
-    angleStart = angleEnd;
-    return out;
-  });
+  const chartData = {
+    labels: items.map((x) => x.dia),
+    datasets: [
+      {
+        data: items.map((x) => x.valor),
+        backgroundColor: items.map((_, i) => palette[i % palette.length]),
+        borderColor: '#ffffff',
+        borderWidth: 1.5,
+      },
+    ],
+  };
+
+  const percentLabelPlugin = {
+    id: 'percentLabelPlugin',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      const meta = chart.getDatasetMeta(0);
+      const dataset = chart.data.datasets[0];
+      const vals = dataset.data || [];
+      const sum = vals.reduce((s, n) => s + Number(n || 0), 0);
+      if (!sum) return;
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 11px Inter, Segoe UI, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      meta.data.forEach((arc, i) => {
+        const value = Number(vals[i] || 0);
+        if (value <= 0) return;
+        const pct = `${Math.round((value / sum) * 100)}%`;
+        const p = arc.getProps(['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'], true);
+        const angle = (p.startAngle + p.endAngle) / 2;
+        const radius = (p.innerRadius + p.outerRadius) / 2;
+        const x = p.x + Math.cos(angle) * radius;
+        const y = p.y + Math.sin(angle) * radius;
+        ctx.fillText(pct, x, y);
+      });
+      ctx.restore();
+    },
+  };
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label(context) {
+            const value = Number(context.raw || 0);
+            const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+            return `${context.label}: ${value} (${pct}%)`;
+          },
+        },
+      },
+    },
+  };
 
   return (
-    <svg className="reporte-chart-svg" viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Distribución por día de la semana">
-      {paths.map((p) => (
-        <path key={p.dia} d={p.d} fill={p.color} stroke="#fff" strokeWidth="1.2" />
-      ))}
-      {paths.map((p) => (
-        <text
-          key={`${p.dia}-pct`}
-          x={p.labelX}
-          y={p.labelY}
-          fontSize="10"
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fill="#ffffff"
-          fontWeight="700"
-        >
-          {p.porcentaje}%
-        </text>
-      ))}
-      {paths.map((p, i) => (
-        <g key={`${p.dia}-leg`} transform={`translate(190, ${24 + i * 24})`}>
-          <rect x="0" y="-10" width="11" height="11" rx="2" fill={p.color} />
-          <text x="18" y="-1" fontSize="11" fill="var(--color-text, #0f172a)" fontWeight="600">
-            {p.dia}: {p.valor} ({p.porcentaje}%)
-          </text>
-        </g>
-      ))}
-    </svg>
+    <div style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: '18px', alignItems: 'center' }}>
+      <div style={{ height: 170 }}>
+        <Pie data={chartData} options={options} plugins={[percentLabelPlugin]} />
+      </div>
+      <div>
+        {items.map((item, i) => {
+          const pct = Math.round((item.valor / total) * 100);
+          return (
+            <div key={item.dia} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ width: 11, height: 11, borderRadius: 2, background: palette[i % palette.length], display: 'inline-block' }} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                {item.dia}: {item.valor} ({pct}%)
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
