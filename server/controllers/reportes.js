@@ -2,6 +2,7 @@ import * as service from '../services/reporteIncidentes.js';
 import * as serviceMem from '../services/reporteMembresias.js';
 import * as serviceMora from '../services/reporteMoraClientes.js';
 import * as serviceMov from '../services/reporteMovimientoVehicular.js';
+import * as serviceOps from '../services/reporteOperativoMaquinas.js';
 
 export async function incidentesPorRango(req, res) {
   try {
@@ -262,6 +263,99 @@ export async function tiempoPromedioEstadiaPdf(req, res) {
     if (err?.code === 'VALIDATION') {
       return res.status(400).json({ error: err.message });
     }
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function alertasOperativas(req, res) {
+  try {
+    const { desde, hasta, maq_id, tal_id, eal_id } = req.query;
+    const data = await serviceOps.getAlertasPorMaquinaTipo({
+      desde,
+      hasta,
+      maqId: maq_id,
+      talId: tal_id,
+      ealId: eal_id,
+    });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function alertasOperativasPdf(req, res) {
+  try {
+    const { desde, hasta, maq_id, tal_id, eal_id } = req.query;
+    const data = await serviceOps.getAlertasPorMaquinaTipo({
+      desde,
+      hasta,
+      maqId: maq_id,
+      talId: tal_id,
+      ealId: eal_id,
+    });
+    const pdfBuffer = await serviceOps.buildAlertasPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-alertas-maquina-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function mantenimientosOperativos(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceOps.getMantenimientosPorMaquina({ desde, hasta });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function mantenimientosOperativosPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceOps.getMantenimientosPorMaquina({ desde, hasta });
+    const pdfBuffer = await serviceOps.buildMantenimientosPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-mantenimientos-maquina-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function recargasOperativas(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceOps.getRecargasEfectivoPorMaquina({ desde, hasta });
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function recargasOperativasPdf(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceOps.getRecargasEfectivoPorMaquina({ desde, hasta });
+    const pdfBuffer = await serviceOps.buildRecargasPdfBuffer(data);
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-recargas-maquina-${safeDesde}-${safeHasta}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
     res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
   }
 }

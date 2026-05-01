@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pie } from 'react-chartjs-2';
 import { ArcElement, Chart as ChartJS, Legend, Tooltip } from 'chart.js';
 import { API_BASE } from '../config.js';
+import ReportesOperativosMaquinasSection from './ReportesOperativosMaquinasSection.jsx';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -196,8 +197,8 @@ export default function ReportesPage() {
         <button type="button" role="tab" aria-selected={seccion === 'movimiento'} className={`reporte-tab-btn${seccion === 'movimiento' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('movimiento')}>
           1) Movimiento vehicular
         </button>
-        <button type="button" role="tab" aria-selected={false} className="reporte-tab-btn" disabled>
-          2) Sección pendiente
+        <button type="button" role="tab" aria-selected={seccion === 'operativos'} className={`reporte-tab-btn${seccion === 'operativos' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('operativos')}>
+          2) Reportes operativos de máquinas
         </button>
         <button type="button" role="tab" aria-selected={false} className="reporte-tab-btn" disabled>
           3) Sección pendiente
@@ -424,6 +425,8 @@ export default function ReportesPage() {
           ) : null}
         </>
       ) : null}
+
+      {seccion === 'operativos' ? <ReportesOperativosMaquinasSection /> : null}
     </div>
   );
 }

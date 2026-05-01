@@ -160,7 +160,7 @@ export async function getIncidentesPorRango(desdeStr, hastaStr, incIdOpt) {
     id: r.BIV_ID ?? r.biv_id,
     fechaHora: r.BIV_FECHA_HORA ?? r.biv_fecha_hora,
     tipoIncidente: r.INC_TIPO ?? r.inc_tipo ?? '—',
-    descripcion: r.BIV_DESCRIPCION ?? r.biv_descripcion ?? '—',
+    descripcion: r.INC_DESC_CAT ?? r.inc_desc_cat ?? r.BIV_DESCRIPCION ?? r.biv_descripcion ?? '—',
     placa: r.VEH_PLACA ?? r.veh_placa ?? '—',
     estadoResolucion: estadoResolucion(r.BIV_RESUELTO ?? r.biv_resuelto),
     incId: r.INC_ID ?? r.inc_id,
@@ -364,37 +364,78 @@ export async function buildIncidentesPdfBuffer(data) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text('Reporte de incidentes', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(10).text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
-    doc.moveDown(1.2);
+    const left = doc.page.margins.left;
+    const fullW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const rowH = 17;
+    const headH = 20;
 
-    doc.fontSize(11).text('Resumen', { underline: true });
-    doc.fontSize(10);
+    const drawTable = (title, headers, widths, rows) => {
+      const drawHead = () => {
+        doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text(title, left, doc.y, { width: fullW });
+        doc.moveDown(0.2);
+        const y = doc.y;
+        doc.rect(left, y, fullW, headH).fill('#e2e8f0');
+        let x = left;
+        doc.font('Helvetica-Bold').fontSize(8.4).fillColor('#0f172a');
+        headers.forEach((h, i) => {
+          doc.text(h, x + 4, y + 6, { width: widths[i] - 8, lineBreak: false });
+          x += widths[i];
+        });
+        doc.strokeColor('#94a3b8').lineWidth(0.8).rect(left, y, fullW, headH).stroke();
+        doc.y = y + headH;
+      };
+      drawHead();
+      rows.forEach((r, idx) => {
+        if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) {
+          doc.addPage();
+          drawHead();
+        }
+        const y = doc.y;
+        if (idx % 2 === 0) doc.rect(left, y, fullW, rowH).fill('#f8fafc');
+        doc.strokeColor('#e2e8f0').lineWidth(0.5).rect(left, y, fullW, rowH).stroke();
+        let x = left;
+        doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
+        r.forEach((cell, i) => {
+          const txt = String(cell ?? '—').replace(/\s+/g, ' ').trim();
+          doc.text(txt.length > 42 ? `${txt.slice(0, 41)}…` : txt, x + 4, y + 5, { width: widths[i] - 8, lineBreak: false });
+          x += widths[i];
+        });
+        doc.y = y + rowH;
+      });
+      doc.moveDown(0.6);
+    };
+
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#111827').text('Reporte de incidentes', { align: 'center' });
+    doc.moveDown(0.4);
+    doc.font('Helvetica').fontSize(10).fillColor('#334155').text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
+    doc.moveDown(0.8);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Resumen');
+    doc.font('Helvetica').fontSize(9).fillColor('#0f172a');
     doc.text(`Total de incidentes: ${resumen.totalIncidentes}`);
     doc.text(`Promedio diario: ${resumen.promedioDiario}`);
-    doc.text(
-      resumen.fechaConMasIncidentes != null
-        ? `Día con más incidentes: ${resumen.fechaConMasIncidentes} (${resumen.maxIncidentesEnUnDia})`
-        : `Día con más incidentes: — (${resumen.maxIncidentesEnUnDia})`
+    doc.text(`Día con más incidentes: ${resumen.fechaConMasIncidentes || '—'} (${resumen.maxIncidentesEnUnDia || 0})`);
+    doc.moveDown(0.6);
+
+    const porDiaConIncidentes = (serieDiaria || []).filter((p) => Number(p.cantidad || 0) > 0);
+    drawTable(
+      'Detalle por día (solo con incidentes)',
+      ['Fecha', 'Incidentes'],
+      [fullW * 0.68, fullW * 0.32],
+      porDiaConIncidentes.map((p) => [p.fecha, p.cantidad])
     );
-    doc.moveDown(1);
 
-    doc.fontSize(11).text('Detalle por día (tendencia)', { underline: true });
-    doc.fontSize(9);
-    serieDiaria.forEach((p) => {
-      doc.text(`${p.fecha}: ${p.cantidad}`);
-    });
-    doc.moveDown(1);
-
-    doc.fontSize(11).text('Detalle de registros', { underline: true });
-    doc.fontSize(8);
-    detalle.forEach((row) => {
-      const fh = row.fechaHora ? new Date(row.fechaHora).toLocaleString('es-GT') : '—';
-      doc.text(
-        `${fh} | ${row.tipoIncidente} | ${row.placa} | ${row.estadoResolucion} | ${String(row.descripcion).slice(0, 120)}`
-      );
-    });
+    drawTable(
+      'Detalle de registros',
+      ['Fecha y hora', 'Tipo', 'Placa', 'Estado', 'Descripción'],
+      [fullW * 0.25, fullW * 0.2, fullW * 0.12, fullW * 0.13, fullW * 0.3],
+      (detalle || []).map((row) => [
+        row.fechaHora ? new Date(row.fechaHora).toLocaleString('es-GT') : '—',
+        row.tipoIncidente,
+        row.placa,
+        row.estadoResolucion,
+        row.descripcion,
+      ])
+    );
 
     doc.end();
   });
@@ -409,35 +450,48 @@ export async function buildIncidentesPorTipoPdfBuffer(data) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text('Reporte de incidentes por tipo', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(10).text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
-    doc.moveDown(1);
+    const left = doc.page.margins.left;
+    const fullW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const rowH = 17;
+    const headH = 20;
 
-    doc.fontSize(11).text('Resumen', { underline: true });
-    doc.fontSize(10);
-    doc.text(`Total de registros en el período: ${totalRegistros}`);
-    if (tipoMasFrecuente) {
-      doc.text(
-        `Tipo más frecuente: ${tipoMasFrecuente.tipoIncidente} (${tipoMasFrecuente.ocurrencias} ocurrencias)`
-      );
-    } else {
-      doc.text('Tipo más frecuente: —');
-    }
-    doc.moveDown(1);
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#111827').text('Reporte de incidentes por tipo', { align: 'center' });
+    doc.moveDown(0.4);
+    doc.font('Helvetica').fontSize(10).fillColor('#334155').text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
+    doc.moveDown(0.7);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Resumen');
+    doc.font('Helvetica').fontSize(9);
+    doc.text(`Total de registros: ${totalRegistros}`);
+    doc.text(`Tipo más frecuente: ${tipoMasFrecuente ? `${tipoMasFrecuente.tipoIncidente} (${tipoMasFrecuente.ocurrencias})` : '—'}`);
+    doc.moveDown(0.45);
 
-    doc.fontSize(11).text('Detalle por tipo', { underline: true });
-    doc.fontSize(9);
-    porTipo.forEach((row) => {
-      const star = row.esMasFrecuente ? '* ' : '';
-      doc.text(
-        `${star}${row.tipoIncidente} | Ocurrencias: ${row.ocurrencias} | Resueltos: ${row.resueltos} | Pendientes: ${row.pendientes}`
-      );
+    const y = doc.y;
+    doc.rect(left, y, fullW, headH).fill('#e2e8f0');
+    const widths = [fullW * 0.46, fullW * 0.18, fullW * 0.18, fullW * 0.18];
+    const headers = ['Tipo de incidente', 'Ocurrencias', 'Resueltos', 'Pendientes'];
+    let x = left;
+    doc.font('Helvetica-Bold').fontSize(8.4).fillColor('#0f172a');
+    headers.forEach((h, i) => {
+      doc.text(h, x + 4, y + 6, { width: widths[i] - 8, lineBreak: false });
+      x += widths[i];
     });
-    if (porTipo.some((r) => r.esMasFrecuente)) {
-      doc.moveDown(0.5);
-      doc.fontSize(8).text('* Tipo(s) con la mayor frecuencia en el período.');
-    }
+    doc.strokeColor('#94a3b8').lineWidth(0.8).rect(left, y, fullW, headH).stroke();
+    doc.y = y + headH;
+
+    (porTipo || []).forEach((row, idx) => {
+      if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) doc.addPage();
+      const yy = doc.y;
+      if (idx % 2 === 0) doc.rect(left, yy, fullW, rowH).fill('#f8fafc');
+      doc.strokeColor('#e2e8f0').lineWidth(0.5).rect(left, yy, fullW, rowH).stroke();
+      const vals = [row.esMasFrecuente ? `★ ${row.tipoIncidente}` : row.tipoIncidente, row.ocurrencias, row.resueltos, row.pendientes];
+      x = left;
+      doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
+      vals.forEach((v2, i) => {
+        doc.text(String(v2), x + 4, yy + 5, { width: widths[i] - 8, lineBreak: false });
+        x += widths[i];
+      });
+      doc.y = yy + rowH;
+    });
 
     doc.end();
   });
@@ -459,31 +513,55 @@ export async function buildIncidentesPorResolucionPdfBuffer(data) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text('Reporte de incidentes por resolución', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(10).text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
-    doc.moveDown(1);
+    const left = doc.page.margins.left;
+    const fullW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const rowH = 17;
+    const headH = 20;
+    const widths = [fullW * 0.22, fullW * 0.1, fullW * 0.2, fullW * 0.12, fullW * 0.2, fullW * 0.16];
+    const headers = ['Tipo incidente', 'Placa', 'Fecha registro', 'Estado', 'Fecha resolución', 'Usuario'];
 
-    doc.fontSize(11).text('Resumen', { underline: true });
-    doc.fontSize(10);
-    doc.text(`Total de registros: ${totalRegistros}`);
-    doc.text(`Resueltos: ${resueltos}`);
-    doc.text(`Pendientes: ${pendientes}`);
-    doc.text(
-      tiempoPromedioResolucionEtiqueta
-        ? `Tiempo promedio de resolución (resueltos): ${tiempoPromedioResolucionEtiqueta}`
-        : 'Tiempo promedio de resolución: —'
-    );
-    doc.moveDown(1);
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#111827').text('Reporte de incidentes por resolución', { align: 'center' });
+    doc.moveDown(0.4);
+    doc.font('Helvetica').fontSize(10).fillColor('#334155').text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
+    doc.moveDown(0.7);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Resumen');
+    doc.font('Helvetica').fontSize(9);
+    doc.text(`Total: ${totalRegistros} | Resueltos: ${resueltos} | Pendientes: ${pendientes}`);
+    doc.text(`Tiempo promedio de resolución: ${tiempoPromedioResolucionEtiqueta || '—'}`);
+    doc.moveDown(0.45);
 
-    doc.fontSize(11).text('Detalle', { underline: true });
-    doc.fontSize(8);
-    detalle.forEach((row) => {
-      const fr = row.fechaRegistro ? new Date(row.fechaRegistro).toLocaleString('es-GT') : '—';
-      const fres = row.fechaResolucion ? new Date(row.fechaResolucion).toLocaleString('es-GT') : '—';
-      doc.text(
-        `${row.tipoIncidente} | ${row.placa} | Registro: ${fr} | ${row.estadoResolucion} | Resolución: ${fres} | Usuario: ${row.usuarioResolvio}`
-      );
+    const y = doc.y;
+    doc.rect(left, y, fullW, headH).fill('#e2e8f0');
+    let x = left;
+    doc.font('Helvetica-Bold').fontSize(8.3).fillColor('#0f172a');
+    headers.forEach((h, i) => {
+      doc.text(h, x + 4, y + 6, { width: widths[i] - 8, lineBreak: false });
+      x += widths[i];
+    });
+    doc.strokeColor('#94a3b8').lineWidth(0.8).rect(left, y, fullW, headH).stroke();
+    doc.y = y + headH;
+
+    (detalle || []).forEach((row, idx) => {
+      if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) doc.addPage();
+      const yy = doc.y;
+      if (idx % 2 === 0) doc.rect(left, yy, fullW, rowH).fill('#f8fafc');
+      doc.strokeColor('#e2e8f0').lineWidth(0.5).rect(left, yy, fullW, rowH).stroke();
+      const vals = [
+        row.tipoIncidente,
+        row.placa,
+        row.fechaRegistro ? new Date(row.fechaRegistro).toLocaleString('es-GT') : '—',
+        row.estadoResolucion,
+        row.fechaResolucion ? new Date(row.fechaResolucion).toLocaleString('es-GT') : '—',
+        row.usuarioResolvio,
+      ];
+      x = left;
+      doc.font('Helvetica').fontSize(7.8).fillColor('#0f172a');
+      vals.forEach((v2, i) => {
+        const txt = String(v2 ?? '—');
+        doc.text(txt.length > 28 ? `${txt.slice(0, 27)}…` : txt, x + 4, yy + 5, { width: widths[i] - 8, lineBreak: false });
+        x += widths[i];
+      });
+      doc.y = yy + rowH;
     });
 
     doc.end();

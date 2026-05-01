@@ -19,5 +19,11 @@ router.get('/movimiento-vehicular/entradas-salidas/pdf', ctrl.entradasSalidasPdf
 router.get('/movimiento-vehicular/entradas-salidas', ctrl.entradasSalidas);
 router.get('/movimiento-vehicular/tiempo-estadia/pdf', ctrl.tiempoPromedioEstadiaPdf);
 router.get('/movimiento-vehicular/tiempo-estadia', ctrl.tiempoPromedioEstadia);
+router.get('/operativos/alertas/pdf', ctrl.alertasOperativasPdf);
+router.get('/operativos/alertas', ctrl.alertasOperativas);
+router.get('/operativos/mantenimientos/pdf', ctrl.mantenimientosOperativosPdf);
+router.get('/operativos/mantenimientos', ctrl.mantenimientosOperativos);
+router.get('/operativos/recargas/pdf', ctrl.recargasOperativasPdf);
+router.get('/operativos/recargas', ctrl.recargasOperativas);
 
 export default router;
