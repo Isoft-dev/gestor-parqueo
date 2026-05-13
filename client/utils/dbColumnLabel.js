@@ -70,6 +70,9 @@ export function humanizeDbColumn(key) {
   if (idOnly) {
     const pref = idOnly[1].toUpperCase();
     const label = TABLE_PREFIX_ES[pref];
+    const base = label ? label : `${formatTailWord(pref)}`;
+    /* Incidente, usuario y vehículo: selects por nombre/placa, sin sufijo "(ID)". */
+    if (pref === 'INC' || pref === 'USU' || pref === 'VEH') return base;
     return label ? `${label} (ID)` : `${formatTailWord(pref)} (ID)`;
   }
 

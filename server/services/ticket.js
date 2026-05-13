@@ -1,7 +1,7 @@
 import oracledb from 'oracledb';
 import PDFDocument from 'pdfkit/js/pdfkit.js';
 import QRCode from 'qrcode';
-import { getCobroMinimoSub1hEffective } from './cobroPoliticaRuntime.js';
+import { getCobroMinimoSub1hEffective, getTarifaActivaRuntimeId } from './cobroPoliticaRuntime.js';
 import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
 import { ensureClienteFromTicketNitTx } from './cliente.js';
 import { applyCashMovementTx } from './cashMachine.js';
@@ -11,6 +11,15 @@ import {
   isTipoMaquinaEntrada,
   isTipoMaquinaSalida,
 } from '../utils/tipoMaquinaRules.js';
+
+/** Recargo fijo (GTQ) por ticket en estado extraviado al momento del cobro. */
+const RECARGO_TICKET_EXTRAVIADO_Q = 100;
+
+function ticketEstadoIndicaExtraviado(etiEstado) {
+  return String(etiEstado ?? '')
+    .toLowerCase()
+    .includes('extrav');
+}
 
 /** Aplica mínimo (p. ej. Q5) solo si la estadía facturable es estrictamente menor a 60 minutos. */
 function aplicarMinimoSub1h(montoBruto, minsFacturables) {
@@ -40,7 +49,7 @@ export async function getByCodigo(codigo) {
             t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
             t.TIC_FECHA_HORA_ENTRADA, t.TIC_FECHA_HORA_SALIDA,
             t.ETI_ID, e.ETI_ESTADO,
-            c.COB_ID AS COB_ID
+            c.COB_ID AS COB_ID, c.COB_MONTO_TOTAL AS COB_MONTO_TOTAL
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON t.VEH_ID = v.VEH_ID
        JOIN PAR_ESTADO_TICKET e ON t.ETI_ID = e.ETI_ID
@@ -68,6 +77,11 @@ async function getTarifaVigente() {
            FROM PAR_TARIFA
           ORDER BY TAR_ID DESC`
   );
+  const selectedTarId = getTarifaActivaRuntimeId();
+  if (selectedTarId != null) {
+    const selected = rows.find((r) => String(r.TAR_ID) === String(selectedTarId));
+    if (selected) return selected;
+  }
   return rows[0] || null;
 }
 
@@ -87,13 +101,23 @@ async function getTarifaVigenteTx(conn) {
            FROM PAR_TARIFA
           ORDER BY TAR_ID DESC`
   );
-  return rows.rows?.[0] || null;
+  const list = rows.rows || [];
+  const selectedTarId = getTarifaActivaRuntimeId();
+  if (selectedTarId != null) {
+    const selected = list.find((r) => String(r.TAR_ID) === String(selectedTarId));
+    if (selected) return selected;
+  }
+  return list[0] || null;
 }
 
 export async function quoteByCodigo(codigo) {
   const ticket = await getByCodigo(codigo);
   if (!ticket) throw new Error('Ticket no reconocido');
-  if (ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '') {
+  const estadoTicketNorm = String(ticket.ETI_ESTADO || '').toLowerCase();
+  const isVencido = estadoTicketNorm.includes('venc');
+  const isVolverCobrar = estadoTicketNorm.includes('volver') && estadoTicketNorm.includes('cobr');
+  const hasCobro = ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '';
+  if (hasCobro && !isVencido && !isVolverCobrar) {
     throw new Error('Ticket ya saldado');
   }
 
@@ -112,6 +136,25 @@ export async function quoteByCodigo(codigo) {
   const precio = Number(tarifa.TAR_PRECIO || 0);
   const montoBruto = Number((horasRedondeadas * precio).toFixed(2));
   const { monto, politica } = aplicarMinimoSub1h(montoBruto, minsFacturables);
+  const extraviado = ticketEstadoIndicaExtraviado(ticket.ETI_ESTADO);
+  const recargoTicketExtraviado = extraviado ? RECARGO_TICKET_EXTRAVIADO_Q : 0;
+  const recargoPorVencimiento =
+    isVencido && hasCobro
+      ? Number(ticket.COB_MONTO_TOTAL || 0)
+      : 0;
+  const recargoPorVolverCobrar =
+    isVolverCobrar && hasCobro
+      ? Number((monto + recargoTicketExtraviado).toFixed(2))
+      : 0;
+  const montoTotal = Number(
+    (
+      (isVencido && hasCobro
+        ? recargoPorVencimiento
+        : isVolverCobrar && hasCobro
+          ? recargoPorVolverCobrar
+          : monto + recargoTicketExtraviado)
+    ).toFixed(2)
+  );
 
   return {
     ticket: {
@@ -119,6 +162,8 @@ export async function quoteByCodigo(codigo) {
       TIC_CODIGO: ticket.TIC_CODIGO,
       VEH_PLACA: ticket.VEH_PLACA,
       TIC_FECHA_HORA_ENTRADA: ticket.TIC_FECHA_HORA_ENTRADA,
+      ETI_ID: ticket.ETI_ID,
+      ETI_ESTADO: ticket.ETI_ESTADO,
     },
     tarifa: {
       TAR_ID: tarifa.TAR_ID,
@@ -132,7 +177,12 @@ export async function quoteByCodigo(codigo) {
       horasFacturables: Number(horas.toFixed(2)),
       horasCobradas: horasRedondeadas,
     },
-    montoTotal: monto,
+    montoEstadia: monto,
+    recargoTicketExtraviado,
+    recargoPorVencimiento,
+    recargoPorVolverCobrar,
+    extraviado,
+    montoTotal,
     montoMinimoAplicado: monto > montoBruto,
     politicaMinimoSub1h: politica,
     calculadoEn: ahora.toISOString(),
@@ -164,6 +214,111 @@ async function cobroIdentityAlwaysTx(conn) {
   return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
 }
 
+async function bitacoraIncidenteVehiculoIdentityAlwaysTx(conn) {
+  const r = await conn.execute(
+    `SELECT GENERATION_TYPE
+       FROM USER_TAB_IDENTITY_COLS
+      WHERE TABLE_NAME='PAR_BITACORA_INCIDENTE_VEHICULO' AND COLUMN_NAME='BIV_ID'`
+  );
+  return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
+}
+
+async function findIncidenteTicketExtraviadoIdTx(conn) {
+  const r = await conn.execute(
+    `SELECT INC_ID
+       FROM PAR_INCIDENTE
+      WHERE LOWER(INC_TIPO) LIKE '%extrav%'
+         OR LOWER(NVL(INC_DESCRIPCION, '')) LIKE '%extrav%'
+      ORDER BY INC_ID`
+  );
+  return r.rows?.[0]?.INC_ID ?? null;
+}
+
+/**
+ * Bitácora al marcar el ticket como extraviado desde gestión (pendiente hasta cobro/salida).
+ * Requiere al menos un PAR_INCIDENTE cuyo tipo o descripción sugiera «extraviado».
+ */
+/**
+ * Marca como resuelta la bitácora de ticket extraviado vinculada al pago (fecha = cobro).
+ */
+async function resolveBitacoraTicketExtraviadoEnCobroTx(conn, { vehId, ticId, fechaPago }) {
+  if (vehId == null || ticId == null) return;
+  const incId = await findIncidenteTicketExtraviadoIdTx(conn);
+  if (incId == null) return;
+  const mark = `(TIC_ID ${ticId})`;
+  await conn.execute(
+    `UPDATE PAR_BITACORA_INCIDENTE_VEHICULO b
+        SET b.BIV_RESUELTO = 1,
+            b.BIV_FECHA_RESOLUCION = :fh
+      WHERE b.BIV_ID = (
+        SELECT MAX(b2.BIV_ID)
+          FROM PAR_BITACORA_INCIDENTE_VEHICULO b2
+         WHERE b2.VEH_ID = :v
+           AND b2.INC_ID = :inc
+           AND NVL(b2.BIV_RESUELTO, 0) = 0
+           AND b2.BIV_FECHA_RESOLUCION IS NULL
+           AND INSTR(b2.BIV_DESCRIPCION, :mark) > 0
+      )`,
+    { fh: fechaPago, v: vehId, inc: incId, mark }
+  );
+}
+
+async function insertBitacoraTicketExtraviadoDesdeGestionStandalone({ vehId, ticId, ticCodigo, usuId }) {
+  const fecha = new Date();
+  const desc = (
+    `Ticket extraviado (gestión): estado actualizado en PAR_TICKET. Código ${ticCodigo} (TIC_ID ${ticId}). ` +
+    `Pendiente de cobro; al pagar en máquina de cobro se aplica recargo de Q${RECARGO_TICKET_EXTRAVIADO_Q.toFixed(2)} sobre la estadía.`
+  ).slice(0, 950);
+
+  const usuBind =
+    usuId != null && String(usuId).trim() !== '' && !Number.isNaN(Number(usuId)) ? Number(usuId) : null;
+
+  let conn;
+  try {
+    conn = await getConnection();
+    const incId = await findIncidenteTicketExtraviadoIdTx(conn);
+    if (incId == null) {
+      throw new Error(
+        'No hay incidente configurado para ticket extraviado: agrega en PAR_INCIDENTE un INC_TIPO o INC_DESCRIPCION que contenga «extraviado».'
+      );
+    }
+    const identityAlways = await bitacoraIncidenteVehiculoIdentityAlwaysTx(conn);
+    if (identityAlways) {
+      await conn.execute(
+        `INSERT INTO PAR_BITACORA_INCIDENTE_VEHICULO
+          (BIV_DESCRIPCION, BIV_FECHA_HORA, VEH_ID, INC_ID, BIV_RESUELTO, BIV_FECHA_RESOLUCION, USU_ID)
+         VALUES
+          (:d, :fh, :v, :inc, 0, NULL, :usu)`,
+        { d: desc, fh: fecha, v: vehId, inc: incId, usu: usuBind }
+      );
+    } else {
+      const nxt = await conn.execute(
+        `SELECT NVL(MAX(BIV_ID), 0) + 1 AS N FROM PAR_BITACORA_INCIDENTE_VEHICULO`
+      );
+      const bivId = Number(nxt.rows?.[0]?.N ?? nxt.rows?.[0]?.n ?? 1);
+      await conn.execute(
+        `INSERT INTO PAR_BITACORA_INCIDENTE_VEHICULO
+          (BIV_ID, BIV_DESCRIPCION, BIV_FECHA_HORA, VEH_ID, INC_ID, BIV_RESUELTO, BIV_FECHA_RESOLUCION, USU_ID)
+         VALUES
+          (:id, :d, :fh, :v, :inc, 0, NULL, :usu)`,
+        { id: bivId, d: desc, fh: fecha, v: vehId, inc: incId, usu: usuBind }
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw err;
+  } finally {
+    if (conn) await conn.close();
+  }
+}
+
 async function detalleMaquinaTicketIdentityAlwaysTx(conn) {
   const r = await conn.execute(
     `SELECT GENERATION_TYPE
@@ -183,29 +338,237 @@ async function findEstadoPagadoIdTx(conn, fallback) {
   return r.rows?.[0]?.ETI_ID ?? fallback ?? null;
 }
 
+async function findEstadoVencidoIdTx(conn, fallback = null) {
+  const r = await conn.execute(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%venc%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? fallback ?? null;
+}
+
+async function findEstadoVolverCobrarIdTx(conn) {
+  const r = await conn.execute(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%volver%'
+        AND LOWER(ETI_ESTADO) LIKE '%cobr%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? null;
+}
+
+async function findEstadoValidadoIdTx(conn) {
+  const r = await conn.execute(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%valid%'
+      ORDER BY ETI_ID`
+  );
+  return r.rows?.[0]?.ETI_ID ?? null;
+}
+
+function normText(s) {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+async function findEstadoAlertaAtendidaId() {
+  const rows = await executeSql(
+    `SELECT EAL_ID
+       FROM PAR_ESTADO_ALERTA
+      WHERE LOWER(EAL_ESTADO) LIKE '%atendid%'
+         OR LOWER(EAL_ESTADO) LIKE '%resuelt%'
+         OR LOWER(EAL_ESTADO) LIKE '%cerrad%'
+      ORDER BY EAL_ID`
+  );
+  if (rows?.[0]?.EAL_ID != null) return rows[0].EAL_ID;
+  const fb = await executeSql(
+    `SELECT EAL_ID
+       FROM PAR_ESTADO_ALERTA
+      WHERE LOWER(EAL_ESTADO) NOT LIKE '%pend%'
+      ORDER BY EAL_ID`
+  );
+  return fb?.[0]?.EAL_ID ?? null;
+}
+
+async function hasAlertaColumn(columnName) {
+  const rows = await executeSql(
+    `SELECT COUNT(*) AS TOTAL
+       FROM USER_TAB_COLUMNS
+      WHERE TABLE_NAME = 'PAR_ALERTA' AND COLUMN_NAME = :c`,
+    { c: String(columnName || '').toUpperCase() }
+  );
+  return Number(rows?.[0]?.TOTAL || 0) > 0;
+}
+
+async function markGraceAlertAttendedByTicketCode(ticketCode, usuId = null) {
+  if (!ticketCode) return;
+  const ealAtendidaId = await findEstadoAlertaAtendidaId();
+  if (!ealAtendidaId) return;
+  const rows = await executeSql(
+    `SELECT ALE_ID
+       FROM PAR_ALERTA
+      WHERE UPPER(NVL(ALE_DESCRIPCION, '')) LIKE UPPER(:descLike)
+        AND (
+          UPPER(NVL(ALE_MOTIVO, '')) LIKE '%GRACIA%'
+          OR UPPER(NVL(ALE_DESCRIPCION, '')) LIKE '%GRACIA%'
+        )
+      ORDER BY ALE_FECHA_HORA_GENERACION DESC, ALE_ID DESC`,
+    { descLike: `%TICKET ${String(ticketCode).trim()}%` }
+  );
+  const aleId = rows?.[0]?.ALE_ID ?? null;
+  if (!aleId) return;
+  const hasUsuResolvio = await hasAlertaColumn('ALE_USU_ID_RESOLVIO');
+  const hasDescSolucion = await hasAlertaColumn('ALE_DESCRIPCION_SOLUCION');
+  const sets = [
+    'EAL_ID = :ealId',
+    'ALE_FECHA_ATENCION = NVL(ALE_FECHA_ATENCION, SYSDATE)',
+  ];
+  const binds = { ealId: ealAtendidaId, aleId };
+  if (hasUsuResolvio && usuId != null && String(usuId).trim() !== '') {
+    sets.push('ALE_USU_ID_RESOLVIO = :usuId');
+    binds.usuId = Number(usuId);
+  }
+  if (hasDescSolucion) {
+    sets.push('ALE_DESCRIPCION_SOLUCION = :descSol');
+    binds.descSol = 'Se le cambió el estado de vencido a volver a cobrar desde el panel de admin.';
+  }
+  await executeSql(
+    `UPDATE PAR_ALERTA
+        SET ${sets.join(', ')}
+      WHERE ALE_ID = :aleId`,
+    binds,
+    { autoCommit: true }
+  );
+}
+
+/** Comprobante estilo ticket térmico (~105 mm ancho). */
+const RECEIPT_PAGE_W = Math.round((105 / 25.4) * 72);
+const RECEIPT_PAGE_H = 480;
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatReciboFechaLinea(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const yyyy = date.getFullYear();
+  const mm = pad2(date.getMonth() + 1);
+  const dd = pad2(date.getDate());
+  let wd = date.toLocaleDateString('es-GT', { weekday: 'short' });
+  wd = String(wd || '').replace(/\./g, '').trim().toUpperCase();
+  return `${time} ${yyyy}-${mm}-${dd} ${wd}`;
+}
+
+function receiptNitDisplay(cobNit) {
+  const s = String(cobNit ?? '').trim();
+  if (!s || /^cf$/i.test(s)) return 'C / F';
+  return s;
+}
+
+function horasEstadiaAHorasMinutos(decHoras) {
+  const n = Number(decHoras);
+  if (!Number.isFinite(n) || n < 0) return '0 Horas 0 Minutos';
+  const totalMin = Math.round(n * 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${h} Horas ${m} Minutos`;
+}
+
+function receiptRowTwoCol(doc, leftX, innerW, y, label, value) {
+  const gap = 8;
+  const lw = innerW * 0.38;
+  const rw = innerW - lw - gap;
+  doc.fillColor('#000000').font('Helvetica').fontSize(9);
+  const lab = String(label);
+  const val = String(value ?? '—');
+  const hLabel = doc.heightOfString(lab, { width: lw });
+  const hVal = doc.heightOfString(val, { width: rw });
+  const h = Math.max(hLabel, hVal, 11) + 3;
+  doc.text(lab, leftX, y, { width: lw, align: 'left' });
+  doc.text(val, leftX + lw + gap, y, { width: rw, align: 'right' });
+  return y + h;
+}
+
 function buildPdfBuffer({ ticket, cobro }) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const doc = new PDFDocument({ margin: 42, size: 'A4' });
+    const doc = new PDFDocument({
+      size: [RECEIPT_PAGE_W, RECEIPT_PAGE_H],
+      margin: 28,
+    });
     doc.on('data', (c) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(18).text('Comprobante de pago', { align: 'center' });
-    doc.moveDown(1);
-    doc.fontSize(11);
-    doc.text(`Ticket: ${ticket.TIC_CODIGO} (ID ${ticket.TIC_ID})`);
-    doc.text(`Vehiculo: ${ticket.VEH_PLACA || 'N/D'}`);
-    doc.text(`Hora entrada: ${new Date(ticket.TIC_FECHA_HORA_ENTRADA).toLocaleString('es-GT')}`);
-    doc.text(`Hora pago: ${new Date(cobro.COB_FECHA_HORA).toLocaleString('es-GT')}`);
-    doc.text(`Tiempo estadia (horas): ${cobro.COB_HORAS_TOTALES}`);
-    doc.text(`Monto cobrado: Q${Number(cobro.COB_MONTO_TOTAL || 0).toFixed(2)}`);
-    doc.text(`Monto recibido: Q${Number(cobro.COB_MONTO_RECIBIDO || 0).toFixed(2)}`);
-    doc.text(`Vuelto: Q${Number(cobro.COB_VUELTO || 0).toFixed(2)}`);
-    doc.text(`NIT/CF: ${cobro.COB_NIT || 'N/D'}`);
-    doc.text(`Tipo cobro (TCO_ID): ${cobro.TCO_ID}`);
-    doc.moveDown(1);
-    doc.text('Gracias por su visita.', { align: 'center' });
+    const margin = 28;
+    const leftX = margin;
+    const innerW = RECEIPT_PAGE_W - margin * 2;
+    let y = margin;
+
+    doc.fillColor('#000000');
+    doc.font('Helvetica-Bold').fontSize(13);
+    doc.text('GESTOR PARQUEO', leftX, y, { width: innerW, align: 'center' });
+    y += 16;
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Grupo 8', leftX, y, { width: innerW, align: 'center' });
+    y += 14;
+    doc.font('Helvetica').fontSize(8.5);
+    const nitTxt = receiptNitDisplay(cobro.COB_NIT);
+    const clienteNombre = String(cobro.RECEIPT_CLIENTE_NOMBRE || '').trim() || '—';
+    doc.text(`NIT: ${nitTxt}`, leftX, y, { width: innerW, align: 'center' });
+    y += 11;
+    doc.text(`Cliente: ${clienteNombre}`, leftX, y, { width: innerW, align: 'center' });
+    y += 16;
+
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text(`Recibo No: ${cobro.COB_ID}`, leftX, y, { width: innerW, align: 'center' });
+    y += 13;
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.text(`Placa: ${ticket.VEH_PLACA || 'N/D'}`, leftX, y, { width: innerW, align: 'center' });
+    y += 18;
+
+    const tarifaDesc = String(cobro.TAR_TIPO || '—').trim() || '—';
+    const medioPago = String(cobro.TIPO_COBRO_DESC || '').trim() || `Tipo cobro (${cobro.TCO_ID})`;
+    const maqCobro = String(cobro.MAQ_COBRO_CODIGO || '').trim() || 'N/D';
+    const entradaAt = ticket.TIC_FECHA_HORA_ENTRADA;
+    const salidaAt = cobro.COB_FECHA_HORA;
+
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Tarifa:', tarifaDesc);
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Entrada:', formatReciboFechaLinea(entradaAt));
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Salida:', formatReciboFechaLinea(salidaAt));
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Tiempo:', horasEstadiaAHorasMinutos(cobro.COB_HORAS_TOTALES));
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Máquina de cobro:', maqCobro);
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Medio de pago:', medioPago);
+    y = receiptRowTwoCol(
+      doc,
+      leftX,
+      innerW,
+      y,
+      'Monto recibido:',
+      `Q${Number(cobro.COB_MONTO_RECIBIDO || 0).toFixed(2)}`,
+    );
+    y = receiptRowTwoCol(doc, leftX, innerW, y, 'Vuelto:', `Q${Number(cobro.COB_VUELTO || 0).toFixed(2)}`);
+    y += 8;
+
+    const barH = 22;
+    const totalStr = `Q${Number(cobro.COB_MONTO_TOTAL || 0).toFixed(2)}`;
+    doc.fillColor('#000000').rect(leftX, y, innerW, barH).fill();
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11);
+    doc.text('TOTAL:', leftX + 8, y + 5);
+    doc.text(totalStr, leftX, y + 5, { width: innerW - 8, align: 'right' });
+    doc.fillColor('#000000');
+    y += barH + 14;
+
+    doc.font('Helvetica').fontSize(9);
+    doc.text('Gracias por su visita.', leftX, y, { width: innerW, align: 'center' });
+
     doc.end();
   });
 }
@@ -283,30 +646,90 @@ async function alertaIdentityAlwaysTx(conn) {
   return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
 }
 
-async function buildEntryTicketPdfBuffer({ ticket, vehiculo }) {
-  const qrDataUrl = await QRCode.toDataURL(ticket.TIC_CODIGO, { margin: 1, scale: 6 });
+/** ~80 mm ticket térmico (puntos @72 dpi). */
+const ENTRY_TICKET_PAGE_W = Math.round((80 / 25.4) * 72);
+/** Alto acotado al contenido; el pie va pegado a la última línea (sin hueco grande abajo). */
+const ENTRY_TICKET_PAGE_H = 400;
+
+function formatTicketThermalDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${String(date.getFullYear()).slice(-2)} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function drawThermalGrupo8Mark(doc, cx, cy, boxW, boxH) {
+  doc.save();
+  doc.rect(cx - boxW / 2, cy - boxH / 2, boxW, boxH).fill('#000000');
+  doc.fillColor('#ffffff').font('Courier-Bold').fontSize(6.2);
+  doc.text('Grupo 8', cx - boxW / 2, cy - 3.2, { width: boxW, align: 'center' });
+  doc.restore();
+}
+
+async function buildEntryTicketPdfBuffer({ ticket, maquinaEntradaLabel }) {
+  const qrDataUrl = await QRCode.toDataURL(String(ticket.TIC_CODIGO || ''), {
+    margin: 1,
+    errorCorrectionLevel: 'M',
+    width: 320,
+  });
   const qrBase64 = qrDataUrl.split(',')[1];
   const qrBuffer = Buffer.from(qrBase64, 'base64');
 
+  const machineLabel = String(maquinaEntradaLabel || '').trim() || 'N/D';
+  const fechaLine = formatTicketThermalDate(ticket.TIC_FECHA_HORA_ENTRADA);
+
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const doc = new PDFDocument({ margin: 42, size: 'A4' });
+    const doc = new PDFDocument({
+      size: [ENTRY_TICKET_PAGE_W, ENTRY_TICKET_PAGE_H],
+      margin: 14,
+      autoFirstPage: true,
+    });
     doc.on('data', (c) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(18).text('Ticket de entrada', { align: 'center' });
-    doc.moveDown(0.8);
-    doc.fontSize(11);
-    doc.text(`Codigo ticket: ${ticket.TIC_CODIGO}`);
-    doc.text(`Ticket ID: ${ticket.TIC_ID}`);
-    doc.text(`Placa: ${vehiculo.VEH_PLACA || 'N/D'}`);
-    doc.text(`Modelo: ${vehiculo.VEH_MODELO || 'N/D'}`);
-    doc.text(`Color: ${vehiculo.VEH_COLOR || 'N/D'}`);
-    doc.text(`Hora entrada: ${new Date(ticket.TIC_FECHA_HORA_ENTRADA).toLocaleString('es-GT')}`);
-    doc.moveDown(0.8);
-    doc.text('QR para lectura en salida/cobro:');
-    doc.image(qrBuffer, { fit: [220, 220], align: 'center' });
+    const margin = 14;
+    const leftX = margin;
+    const innerW = ENTRY_TICKET_PAGE_W - margin * 2;
+
+    doc.fillColor('#000000');
+    doc.font('Courier').fontSize(9);
+
+    const qrSize = Math.min(168, innerW);
+    const qrX = leftX + (innerW - qrSize) / 2;
+    doc.image(qrBuffer, qrX, doc.y, { width: qrSize, height: qrSize });
+    doc.y += qrSize + 18;
+
+    const centerBlock = (size, text, gapAfter = 6) => {
+      doc.font('Courier').fontSize(size);
+      doc.text(text, leftX, doc.y, { width: innerW, align: 'center' });
+      doc.y += gapAfter;
+    };
+
+    centerBlock(9, 'Tarifa de Parqueo', 5);
+    centerBlock(11, 'BIENVENIDOS', 6);
+    centerBlock(9, 'Gestor de Parqueo', 7);
+    centerBlock(8, 'Ticket No.', 5);
+    doc.font('Courier-Bold').fontSize(10);
+    doc.text(String(ticket.TIC_CODIGO || ''), leftX, doc.y, { width: innerW, align: 'center' });
+    doc.y += 6;
+    doc.font('Courier').fontSize(8.5);
+    doc.text(fechaLine, leftX, doc.y, { width: innerW, align: 'center' });
+    doc.y += 10;
+
+    doc.font('Courier').fontSize(7.5);
+    const markBoxW = 52;
+    const markBoxH = 14;
+    const gapMark = 8;
+    const leftColW = Math.max(28, innerW - markBoxW - gapMark);
+    const footerY = doc.y;
+    const markCx = leftX + leftColW + gapMark + markBoxW / 2;
+
+    doc.text(machineLabel, leftX, footerY, { width: leftColW, align: 'left' });
+    drawThermalGrupo8Mark(doc, markCx, footerY + markBoxH / 2, markBoxW, markBoxH);
+    doc.fillColor('#000000').font('Courier').fontSize(7.5);
+
     doc.end();
   });
 }
@@ -315,7 +738,7 @@ export async function generateEntryTicket({
   VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, MAQ_ID,
 }) {
   const placa = String(VEH_PLACA || '').trim().toUpperCase();
-  if (!placa) throw new Error('VEH_PLACA es requerido');
+  if (!placa) throw new Error('La placa es obligatoria.');
   if (!TVE_ID) throw new Error('TVE_ID es requerido');
   if (!MAQ_ID) throw new Error('MAQ_ID es requerido');
 
@@ -327,7 +750,7 @@ export async function generateEntryTicket({
       { placa }
     );
     if (placaExist.rows?.length) {
-      throw new Error('Ya existe un vehiculo con la misma VEH_PLACA');
+      throw new Error('Ya existe un vehículo con la misma placa.');
     }
 
     const tipoVehiculo = await conn.execute(
@@ -475,15 +898,32 @@ export async function generateEntryTicket({
 export async function generateEntryTicketPdfByTicketId(ticketId) {
   const rows = await executeSql(
     `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA,
-            v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR
+            v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+            m.MAQ_CODIGO AS MAQ_ENTRADA_CODIGO
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
+       LEFT JOIN PAR_DETALLE_MAQUINA_TICKET d
+         ON d.TIC_ID = t.TIC_ID
+        AND d.DMT_TRANSACCION = 'GENERACION_TICKET'
+        AND d.DMT_ID = (
+              SELECT MIN(d2.DMT_ID)
+                FROM PAR_DETALLE_MAQUINA_TICKET d2
+               WHERE d2.TIC_ID = t.TIC_ID
+                 AND d2.DMT_TRANSACCION = 'GENERACION_TICKET'
+            )
+       LEFT JOIN PAR_MAQUINA m ON m.MAQ_ID = d.MAQ_ID
       WHERE t.TIC_ID = :ticketId`,
     { ticketId }
   );
   const row = rows[0];
   if (!row) throw new Error('Ticket no encontrado');
-  const pdfBuffer = await buildEntryTicketPdfBuffer({ ticket: row, vehiculo: row });
+  const maquinaEntradaLabel = row.MAQ_ENTRADA_CODIGO != null && String(row.MAQ_ENTRADA_CODIGO).trim()
+    ? String(row.MAQ_ENTRADA_CODIGO).trim()
+    : 'N/D';
+  const pdfBuffer = await buildEntryTicketPdfBuffer({
+    ticket: row,
+    maquinaEntradaLabel,
+  });
   return {
     pdfBuffer,
     fileName: `ticket-entrada-${row.TIC_ID}.pdf`,
@@ -516,8 +956,10 @@ export async function checkoutByCodigo({
 
     const tRes = await conn.execute(
       `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA, t.ETI_ID, t.VEH_ID,
-              c.COB_ID AS COB_ID
+              et.ETI_ESTADO,
+              c.COB_ID AS COB_ID, c.COB_MONTO_TOTAL AS COB_MONTO_TOTAL
          FROM PAR_TICKET t
+         JOIN PAR_ESTADO_TICKET et ON et.ETI_ID = t.ETI_ID
          LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
         WHERE UPPER(TRIM(t.TIC_CODIGO)) = UPPER(TRIM(:codigo))
         FOR UPDATE OF t.TIC_ID`,
@@ -525,7 +967,11 @@ export async function checkoutByCodigo({
     );
     const ticket = tRes.rows?.[0];
     if (!ticket) throw new Error('Ticket no reconocido');
-    if (ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '') throw new Error('Ticket ya saldado');
+    const estadoTicketNorm = String(ticket.ETI_ESTADO || '').toLowerCase();
+    const isVencido = estadoTicketNorm.includes('venc');
+    const isVolverCobrar = estadoTicketNorm.includes('volver') && estadoTicketNorm.includes('cobr');
+    const hasCobro = ticket.COB_ID != null && String(ticket.COB_ID).trim() !== '';
+    if (hasCobro && !isVencido && !isVolverCobrar) throw new Error('Ticket ya saldado');
 
     const tipoCobro = await conn.execute(
       `SELECT TCO_ID FROM PAR_TIPO_COBRO WHERE TCO_ID = :id`,
@@ -548,6 +994,25 @@ export async function checkoutByCodigo({
     const precio = Number(tarifa.TAR_PRECIO || 0);
     const montoBruto = Number((horasCobradas * precio).toFixed(2));
     const { monto } = aplicarMinimoSub1h(montoBruto, minsFacturables);
+    const extraviado = ticketEstadoIndicaExtraviado(ticket.ETI_ESTADO);
+    const recargoTicketExtraviado = extraviado ? RECARGO_TICKET_EXTRAVIADO_Q : 0;
+    const recargoPorVencimiento =
+      isVencido && hasCobro
+        ? Number(ticket.COB_MONTO_TOTAL || 0)
+        : 0;
+    const recargoPorVolverCobrar =
+      isVolverCobrar && hasCobro
+        ? Number((monto + recargoTicketExtraviado).toFixed(2))
+        : 0;
+    const montoTotalCobro = Number(
+      (
+        (isVencido && hasCobro
+          ? recargoPorVencimiento
+          : isVolverCobrar && hasCobro
+            ? recargoPorVolverCobrar
+            : monto + recargoTicketExtraviado)
+      ).toFixed(2)
+    );
 
     const maqTipo = await conn.execute(
       `SELECT tm.TMA_TIPO
@@ -562,10 +1027,10 @@ export async function checkoutByCodigo({
     }
 
     const montoRecibido = Number(COB_MONTO_RECIBIDO);
-    if (!Number.isFinite(montoRecibido) || montoRecibido < monto) {
+    if (!Number.isFinite(montoRecibido) || montoRecibido < montoTotalCobro) {
       throw new Error('El monto recibido debe ser mayor o igual al monto total');
     }
-    const vuelto = Number((montoRecibido - monto).toFixed(2));
+    const vuelto = Number((montoRecibido - montoTotalCobro).toFixed(2));
 
     let ingresoMap = null;
     if (BILLETES_INGRESO && typeof BILLETES_INGRESO === 'object') {
@@ -585,7 +1050,26 @@ export async function checkoutByCodigo({
     }
 
     let cobId;
-    if (await cobroIdentityAlwaysTx(conn)) {
+    if ((isVencido || isVolverCobrar) && hasCobro) {
+      cobId = Number(ticket.COB_ID);
+      await conn.execute(
+        `UPDATE PAR_COBRO
+            SET COB_MONTO_TOTAL = NVL(COB_MONTO_TOTAL, 0) + :extra,
+                COB_MONTO_RECIBIDO = NVL(COB_MONTO_RECIBIDO, 0) + :recibido,
+                COB_VUELTO = NVL(COB_VUELTO, 0) + :vuelto,
+                COB_FECHA_HORA = :fecha,
+                COB_PROCESADO_MAQUINA = :procesado
+          WHERE COB_ID = :cobId`,
+        {
+          extra: montoTotalCobro,
+          recibido: montoRecibido,
+          vuelto,
+          fecha: ahora,
+          procesado: Number(COB_PROCESADO_MAQUINA) ? 1 : 0,
+          cobId,
+        }
+      );
+    } else if (await cobroIdentityAlwaysTx(conn)) {
       const ins = await conn.execute(
         `INSERT INTO PAR_COBRO
           (COB_HORAS_TOTALES, TCO_ID, TIC_ID, COB_MONTO_TOTAL, COB_MONTO_RECIBIDO, COB_VUELTO,
@@ -598,7 +1082,7 @@ export async function checkoutByCodigo({
           COB_HORAS_TOTALES: Number(horas.toFixed(2)),
           TCO_ID,
           TIC_ID: ticket.TIC_ID,
-          COB_MONTO_TOTAL: monto,
+          COB_MONTO_TOTAL: montoTotalCobro,
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
@@ -624,7 +1108,7 @@ export async function checkoutByCodigo({
           COB_HORAS_TOTALES: Number(horas.toFixed(2)),
           TCO_ID,
           TIC_ID: ticket.TIC_ID,
-          COB_MONTO_TOTAL: monto,
+          COB_MONTO_TOTAL: montoTotalCobro,
           COB_MONTO_RECIBIDO: montoRecibido,
           COB_VUELTO: vuelto,
           COB_FECHA_HORA: ahora,
@@ -633,6 +1117,14 @@ export async function checkoutByCodigo({
           COB_NIT: cobNit,
         }
       );
+    }
+
+    if (extraviado) {
+      await resolveBitacoraTicketExtraviadoEnCobroTx(conn, {
+        vehId: ticket.VEH_ID,
+        ticId: ticket.TIC_ID,
+        fechaPago: ahora,
+      });
     }
 
     const etiPagadoId = await findEstadoPagadoIdTx(conn, ticket.ETI_ID);
@@ -702,7 +1194,12 @@ export async function checkoutByCodigo({
       COB_ID: cobId,
       TCO_ID,
       COB_NIT: cobNit,
-      montoTotal: monto,
+      montoEstadia: monto,
+      recargoTicketExtraviado,
+      recargoPorVencimiento,
+      recargoPorVolverCobrar,
+      extraviado,
+      montoTotal: montoTotalCobro,
       horasCobradas,
       COB_MONTO_RECIBIDO: montoRecibido,
       COB_VUELTO: vuelto,
@@ -781,6 +1278,14 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
     const withinGrace = minsDesdePago <= graceMins;
 
     if (!withinGrace) {
+      const etiVencidoId = await findEstadoVencidoIdTx(conn, ticket.ETI_ID);
+      await conn.execute(
+        `UPDATE PAR_TICKET
+            SET ETI_ID = :etiId
+          WHERE TIC_ID = :ticId`,
+        { etiId: etiVencidoId, ticId: ticket.TIC_ID }
+      );
+
       const ealId = await findEstadoAlertaPendienteIdTx(conn);
       const talId = await findTipoAlertaTiempoGraciaIdTx(conn);
       if (!ealId || !talId) {
@@ -816,8 +1321,20 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
         );
       }
       await conn.commit();
-      throw new Error('Salida bloqueada: tiempo de gracia superado, solicita asistencia');
+      throw new Error('Salida bloqueada: tiempo de gracia superado, ticket vencido; dirigete a la maquina de cobro');
     }
+
+    const etiValidadoId = await findEstadoValidadoIdTx(conn);
+    if (!etiValidadoId) {
+      throw new Error('No existe estado de ticket «Validado» en PAR_ESTADO_TICKET');
+    }
+    await conn.execute(
+      `UPDATE PAR_TICKET
+          SET TIC_FECHA_HORA_SALIDA = :fhSalida,
+              ETI_ID = :etiId
+        WHERE TIC_ID = :ticId`,
+      { fhSalida: now, etiId: etiValidadoId, ticId: ticket.TIC_ID }
+    );
 
     const dmtIdentity = await detalleMaquinaTicketIdentityAlwaysTx(conn);
     if (dmtIdentity) {
@@ -877,10 +1394,63 @@ export async function getReceiptDataByTicketId(ticketId) {
     `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA,
             v.VEH_PLACA,
             c.COB_ID, c.COB_HORAS_TOTALES, c.COB_MONTO_TOTAL, c.COB_MONTO_RECIBIDO, c.COB_VUELTO,
-            c.COB_FECHA_HORA, c.COB_NIT, c.TCO_ID
+            c.COB_FECHA_HORA, c.COB_NIT, c.TCO_ID, c.TAR_ID,
+            tar.TAR_TIPO,
+            tp.TCO_TIPO AS TIPO_COBRO_DESC,
+            m.MAQ_CODIGO AS MAQ_COBRO_CODIGO,
+            CASE
+              WHEN UPPER(TRIM(NVL(c.COB_NIT, ''))) = 'CF' OR TRIM(NVL(c.COB_NIT, '')) IS NULL THEN 'Consumidor final'
+              ELSE NVL(
+                NULLIF(
+                  TRIM(
+                    REGEXP_REPLACE(
+                      NVL(cl.CLI_PRIMER_NOMBRE, '') || ' ' || NVL(cl.CLI_SEGUNDO_NOMBRE, '') || ' ' ||
+                      NVL(cl.CLI_PRIMER_APELLIDO, '') || ' ' || NVL(cl.CLI_SEGUNDO_APELLIDO, ''),
+                      '[[:space:]]+',
+                      ' '
+                    )
+                  ),
+                  ''
+                ),
+                NVL(
+                  (SELECT TRIM(
+                            REGEXP_REPLACE(
+                              NVL(c2.CLI_PRIMER_NOMBRE, '') || ' ' || NVL(c2.CLI_SEGUNDO_NOMBRE, '') || ' ' ||
+                              NVL(c2.CLI_PRIMER_APELLIDO, '') || ' ' || NVL(c2.CLI_SEGUNDO_APELLIDO, ''),
+                              '[[:space:]]+',
+                              ' '
+                            )
+                          )
+                     FROM PAR_CLIENTE c2
+                    WHERE c2.CLI_ID = (
+                          SELECT MAX(c3.CLI_ID)
+                            FROM PAR_CLIENTE c3
+                           WHERE c3.CLI_NIT IS NOT NULL
+                             AND REGEXP_REPLACE(UPPER(TRIM(c3.CLI_NIT)), '[^0-9A-Z]', '') =
+                                 REGEXP_REPLACE(UPPER(TRIM(c.COB_NIT)), '[^0-9A-Z]', '')
+                        )),
+                  'Sin datos de cliente'
+                )
+              )
+            END AS RECEIPT_CLIENTE_NOMBRE
        FROM PAR_TICKET t
        LEFT JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
-       JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
+       LEFT JOIN PAR_CLIENTE cl ON cl.CLI_ID = v.CLI_ID
+       JOIN PAR_COBRO c
+         ON c.TIC_ID = t.TIC_ID
+        AND c.COB_ID = (SELECT MAX(c2.COB_ID) FROM PAR_COBRO c2 WHERE c2.TIC_ID = t.TIC_ID)
+       LEFT JOIN PAR_TARIFA tar ON tar.TAR_ID = c.TAR_ID
+       LEFT JOIN PAR_TIPO_COBRO tp ON tp.TCO_ID = c.TCO_ID
+       LEFT JOIN PAR_DETALLE_MAQUINA_TICKET d
+         ON d.TIC_ID = t.TIC_ID
+        AND d.DMT_TRANSACCION = 'PROCESAMIENTO_COBRO'
+        AND d.DMT_ID = (
+              SELECT MAX(d2.DMT_ID)
+                FROM PAR_DETALLE_MAQUINA_TICKET d2
+               WHERE d2.TIC_ID = t.TIC_ID
+                 AND d2.DMT_TRANSACCION = 'PROCESAMIENTO_COBRO'
+            )
+       LEFT JOIN PAR_MAQUINA m ON m.MAQ_ID = d.MAQ_ID
       WHERE t.TIC_ID = :ticketId`,
     { ticketId }
   );
@@ -890,9 +1460,16 @@ export async function getReceiptDataByTicketId(ticketId) {
 export async function generateReceiptPdfByTicketId(ticketId) {
   const row = await getReceiptDataByTicketId(ticketId);
   if (!row) throw new Error('No se encontró comprobante para el ticket');
+  let data = row;
+  if (!String(data.TAR_TIPO || '').trim()) {
+    const tar = await getTarifaVigente();
+    if (tar?.TAR_TIPO) {
+      data = { ...data, TAR_TIPO: tar.TAR_TIPO };
+    }
+  }
   const pdfBuffer = await buildPdfBuffer({
-    ticket: row,
-    cobro: row,
+    ticket: data,
+    cobro: data,
   });
   return {
     pdfBuffer,
@@ -965,7 +1542,10 @@ export async function create(data) {
   return getById(ticId);
 }
 
-export async function update(id, data) {
+export async function update(id, data, opts = {}) {
+  const prev = await getById(id);
+  if (!prev) throw new Error('Ticket no encontrado');
+
   await executeProcedure(
     `BEGIN SP_TICKET_UPDATE(:id, :TIC_FECHA_HORA_SALIDA, :ETI_ID); END;`,
     {
@@ -974,7 +1554,48 @@ export async function update(id, data) {
       ETI_ID: data.ETI_ID ?? null,
     }
   );
-  return getById(id);
+
+  const rowsEtiEx = await executeSql(
+    `SELECT ETI_ID
+       FROM PAR_ESTADO_TICKET
+      WHERE LOWER(ETI_ESTADO) LIKE '%extrav%'
+      ORDER BY ETI_ID`
+  );
+  const etiExtraviadoId = rowsEtiEx[0]?.ETI_ID ?? rowsEtiEx[0]?.eti_id ?? null;
+  const updated = await getById(id);
+  const nuevoEti = updated?.ETI_ID ?? updated?.eti_id ?? null;
+  const prevEti = prev?.ETI_ID ?? prev?.eti_id ?? null;
+  const prevEstadoNorm = normText(prev?.ETI_ESTADO ?? prev?.eti_estado);
+  const nextEstadoNorm = normText(updated?.ETI_ESTADO ?? updated?.eti_estado);
+
+  if (
+    etiExtraviadoId != null
+    && nuevoEti != null
+    && String(nuevoEti) === String(etiExtraviadoId)
+    && String(prevEti || '') !== String(etiExtraviadoId)
+  ) {
+    const vehId = updated?.VEH_ID ?? updated?.veh_id ?? prev?.VEH_ID ?? prev?.veh_id;
+    const codigo = updated?.TIC_CODIGO ?? updated?.tic_codigo ?? prev?.TIC_CODIGO ?? prev?.tic_codigo;
+    if (vehId != null && codigo) {
+      await insertBitacoraTicketExtraviadoDesdeGestionStandalone({
+        vehId,
+        ticId: id,
+        ticCodigo: String(codigo),
+        usuId: opts.usuIdBitacoraExtraviado ?? null,
+      });
+    }
+  }
+
+  if (
+    prevEstadoNorm.includes('venc')
+    && nextEstadoNorm.includes('volver')
+    && nextEstadoNorm.includes('cobr')
+  ) {
+    const codigo = updated?.TIC_CODIGO ?? updated?.tic_codigo ?? prev?.TIC_CODIGO ?? prev?.tic_codigo ?? null;
+    await markGraceAlertAttendedByTicketCode(codigo, opts?.usuIdAlertaAtendida ?? null);
+  }
+
+  return updated;
 }
 
 async function findEstadoTicketExtraviadoTx(conn) {
@@ -989,7 +1610,7 @@ async function findEstadoTicketExtraviadoTx(conn) {
 /** Protocolo ticket extraviado: marca estado y devuelve cotización vigente. */
 export async function prepararTicketExtraviadoPorPlaca(vehPlaca) {
   const placa = String(vehPlaca || '').trim().toUpperCase();
-  if (!placa) throw new Error('VEH_PLACA es requerido');
+  if (!placa) throw new Error('La placa es obligatoria.');
   let conn;
   try {
     conn = await getConnection();

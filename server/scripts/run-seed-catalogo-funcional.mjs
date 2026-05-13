@@ -1,6 +1,6 @@
 /**
- * Ejecuta database/seed_catalogos_hu.sql contra Oracle (misma conexión que .env).
- * Uso (desde carpeta server): node scripts/run-seed-catalogos.mjs
+ * Ejecuta database/seed_catalogo_funcional.sql contra Oracle (misma conexión que .env).
+ * Uso (desde carpeta server): npm run db:seed-catalogo-funcional
  */
 import dotenv from 'dotenv';
 import fs from 'fs';
@@ -13,6 +13,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 
+/** Comentarios `--` y terminador `/` de SQL*Plus (oracledb.execute no admite `/` suelto al final). */
 function prepareSeedSql(raw) {
   let s = raw.replace(/--[^\r\n]*/g, '');
   const lines = s.split(/\r?\n/);
@@ -30,7 +31,7 @@ async function main() {
     process.exit(1);
   }
 
-  const sqlPath = path.join(__dirname, '../../database/seed_catalogos_hu.sql');
+  const sqlPath = path.join(__dirname, '../../database/seed_catalogo_funcional.sql');
   if (!fs.existsSync(sqlPath)) {
     console.error('No existe:', sqlPath);
     process.exit(1);
@@ -46,9 +47,9 @@ async function main() {
   const conn = await oracledb.getConnection({ user, password, connectString });
   try {
     await conn.execute(sql);
-    console.log('OK: ejecutado seed_catalogos_hu.sql (bloque PL/SQL completo)');
+    console.log('OK: ejecutado seed_catalogo_funcional.sql (bloque PL/SQL completo)');
     await conn.commit();
-    console.log('Hecho: seed_catalogos_hu.sql aplicado (COMMIT).');
+    console.log('Hecho: seed_catalogo_funcional.sql aplicado (COMMIT).');
   } catch (e) {
     await conn.rollback();
     throw e;

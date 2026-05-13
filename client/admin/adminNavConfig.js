@@ -20,6 +20,7 @@ export const ADMIN_NAV_ROUTES = [
     entityKeys: [
       'cliente',
       'membresia',
+      'detalle-pago-membresia',
       'vehiculo',
       'tipo-vehiculo',
       'tipo-membresia',
@@ -36,6 +37,7 @@ export const ADMIN_NAV_ROUTES = [
     entityKeys: [
       'estado-ticket',
       'ticket',
+      'cliente',
       'vehiculo',
       'cobro',
       'tipo-cobro',

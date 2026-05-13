@@ -3,11 +3,13 @@ import { executeProcedure, executeSql, getConnection } from '../db/oracle.js';
 import { buildMemCodigo, buildTagPdfBuffer } from '../utils/tag.js';
 import { sendTagMail } from '../utils/mailer.js';
 import {
+  assignDynamicMembershipSpaceTx,
   afterMembresiaCreatedSetEspacioReservadoLibre,
   setMembresiaEspacioReservadoLibreTx,
   setMembresiaEspacioReservadoOcupadoTx,
 } from './espacioCapacity.js';
 import { insertSystemAlerta } from '../utils/systemAlert.js';
+import { isTipoMaquinaEntrada } from '../utils/tipoMaquinaRules.js';
 
 function norm(s) {
   return String(s ?? '')
@@ -28,10 +30,12 @@ SELECT m.MEM_ID,
        m.MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
        m.EME_ID, em.EME_ESTADO,
        m.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.CLI_ID,
+       c.CLI_PRIMER_NOMBRE, c.CLI_SEGUNDO_NOMBRE, c.CLI_PRIMER_APELLIDO, c.CLI_SEGUNDO_APELLIDO,
        m.ESP_ID, e.ESP_CODIGO, e.ESP_UBICACION
 FROM PAR_MEMBRESIA m
 JOIN PAR_TIPO_MEMBRESIA tm ON m.TME_ID = tm.TME_ID
 JOIN PAR_VEHICULO v ON m.VEH_ID = v.VEH_ID
+LEFT JOIN PAR_CLIENTE c ON v.CLI_ID = c.CLI_ID
 JOIN PAR_ESPACIO e ON m.ESP_ID = e.ESP_ID
 LEFT JOIN PAR_ESTADO_MEMBRESIA em ON m.EME_ID = em.EME_ID
 `;
@@ -145,7 +149,17 @@ export async function create(data) {
     throw new Error('Falta la columna MEM_CODIGO en PAR_MEMBRESIA. Esta HU requiere persistir ese valor en base de datos.');
   }
   await validateVehiculoParaMembresia(data.VEH_ID);
-  await validateEspacioDisponible(data.ESP_ID);
+  let espId = data.ESP_ID;
+  if (espId == null || String(espId).trim() === '') {
+    let conn;
+    try {
+      conn = await getConnection();
+      espId = await assignDynamicMembershipSpaceTx(conn);
+    } finally {
+      if (conn) await conn.close();
+    }
+  }
+  await validateEspacioDisponible(espId);
   const now = new Date();
   const fechaInicio = data.MEM_FECHA_INICIO ? new Date(data.MEM_FECHA_INICIO) : now;
   const diasTipo = await loadDuracionTipoMembresia(data.TME_ID);
@@ -170,7 +184,7 @@ export async function create(data) {
           ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
           : now,
         VEH_ID: data.VEH_ID ?? null,
-        ESP_ID: data.ESP_ID ?? null,
+        ESP_ID: espId ?? null,
       },
       { autoCommit: true }
     );
@@ -179,17 +193,17 @@ export async function create(data) {
          FROM PAR_MEMBRESIA
         WHERE VEH_ID = :vehId AND ESP_ID = :espId
         ORDER BY MEM_ID DESC`,
-      { vehId: data.VEH_ID ?? null, espId: data.ESP_ID ?? null }
+      { vehId: data.VEH_ID ?? null, espId: espId ?? null }
     );
     const memId = rows[0]?.MEM_ID;
     if (!memId) return null;
     const persisted = await persistMemCodigo(memId, fechaInicio);
     try {
-      await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
+      await afterMembresiaCreatedSetEspacioReservadoLibre(espId);
     } catch (e) {
       await insertSystemAlerta({
         motivo: 'Membresía creada pero no se actualizó estado del espacio',
-        descripcion: `ESP_ID ${data.ESP_ID}: ${e?.message || e}`,
+        descripcion: `ESP_ID ${espId}: ${e?.message || e}`,
       });
     }
     const created = await getById(memId);
@@ -208,16 +222,16 @@ export async function create(data) {
         ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
         : now,
       VEH_ID: data.VEH_ID ?? null,
-      ESP_ID: data.ESP_ID ?? null,
+      ESP_ID: espId ?? null,
     }
   );
   const persisted = await persistMemCodigo(data.MEM_ID, fechaInicio);
   try {
-    await afterMembresiaCreatedSetEspacioReservadoLibre(data.ESP_ID);
+    await afterMembresiaCreatedSetEspacioReservadoLibre(espId);
   } catch (e) {
     await insertSystemAlerta({
       motivo: 'Membresía creada pero no se actualizó estado del espacio',
-      descripcion: `ESP_ID ${data.ESP_ID}: ${e?.message || e}`,
+      descripcion: `ESP_ID ${espId}: ${e?.message || e}`,
     });
   }
   const created = await getById(data.MEM_ID);
@@ -334,15 +348,11 @@ export async function sendMembershipTag(memId) {
 }
 
 export async function searchPaymentCandidates(query) {
-  const q = `%${String(query || '').toUpperCase()}%`;
+  const raw = String(query || '').trim().toUpperCase().replace(/\s+/g, '');
+  const q = `%${raw}%`;
   return executeSql(
     `${MEM_SELECT_SQL}
-     LEFT JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
-     WHERE UPPER(NVL(c.CLI_PRIMER_NOMBRE, '')) LIKE :q
-        OR UPPER(NVL(c.CLI_SEGUNDO_NOMBRE, '')) LIKE :q
-        OR UPPER(NVL(c.CLI_PRIMER_APELLIDO, '')) LIKE :q
-        OR UPPER(NVL(c.CLI_SEGUNDO_APELLIDO, '')) LIKE :q
-        OR UPPER(NVL(v.VEH_PLACA, '')) LIKE :q
+     WHERE UPPER(REPLACE(TRIM(NVL(v.VEH_PLACA, '')), ' ', '')) LIKE :q
      ORDER BY m.MEM_FECHA_VENCIMIENTO`,
     { q }
   );
@@ -392,15 +402,15 @@ export async function registerMonthlyPayment(memId, payload) {
   let dpmId;
 
   const diasTipo = await loadDuracionTipoMembresia(membership.TME_ID);
-  const refVenc = membership.MEM_FECHA_VENCIMIENTO
-    ? new Date(membership.MEM_FECHA_VENCIMIENTO)
-    : new Date();
-  const baseDate = addDaysCalendar(refVenc, diasTipo);
+  /** La renovación cuenta la duración del plan desde la fecha del pago, no desde el vencimiento anterior (evita “arrastrar” periodos ya vencidos). */
+  const baseDate = addDaysCalendar(now, diasTipo);
 
   const estado = norm(membership.EME_ESTADO);
   const suspended = estado.includes('suspend') || estado.includes('inactiv');
+  const wantReactivate =
+    payload.REACTIVATE_IF_SUSPENDED !== false && payload.REACTIVATE_IF_SUSPENDED !== 0;
   let emeId = membership.EME_ID;
-  if (suspended && payload.REACTIVATE_IF_SUSPENDED) {
+  if (suspended && wantReactivate) {
     emeId = await findEstadoActivaId(emeId);
   }
   let conn;
@@ -500,7 +510,7 @@ export async function registerMonthlyPayment(memId, payload) {
     PAG_ID: pagId,
     DPM_ID: dpmId,
     MEM_FECHA_VENCIMIENTO: baseDate.toISOString(),
-    REACTIVATED: suspended && !!payload.REACTIVATE_IF_SUSPENDED,
+    REACTIVATED: suspended && wantReactivate,
   };
 }
 
@@ -556,12 +566,62 @@ function isMembershipExpired(row) {
   if (!row?.MEM_FECHA_VENCIMIENTO) return false;
   const venc = new Date(row.MEM_FECHA_VENCIMIENTO);
   if (Number.isNaN(venc.getTime())) return false;
-  return venc.getTime() < Date.now();
+  const V = new Date(venc.getFullYear(), venc.getMonth(), venc.getDate());
+  const n = new Date();
+  const T = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  return T.getTime() > V.getTime();
 }
 
-export async function validateTagAndRegisterEntry(memCodigoRaw) {
+/** Alineado al job diario: vence por calendario y sin pago posterior → estado suspendido. */
+async function suspendMembershipIfPastVencimientoForEntry(memId) {
+  const suspRows = await executeSql(
+    `SELECT EME_ID FROM PAR_ESTADO_MEMBRESIA
+      WHERE LOWER(EME_ESTADO) LIKE '%suspend%'
+      ORDER BY EME_ID FETCH FIRST 1 ROW ONLY`,
+  );
+  const suspId = suspRows[0]?.EME_ID ?? suspRows[0]?.eme_id;
+  if (suspId == null || memId == null) return;
+  await executeSql(
+    `UPDATE PAR_MEMBRESIA m
+        SET EME_ID = :suspId,
+            MEM_FECHA_ULTIMO_CAMBIO_ESTADO = SYSDATE
+      WHERE m.MEM_ID = :memId
+        AND TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
+        AND m.EME_ID <> :suspId2
+        AND NOT EXISTS (
+          SELECT 1
+            FROM PAR_DETALLE_PAGO_MEMBRESIA dpm
+            JOIN PAR_PAGO p ON p.PAG_ID = dpm.PAG_ID
+           WHERE dpm.MEM_ID = m.MEM_ID
+             AND p.PAG_FECHA_HORA >= m.MEM_FECHA_VENCIMIENTO
+        )`,
+    { suspId, memId, suspId2: suspId },
+    { autoCommit: true },
+  );
+}
+
+export async function validateTagAndRegisterEntry(memCodigoRaw, opts = {}) {
   const memCodigo = String(memCodigoRaw || '').trim().toUpperCase();
   if (!memCodigo) throw new Error('MEM_CODIGO es requerido');
+
+  let maqIdAutoriza = null;
+  const rawMaq = opts?.MAQ_ID;
+  if (rawMaq != null && String(rawMaq).trim() !== '') {
+    const mid = Number(String(rawMaq).trim());
+    if (!Number.isFinite(mid) || mid <= 0) throw new Error('MAQ_ID inválido');
+    const mrows = await executeSql(
+      `SELECT m.MAQ_ID, t.TMA_TIPO
+         FROM PAR_MAQUINA m
+         JOIN PAR_TIPO_MAQUINA t ON t.TMA_ID = m.TMA_ID
+        WHERE m.MAQ_ID = :id`,
+      { id: mid },
+    );
+    if (!mrows[0]) throw new Error('Máquina no encontrada');
+    if (!isTipoMaquinaEntrada(mrows[0].TMA_TIPO)) {
+      throw new Error('La máquina indicada no es de entrada');
+    }
+    maqIdAutoriza = mid;
+  }
 
   const withColumn = await hasMemCodigoColumn();
   const row = withColumn
@@ -580,17 +640,41 @@ export async function validateTagAndRegisterEntry(memCodigoRaw) {
        ))`,
       { memCodigo }
     );
-  const membership = row[0];
+  let membership = row[0];
   if (!membership) throw new Error('Tag no reconocido');
 
+  const memId0 = membership.MEM_ID ?? membership.mem_id;
+  await suspendMembershipIfPastVencimientoForEntry(memId0);
+  const rowFresh = withColumn
+    ? await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(m.MEM_CODIGO)) = UPPER(TRIM(:memCodigo))`,
+      { memCodigo }
+    )
+    : await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(:memCodigo)) = UPPER(TRIM(
+         LPAD(EXTRACT(DAY FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         LPAD(EXTRACT(MONTH FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         SUBSTR(TO_CHAR(EXTRACT(YEAR FROM m.MEM_FECHA_INICIO)), -2) ||
+         TO_CHAR(m.MEM_ID)
+       ))`,
+      { memCodigo }
+    );
+  membership = rowFresh[0] || membership;
+
   if (isMembershipSuspended(membership)) {
-    throw new Error('Acceso denegado: membresia suspendida');
+    throw new Error(
+      'Acceso denegado: la membresía está suspendida (periodo vencido). Renueva el pago en la máquina de cobro, sección «Pagar membresía».',
+    );
   }
   if (isMembershipExpired(membership)) {
-    throw new Error('Acceso denegado: membresia vencida');
+    throw new Error(
+      'Acceso denegado: la membresía está vencida. Renueva el pago en la máquina de cobro, sección «Pagar membresía».',
+    );
   }
   if (!isMembershipActive(membership)) {
-    throw new Error('Acceso denegado: membresia no activa');
+    throw new Error('Acceso denegado: la membresía no está activa.');
   }
 
   const openEntrada = await executeSql(
@@ -660,6 +744,7 @@ export async function validateTagAndRegisterEntry(memCodigoRaw) {
     MEM_CODIGO: memCodigo,
     VEH_PLACA: membership.VEH_PLACA,
     EME_ESTADO: membership.EME_ESTADO,
+    MAQ_ID: maqIdAutoriza,
   };
 }
 

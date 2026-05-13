@@ -196,39 +196,54 @@ export async function buildMembresiasEstadoPdfBuffer(data) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text('Reporte de membresías por estado', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(10).text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
+    const left = doc.page.margins.left;
+    const fullW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const rowH = 17;
+    const headH = 20;
+    const w1 = [fullW * 0.3, fullW * 0.14, fullW * 0.2, fullW * 0.12, fullW * 0.12, fullW * 0.12];
+
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#111827').text('Reporte de membresías por estado', { align: 'center' });
+    doc.moveDown(0.4);
+    doc.font('Helvetica').fontSize(10).fillColor('#334155').text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
+    doc.font('Helvetica').fontSize(8.2).fillColor('#475569').text(criterioVigencia, { align: 'center' });
     doc.moveDown(0.6);
-    doc.fontSize(8).text(criterioVigencia, { align: 'center' });
-    doc.moveDown(1);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Resumen');
+    doc.font('Helvetica').fontSize(9);
+    doc.text(`Membresías: ${totalRegistros} | Activas: ${resumen.activas} | Suspendidas: ${resumen.suspendidas} | Vencidas: ${resumen.vencidas}${resumen.otros > 0 ? ` | Otros: ${resumen.otros}` : ''}`);
+    doc.moveDown(0.4);
+    doc.font('Helvetica-Bold').fontSize(10).text('Proporción por estado');
+    doc.font('Helvetica').fontSize(9);
+    (porEstado.length ? porEstado : [{ estadoTexto: 'Sin datos', cantidad: 0, porcentaje: 0 }]).forEach((p) => {
+      doc.text(`${p.estadoTexto}: ${p.cantidad} (${p.porcentaje}%)`);
+    });
+    doc.moveDown(0.5);
 
-    doc.fontSize(11).text('Totales por tipo de estado (criterio de negocio)', { underline: true });
-    doc.fontSize(10);
-    doc.text(`Membresías en el reporte: ${totalRegistros}`);
-    doc.text(`Activas (según catálogo): ${resumen.activas}`);
-    doc.text(`Suspendidas: ${resumen.suspendidas}`);
-    doc.text(`Vencidas: ${resumen.vencidas}`);
-    if (resumen.otros > 0) doc.text(`Otros estados: ${resumen.otros}`);
-    doc.moveDown(1);
+    const y = doc.y;
+    doc.rect(left, y, fullW, headH).fill('#e2e8f0');
+    const headers = ['Cliente', 'Placa', 'Espacio', 'Inicio', 'Vencimiento', 'Estado'];
+    let x = left;
+    doc.font('Helvetica-Bold').fontSize(8.3).fillColor('#0f172a');
+    headers.forEach((h, i) => {
+      doc.text(h, x + 4, y + 6, { width: w1[i] - 8, lineBreak: false });
+      x += w1[i];
+    });
+    doc.strokeColor('#94a3b8').lineWidth(0.8).rect(left, y, fullW, headH).stroke();
+    doc.y = y + headH;
 
-    doc.fontSize(11).text('Proporción por estado (catálogo)', { underline: true });
-    doc.fontSize(9);
-    if (!porEstado.length) {
-      doc.text('Sin datos.');
-    } else {
-      porEstado.forEach((p) => {
-        doc.text(`${p.estadoTexto}: ${p.cantidad} (${p.porcentaje}%)`);
+    (detalle || []).forEach((row, idx) => {
+      if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) doc.addPage();
+      const yy = doc.y;
+      if (idx % 2 === 0) doc.rect(left, yy, fullW, rowH).fill('#f8fafc');
+      doc.strokeColor('#e2e8f0').lineWidth(0.5).rect(left, yy, fullW, rowH).stroke();
+      const vals = [row.clienteNombre, row.placa, row.espacioAsignado, row.fechaInicio || '—', row.fechaVencimiento || '—', row.estadoActual];
+      x = left;
+      doc.font('Helvetica').fontSize(7.8).fillColor('#0f172a');
+      vals.forEach((v2, i) => {
+        const txt = String(v2 ?? '—');
+        doc.text(txt.length > 30 ? `${txt.slice(0, 29)}…` : txt, x + 4, yy + 5, { width: w1[i] - 8, lineBreak: false });
+        x += w1[i];
       });
-    }
-    doc.moveDown(1);
-
-    doc.fontSize(11).text('Detalle de membresías', { underline: true });
-    doc.fontSize(7.5);
-    detalle.forEach((row) => {
-      doc.text(
-        `${row.clienteNombre} | ${row.placa} | ${row.espacioAsignado} | Inicio: ${row.fechaInicio ?? '—'} | Vence: ${row.fechaVencimiento ?? '—'} | Estado: ${row.estadoActual}`
-      );
+      doc.y = yy + rowH;
     });
 
     doc.end();

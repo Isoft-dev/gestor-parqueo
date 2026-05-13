@@ -27,11 +27,58 @@ export default function AdminLayout() {
           </div>
         </div>
         <nav className="admin-nav">
-          {ADMIN_NAV_ROUTES.map((r) => (
+          {ADMIN_NAV_ROUTES.filter((r) => r.path !== 'operacion-cabina' && r.path !== 'reportes').map((r) => (
             <NavLink
               key={r.path || 'home'}
               to={adminPath(r.path)}
               end={!!r.isDashboard}
+              className={({ isActive }) =>
+                `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
+              }
+            >
+              <span className="admin-nav-icon" aria-hidden="true">
+                {r.icon}
+              </span>
+              <span>{r.label}</span>
+            </NavLink>
+          ))}
+          <NavLink
+            to="/admin/maquina-entrada"
+            className={({ isActive }) =>
+              `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
+            }
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              🎟️
+            </span>
+            <span>Máquina de entrada</span>
+          </NavLink>
+          <NavLink
+            to="/admin/maquina-salida"
+            className={({ isActive }) =>
+              `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
+            }
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              🚪
+            </span>
+            <span>Máquina de salida</span>
+          </NavLink>
+          <NavLink
+            to="/admin/maquina-cobro"
+            className={({ isActive }) =>
+              `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
+            }
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              💳
+            </span>
+            <span>Máquina de cobro</span>
+          </NavLink>
+          {ADMIN_NAV_ROUTES.filter((r) => r.path === 'reportes').map((r) => (
+            <NavLink
+              key={r.path}
+              to={adminPath(r.path)}
               className={({ isActive }) =>
                 `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
               }

@@ -96,34 +96,51 @@ export async function buildClientesMoraPdfBuffer(data) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text('Reporte de clientes en mora', { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(10).text('Estado al momento de la generación (sin filtro de fechas).', { align: 'center' });
-    doc.moveDown(1);
+    const left = doc.page.margins.left;
+    const fullW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const rowH = 17;
+    const headH = 20;
+    const widths = [fullW * 0.23, fullW * 0.17, fullW * 0.12, fullW * 0.1, fullW * 0.12, fullW * 0.1, fullW * 0.16];
 
-    doc.fontSize(11).text('Resumen', { underline: true });
-    doc.fontSize(10);
-    doc.text(`Clientes distintos en mora: ${totalClientesDistintos}`);
-    doc.text(`Membresías vencidas en mora (activas): ${totalMembresiasEnMora}`);
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#111827').text('Reporte de clientes en mora', { align: 'center' });
+    doc.moveDown(0.4);
+    doc.font('Helvetica').fontSize(10).fillColor('#334155').text('Estado al momento de la generación (sin filtro de fechas).', { align: 'center' });
+    doc.moveDown(0.6);
     const montoSafe = Number.isFinite(Number(montoTotalReferencia)) ? Number(montoTotalReferencia) : 0;
-    doc.text(`Monto total referencial (suma de precios de tipo de plan): Q ${montoSafe.toFixed(2)}`);
-    doc.moveDown(0.75);
-    doc.fontSize(8).text(
-      '* Filas marcadas: más de 3 días de mora (criterio de suspensión automática si no hay pago registrado).',
-      { width: 500 }
-    );
-    doc.moveDown(1);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Resumen');
+    doc.font('Helvetica').fontSize(9);
+    doc.text(`Clientes distintos: ${totalClientesDistintos} | Membresías en mora: ${totalMembresiasEnMora} | Monto referencial: Q ${montoSafe.toFixed(2)}`);
+    doc.moveDown(0.3);
+    doc.fontSize(8).fillColor('#64748b').text('* Riesgo suspensión: más de 3 días de mora.');
+    doc.moveDown(0.5);
 
-    doc.fontSize(11).text('Detalle', { underline: true });
-    doc.fontSize(7.5);
-    detalle.forEach((row) => {
-      const tag = row.alertaSuspension ? '[RIESGO SUSPENSIÓN] ' : '';
-      const ref = Number.isFinite(Number(row.montoTipoReferencia))
-        ? Number(row.montoTipoReferencia).toFixed(2)
-        : '0.00';
-      doc.text(
-        `${tag}${row.nombreCompleto} | ${row.correo} | ${row.telefono} | ${row.placa} | Vence: ${row.fechaVencimiento ?? '—'} | Mora: ${row.diasMora} d | Ref. Q${ref}`
-      );
+    const y = doc.y;
+    doc.rect(left, y, fullW, headH).fill('#e2e8f0');
+    const headers = ['Nombre', 'Correo', 'Teléfono', 'Placa', 'Vencimiento', 'Días mora', 'Monto ref.'];
+    let x = left;
+    doc.font('Helvetica-Bold').fontSize(8.2).fillColor('#0f172a');
+    headers.forEach((h, i) => {
+      doc.text(h, x + 4, y + 6, { width: widths[i] - 8, lineBreak: false });
+      x += widths[i];
+    });
+    doc.strokeColor('#94a3b8').lineWidth(0.8).rect(left, y, fullW, headH).stroke();
+    doc.y = y + headH;
+
+    (detalle || []).forEach((row, idx) => {
+      if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) doc.addPage();
+      const yy = doc.y;
+      if (idx % 2 === 0) doc.rect(left, yy, fullW, rowH).fill('#f8fafc');
+      doc.strokeColor('#e2e8f0').lineWidth(0.5).rect(left, yy, fullW, rowH).stroke();
+      const ref = Number.isFinite(Number(row.montoTipoReferencia)) ? Number(row.montoTipoReferencia).toFixed(2) : '0.00';
+      const vals = [row.nombreCompleto, row.correo, row.telefono, row.placa, row.fechaVencimiento || '—', row.diasMora, `Q${ref}`];
+      x = left;
+      doc.font('Helvetica').fontSize(7.6).fillColor(row.alertaSuspension ? '#9a3412' : '#0f172a');
+      vals.forEach((v2, i) => {
+        const txt = String(v2 ?? '—');
+        doc.text(txt.length > 30 ? `${txt.slice(0, 29)}…` : txt, x + 4, yy + 5, { width: widths[i] - 8, lineBreak: false });
+        x += widths[i];
+      });
+      doc.y = yy + rowH;
     });
 
     doc.end();

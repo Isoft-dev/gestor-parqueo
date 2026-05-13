@@ -1,6 +1,6 @@
 /**
- * Ejecuta database/seed_catalogos_hu.sql contra Oracle (misma conexión que .env).
- * Uso (desde carpeta server): node scripts/run-seed-catalogos.mjs
+ * Ejecuta database/seed_catalogo_funcional.sql contra Oracle (misma conexión que .env en server/).
+ * Uso (desde raíz del repo, con .env en la raíz): node scripts/run-seed-catalogo-funcional.mjs
  */
 import dotenv from 'dotenv';
 import fs from 'fs';
@@ -26,11 +26,11 @@ async function main() {
   const password = process.env.ORACLE_PASSWORD;
   const connectString = process.env.ORACLE_CONNECT_STRING;
   if (!user || !password || !connectString) {
-    console.error('Define ORACLE_USER, ORACLE_PASSWORD y ORACLE_CONNECT_STRING en server/.env');
+    console.error('Define ORACLE_USER, ORACLE_PASSWORD y ORACLE_CONNECT_STRING en .env (raíz o según convención del repo)');
     process.exit(1);
   }
 
-  const sqlPath = path.join(__dirname, '../../database/seed_catalogos_hu.sql');
+  const sqlPath = path.join(__dirname, '../database/seed_catalogo_funcional.sql');
   if (!fs.existsSync(sqlPath)) {
     console.error('No existe:', sqlPath);
     process.exit(1);
@@ -46,9 +46,9 @@ async function main() {
   const conn = await oracledb.getConnection({ user, password, connectString });
   try {
     await conn.execute(sql);
-    console.log('OK: ejecutado seed_catalogos_hu.sql (bloque PL/SQL completo)');
+    console.log('OK: ejecutado seed_catalogo_funcional.sql (bloque PL/SQL completo)');
     await conn.commit();
-    console.log('Hecho: seed_catalogos_hu.sql aplicado (COMMIT).');
+    console.log('Hecho: seed_catalogo_funcional.sql aplicado (COMMIT).');
   } catch (e) {
     await conn.rollback();
     throw e;

@@ -260,6 +260,13 @@ BEGIN
   SELECT COUNT(*) INTO c FROM PAR_INCIDENTE WHERE UPPER(INC_TIPO) = 'ESTACIONAMIENTO';
   IF c = 0 THEN INSERT INTO PAR_INCIDENTE (INC_ID, INC_TIPO, INC_DESCRIPCION) VALUES (DEFAULT, 'Estacionamiento', 'Incidente demo QA'); END IF;
 
+  SELECT COUNT(*) INTO c FROM PAR_INCIDENTE
+   WHERE LOWER(INC_TIPO) LIKE '%extrav%' OR LOWER(NVL(INC_DESCRIPCION, '')) LIKE '%extrav%';
+  IF c = 0 THEN
+    INSERT INTO PAR_INCIDENTE (INC_ID, INC_TIPO, INC_DESCRIPCION)
+    VALUES (DEFAULT, 'Ticket extraviado', 'Bitácora al cobrar ticket en estado extraviado (recargo Q100)');
+  END IF;
+
   -- Al menos 500 espacios (carga masiva si faltan filas)
   SELECT COUNT(*) INTO c FROM PAR_ESPACIO;
   IF c < 500 THEN

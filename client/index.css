@@ -285,6 +285,7 @@ body {
 
 /* ── Panel de administración ───────────────────────────────── */
 :root {
+  --admin-sidebar-width: 260px;
   --admin-sidebar-bg: #0f172a;
   --admin-sidebar-border: rgba(255, 255, 255, 0.08);
   --admin-sidebar-text: #e2e8f0;
@@ -309,7 +310,7 @@ body {
 }
 
 .admin-sidebar {
-  width: 260px;
+  width: var(--admin-sidebar-width);
   flex-shrink: 0;
   background: var(--admin-sidebar-bg);
   color: var(--admin-sidebar-text);
@@ -811,8 +812,20 @@ body {
 
 .admin-quick-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.9rem;
+}
+
+@media (max-width: 1100px) {
+  .admin-quick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .admin-quick-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-quick-card {
@@ -915,6 +928,10 @@ body {
   border-radius: 10px;
   background: var(--color-bg, #f1f5f9);
   border: 1px solid var(--color-border, #e2e8f0);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
 }
 
 .cobro-minimo-toggle--loading {
@@ -930,6 +947,23 @@ body {
   font-weight: 600;
   color: var(--color-text, #334155);
   user-select: none;
+}
+
+.cobro-minimo-toggle__label--tarifa {
+  cursor: default;
+}
+
+.cobro-minimo-toggle__tarifa-text {
+  white-space: nowrap;
+}
+
+.cobro-minimo-toggle__tarifa-select {
+  min-width: 240px;
+  width: auto;
+  max-width: 360px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.83rem;
 }
 
 .cobro-minimo-toggle__label input {
@@ -954,6 +988,12 @@ body {
 }
 
 [data-theme='dark'] .cobro-minimo-toggle__label {
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .cobro-minimo-toggle__tarifa-select {
+  background: #0f172a;
+  border-color: #334155;
   color: #e2e8f0;
 }
 
@@ -1002,6 +1042,15 @@ body {
 
 .ops-page-public {
   max-width: 1180px;
+}
+
+.ops-page-public--entry,
+.ops-page-public--salida {
+  position: relative;
+  min-height: 100vh;
+  max-width: 100% !important;
+  margin: 0 !important;
+  background: linear-gradient(180deg, #e5e7eb 0%, #d1d5db 100%);
 }
 
 .ops-page-header {
@@ -1113,6 +1162,788 @@ body {
 
 @keyframes ops-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ── Kiosco entrada (rediseño UI) ───────────────────────────── */
+.ops-entry-config {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 60;
+  background: rgba(31, 41, 55, 0.92);
+  border: 1px solid #4b5563;
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 20px rgba(17, 24, 39, 0.35);
+}
+
+.ops-entry-config label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ops-entry-config label span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #e5e7eb;
+  text-transform: uppercase;
+}
+
+.ops-entry-config select {
+  min-width: 260px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #9ca3af;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Dentro del panel admin: anclar al contenedor (no al viewport), con aire similar al fixed 16px de la vista pública. */
+.admin-main .ops-page-public--entry .ops-entry-config,
+.admin-main .ops-page-public--salida .ops-entry-config {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+}
+
+.ops-entry-kiosk-wrap {
+  min-height: calc(100vh - 260px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.ops-entry-kiosk-screen {
+  width: min(600px, calc(100vw - 40px));
+  height: 340px;
+  border-radius: 14px;
+  border: 1px solid #2f3b57;
+  background: #1a1a2e;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.35);
+  transition: all 0.3s ease;
+}
+
+.ops-entry-kiosk-screen--error {
+  background: linear-gradient(180deg, #2b1b1b 0%, #1f1414 100%);
+  border-color: #7f1d1d;
+}
+
+.ops-entry-kiosk-screen-inner {
+  height: 100%;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: all 0.3s ease;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+.ops-entry-kiosk-state {
+  width: 100%;
+  color: #f8fafc;
+}
+
+.ops-entry-kiosk-state h2 {
+  margin: 4px 0 10px;
+  font-size: 1.65rem;
+  line-height: 1.15;
+}
+
+.ops-entry-kiosk-icon {
+  margin: 0 auto 8px;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: 2px solid #93c5fd;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.3rem;
+  color: #93c5fd;
+}
+
+.ops-entry-kiosk-icon--success {
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.ops-entry-kiosk-icon--warn {
+  border-color: #facc15;
+  color: #facc15;
+}
+
+.ops-entry-kiosk-icon--error {
+  border-color: #f87171;
+  color: #f87171;
+}
+
+.ops-entry-kiosk-loader {
+  margin: 0 auto 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.ops-entry-kiosk-loader .ops-loader {
+  width: 22px;
+  height: 22px;
+  border-width: 3px;
+}
+
+.ops-entry-kiosk-subtext {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #cbd5e1;
+}
+
+.ops-entry-kiosk-subtext--pulse {
+  animation: ops-pulse 1.6s ease-in-out infinite;
+}
+
+.ops-entry-kiosk-subtext--warn {
+  color: #facc15;
+}
+
+.ops-entry-kiosk-subtext--error {
+  color: #fca5a5;
+}
+
+.ops-entry-kiosk-download {
+  margin-top: 14px;
+}
+
+.ops-entry-kiosk-controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ops-entry-kiosk-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ops-entry-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(2, 6, 23, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.ops-entry-modal {
+  width: 100%;
+  max-width: 420px;
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.28);
+  padding: 14px;
+}
+
+.ops-entry-modal h3 {
+  margin: 0 0 10px;
+}
+
+.ops-entry-modal-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.ops-entry-modal-grid input,
+.ops-entry-modal-grid select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+
+.ops-entry-modal-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ops-entry-modal-btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ops-entry-modal-btn--soft {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.ops-entry-modal-btn--soft:hover:not(:disabled) {
+  background: #eef2f7;
+  border-color: #94a3b8;
+}
+
+.ops-entry-modal-btn--cancel {
+  background: #ffffff;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.ops-entry-modal-btn--cancel:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.ops-entry-modal-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@keyframes ops-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+/* ── Kiosco cobro (misma filosofía visual que entrada) ─────── */
+.ops-page-public--cobro {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 100vh;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 16px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #e5e7eb 0%, #d1d5db 100%);
+}
+
+.ops-shell--embedded.ops-shell--cobro {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: min(72vh, 880px);
+  width: 100%;
+  padding: 16px;
+}
+
+.ops-cobro-kiosk-root {
+  position: relative;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  transition: opacity 0.3s ease;
+}
+
+/* Input file: no usar display:none — en muchos navegadores bloquea el diálogo al abrir desde botón/label. */
+.ops-cobro-sr-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0.01;
+}
+
+.ops-cobro-upload-label.admin-btn-primary {
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+}
+
+.ops-cobro-config {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 60;
+  background: rgba(31, 41, 55, 0.92);
+  border: 1px solid #4b5563;
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 20px rgba(17, 24, 39, 0.35);
+}
+
+.ops-cobro-config label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ops-cobro-config label span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #e5e7eb;
+  text-transform: uppercase;
+}
+
+.ops-cobro-config select {
+  min-width: 260px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #9ca3af;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Igual que .ops-entry-config: anclado al área de la página (admin-main), no al bloque del kiosco centrado. */
+.admin-main .ops-page-public--cobro .ops-cobro-config {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 60;
+}
+
+.ops-cobro-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+}
+
+.ops-cobro-left {
+  flex: 1 1 52%;
+  max-width: 640px;
+  min-width: min(100%, 320px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  transition: all 0.3s ease;
+}
+
+.ops-cobro-right {
+  flex: 1 1 38%;
+  max-width: 420px;
+  min-width: min(100%, 280px);
+  min-height: 280px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid #2f3b57;
+  background: #1e293b;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.28);
+  color: #e2e8f0;
+  transition: all 0.3s ease;
+}
+
+.ops-cobro-right-hint {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  color: #cbd5e1;
+  text-align: center;
+}
+
+.ops-cobro-msg-banner {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(254, 226, 226, 0.95);
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 0.9rem;
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.ops-cobro-screen {
+  position: relative;
+  width: 100%;
+  min-height: 340px;
+  border-radius: 14px;
+  border: 1px solid #2f3b57;
+  background: #1a1a2e;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.35);
+  transition: all 0.3s ease;
+}
+
+.ops-cobro-card-error-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  text-align: center;
+  border-radius: 14px;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #2b1b1b 0%, #1f1414 100%);
+  border: 1px solid #7f1d1d;
+}
+
+.ops-cobro-screen--error {
+  background: linear-gradient(180deg, #2b1b1b 0%, #1f1414 100%);
+  border-color: #7f1d1d;
+}
+
+.ops-cobro-screen--success {
+  border-color: #166534;
+  background: linear-gradient(180deg, #14261c 0%, #0f172a 100%);
+}
+
+.ops-cobro-screen-inner {
+  min-height: 340px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: all 0.3s ease;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+.ops-cobro-screen-inner--receipt {
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.ops-cobro-state {
+  width: 100%;
+  color: #f8fafc;
+}
+
+.ops-cobro-state h2 {
+  margin: 4px 0 10px;
+  font-size: 1.55rem;
+  line-height: 1.15;
+}
+
+.ops-cobro-icon {
+  margin: 0 auto 8px;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  border: 2px solid #93c5fd;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.3rem;
+  color: #93c5fd;
+}
+
+.ops-cobro-icon--success {
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.ops-cobro-icon--warn {
+  border-color: #facc15;
+  color: #facc15;
+}
+
+.ops-cobro-icon--error {
+  border-color: #f87171;
+  color: #f87171;
+}
+
+.ops-cobro-subtext {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #cbd5e1;
+}
+
+.ops-cobro-subtext--pulse {
+  animation: ops-pulse 1.6s ease-in-out infinite;
+}
+
+.ops-cobro-subtext--error {
+  color: #fca5a5;
+}
+
+.ops-cobro-subtext--hint {
+  color: #fbbf24;
+  font-weight: 500;
+}
+
+.ops-cobro-receipt {
+  width: 100%;
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #e2e8f0;
+}
+
+.ops-cobro-receipt-title {
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  color: #f1f5f9;
+}
+
+.ops-cobro-receipt hr {
+  border: none;
+  border-top: 1px dashed #64748b;
+  margin: 10px 0;
+}
+
+.ops-cobro-receipt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0;
+}
+
+.ops-cobro-receipt-row span:first-child {
+  color: #94a3b8;
+}
+
+.ops-cobro-receipt-total {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #475569;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #4ade80;
+  text-align: center;
+}
+
+.ops-cobro-nit-live {
+  margin-top: 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 1.25rem;
+  color: #f8fafc;
+}
+
+/* Misma fila de acciones que máquina de entrada (ops-entry-kiosk-controls + ancho / posición para input sr-only). */
+.ops-entry-kiosk-controls.ops-cobro-bottom-btns {
+  position: relative;
+  width: 100%;
+}
+
+/* Mismo tamaño para Pagar Ticket (label o button) y Pagar Membresía */
+.ops-cobro-bottom-btns .ops-cobro-bottom-action {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0.55rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.25;
+}
+
+.ops-cobro-bottom-btns button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ops-cobro-physical-btn {
+  min-height: 52px;
+  min-width: 52px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #555;
+  background: #2d2d2d;
+  color: #f3f4f6;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 4px 0 #1a1a1a,
+    0 5px 12px rgba(0, 0, 0, 0.25);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.2s ease;
+}
+
+.ops-cobro-physical-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.ops-cobro-physical-btn:active:not(:disabled) {
+  transform: scale(0.95);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.35),
+    0 2px 0 #1a1a1a,
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.ops-cobro-physical-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ops-cobro-physical-btn--wide {
+  width: 100%;
+  min-width: 0;
+}
+
+.ops-cobro-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ops-cobro-keypad .ops-cobro-physical-btn {
+  width: 100%;
+}
+
+.ops-cobro-pay-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ops-cobro-bill-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.ops-cobro-bill-grid .ops-cobro-physical-btn {
+  min-width: 56px;
+}
+
+.ops-cobro-cash-totals {
+  margin-top: 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.95rem;
+  color: #cbd5e1;
+}
+
+.ops-cobro-cash-totals div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.ops-cobro-card-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ops-cobro-card-form input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #64748b;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+
+.ops-cobro-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Búsqueda por placa — pago membresía (panel oscuro ops-cobro-right) */
+.ops-cobro-mem-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.ops-cobro-mem-search-input {
+  flex: 1 1 160px;
+  min-width: 140px;
+  min-height: 52px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ops-cobro-mem-search-input::placeholder {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.ops-cobro-mem-search-input:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+}
+
+.ops-cobro-mem-search-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.ops-cobro-mem-list {
+  margin-top: 10px;
+  max-height: 200px;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid #475569;
+  background: #0f172a;
+}
+
+.ops-cobro-mem-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid #334155;
+  background: transparent;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 0.88rem;
+  transition: background 0.2s ease;
+}
+
+.ops-cobro-mem-list button:hover {
+  background: rgba(51, 65, 85, 0.6);
+}
+
+.ops-cobro-mem-list button:last-child {
+  border-bottom: none;
 }
 
 /* ── Formulario CRUD (inserción/edición) ───────────────────── */
@@ -1269,6 +2100,12 @@ body {
   border-color: #60a5fa;
 }
 
+.crudx-field select:disabled,
+.crudx-select:disabled,
+.crudx-field input:disabled {
+  cursor: default;
+}
+
 .crudx-form-actions {
   width: 100%;
   display: flex;
@@ -1306,12 +2143,113 @@ body {
 }
 
 /* Búsqueda — registro de pagos membresía */
+/* Bloque de búsqueda tipo registro de pagos (reutilizado en CRUD Ticket) */
+.crudx-ticket-search-block {
+  margin-bottom: 14px;
+}
+
+.crudx-ticket-search-block .admin-panel-head {
+  margin-bottom: 0.75rem;
+}
+
 .admin-search-form {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+/* Fila de búsqueda Ticket: misma altura y baseline que membresía */
+.crudx-ticket-search-form {
+  align-items: center;
+  gap: 12px;
+}
+
+.crudx-ticket-search-form .admin-search-input-wrap {
+  flex: 1 1 200px;
+  max-width: 420px;
+}
+
+.crudx-ticket-search-estado {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  margin: 0;
+  cursor: default;
+}
+
+.crudx-ticket-search-estado-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #64748b);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.crudx-ticket-search-form .admin-search-input,
+.crudx-ticket-search-form .admin-search-select {
+  min-height: 42px;
+  box-sizing: border-box;
+}
+
+.crudx-ticket-search-form .admin-btn-search,
+.crudx-ticket-search-form .admin-btn-search-clear {
+  min-height: 42px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.crudx-ticket-search-form .admin-search-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-search-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font: inherit;
+  background: var(--color-surface, #fff);
+  color: var(--color-text, #0f172a);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-search-select:focus {
+  outline: none;
+  border-color: var(--admin-accent, #3b82f6);
+  box-shadow: 0 0 0 3px var(--admin-accent-soft, rgba(59, 130, 246, 0.2));
+}
+
+.admin-search-select:disabled {
+  cursor: default;
+}
+
+/* Select en fila Ticket: ancho por contenido (el genérico usa width: 100%) */
+.crudx-ticket-search-form .admin-search-select {
+  width: auto;
+  min-width: 10.5rem;
+  max-width: 16rem;
+}
+
+/* Misma fila admin: inputs compactos y fechas (bitácora / filtros CRUD) */
+.crudx-ticket-search-form .admin-search-input.crudx-admin-filter-input-compact {
+  width: auto;
+  min-width: 5.5rem;
+  max-width: 9rem;
+}
+
+.crudx-ticket-search-form input.admin-search-input[type='date'] {
+  width: auto;
+  min-width: 10.5rem;
+  max-width: 12rem;
 }
 
 .admin-search-input-wrap {
@@ -1420,6 +2358,12 @@ body {
 
 [data-theme='dark'] .admin-search-input::placeholder {
   color: #94a3b8;
+}
+
+[data-theme='dark'] .admin-search-select {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
 }
 
 [data-theme='dark'] .crudx-form-note,
@@ -1553,6 +2497,11 @@ body {
   max-width: 52rem;
 }
 
+.crudx-context-hint--full {
+  width: 100%;
+  max-width: none;
+}
+
 [data-theme='dark'] .crudx-context-hint {
   color: #cbd5e1;
   background: #1e3a5f;
@@ -1570,6 +2519,11 @@ body {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   max-width: 52rem;
+}
+
+.crudx-biv-filters--full {
+  width: 100%;
+  max-width: none;
 }
 
 .crudx-biv-filters-title {
@@ -1701,14 +2655,10 @@ body {
 .crudx-actions-cell {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
-}
-
-/* Cliente / Usuario: Editar + Desactivar en una sola fila */
-.crudx-actions-cell--inline {
   flex-wrap: nowrap;
   align-items: center;
   white-space: nowrap;
+  min-width: max-content;
 }
 
 .crudx-btn-xs {
@@ -1982,6 +2932,18 @@ body {
 
 .reporte-inc-table__row--max {
   background: rgba(251, 146, 60, 0.12);
+}
+
+.reporte-mov-kpi-grid .admin-kpi--spaces::before {
+  background: linear-gradient(135deg, #0891b2 0%, #155e75 100%);
+}
+
+.reporte-mov-kpi-grid .admin-kpi--alerts::before {
+  background: linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%);
+}
+
+.reporte-mov-kpi-grid .admin-kpi--alerts2::before {
+  background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
 }
 
 .reporte-inc-badge-max {

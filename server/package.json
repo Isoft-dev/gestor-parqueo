@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node scripts/run-seed-demo.mjs && node --watch index.js",
+    "dev": "node scripts/run-seed-catalogo-funcional.mjs && node --watch index.js",
     "dev:watch": "node --watch index.js",
     "db:reinstall-procedures": "node scripts/reinstall-procedures.mjs",
     "db:seed-demo": "node scripts/run-seed-demo.mjs",
+    "db:seed-catalogo-funcional": "node scripts/run-seed-catalogo-funcional.mjs",
     "db:reset-capacity": "node scripts/reset-demo-capacity.mjs",
     "verify:hu-api": "node scripts/verify-hu-api.mjs",
     "verify:hu-loop": "node scripts/verify-hu-loop.mjs",

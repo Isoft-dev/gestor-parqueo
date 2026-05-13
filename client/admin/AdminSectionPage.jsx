@@ -1,6 +1,5 @@
 import CrudDemo from '../components/CrudDemo.jsx';
 import CobroMinimoSub1hToggle from './CobroMinimoSub1hToggle.jsx';
-import MonthlyPaymentsPanel from './MonthlyPaymentsPanel.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function AdminSectionPage({
@@ -26,7 +25,6 @@ export default function AdminSectionPage({
         <p className="admin-page-desc">{description}</p>
         {footnote ? <p className="admin-page-footnote">{footnote}</p> : null}
       </header>
-      {sectionPath === 'clientes-mensuales' ? <MonthlyPaymentsPanel /> : null}
       <div className="admin-crud-embed">
         <CrudDemo
           key={sectionPath}
