@@ -36,10 +36,14 @@ export default function ReportesAfluenciaSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  
+  // Estado para filtro interactivo
+  const [filtroPeriodo, setFiltroPeriodo] = useState('');
 
   useEffect(() => {
     setError('');
     setData(null);
+    setFiltroPeriodo('');
   }, [tab]);
 
   const generate = async () => {
@@ -143,16 +147,45 @@ export default function ReportesAfluenciaSection() {
                 <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Mayor afluencia</div><div className="admin-kpi-value" style={{ fontSize: '1rem' }}>{tab === 'detallado' ? (data.periodoMayorAfluencia?.periodo || '—') : (data.anioMayorAfluencia?.anio || '—')}</div></article>
               </div>
               <div className="reporte-inc-chart-wrap">
-                <h3 className="reporte-inc-subtitle">Afluencia por período</h3>
-                <div style={{ height: 300 }}><Bar data={chartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+                <h3 className="reporte-inc-subtitle">Afluencia por período (¡Haz clic en una barra!)</h3>
+                <div style={{ height: 300 }}>
+                  <Bar 
+                    data={chartData} 
+                    options={{ 
+                      responsive: true, 
+                      maintainAspectRatio: false,
+                      onClick: (e, elements, chart) => {
+                        if (elements.length > 0) {
+                          setFiltroPeriodo(chart.data.labels[elements[0].index]);
+                        }
+                      }
+                    }} 
+                  />
+                </div>
               </div>
               {tab === 'detallado' ? (
                 <div className="reporte-inc-table-wrap">
-                  <h3 className="reporte-inc-subtitle">Detalle numérico</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                    <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle numérico</h3>
+                    {filtroPeriodo && (
+                      <button 
+                        type="button" 
+                        className="admin-btn-ghost" 
+                        onClick={() => setFiltroPeriodo('')}
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                      >
+                        Quitar filtro: {filtroPeriodo} ✖
+                      </button>
+                    )}
+                  </div>
                   <div className="crudx-table-scroll">
                     <table className="crudx-table reporte-inc-table">
                       <thead><tr><th>Período</th><th>Esporádico</th><th>Membresía</th><th>Total</th></tr></thead>
-                      <tbody>{(data.detalle || []).map((r) => <tr key={r.periodoClave}><td>{r.periodoLabel}</td><td>{r.esporadico}</td><td>{r.membresia}</td><td>{r.total}</td></tr>)}</tbody>
+                      <tbody>
+                        {(data.detalle || [])
+                          .filter(r => !filtroPeriodo || r.periodoLabel === filtroPeriodo)
+                          .map((r) => <tr key={r.periodoClave}><td>{r.periodoLabel}</td><td>{r.esporadico}</td><td>{r.membresia}</td><td>{r.total}</td></tr>)}
+                      </tbody>
                     </table>
                   </div>
                 </div>
@@ -175,11 +208,27 @@ export default function ReportesAfluenciaSection() {
                     </div>
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle anual</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle anual</h3>
+                      {filtroPeriodo && (
+                        <button 
+                          type="button" 
+                          className="admin-btn-ghost" 
+                          onClick={() => setFiltroPeriodo('')}
+                          style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                        >
+                          Quitar filtro: {filtroPeriodo} ✖
+                        </button>
+                      )}
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead><tr><th>Año</th><th>Esporádico</th><th>Membresía</th><th>Total</th></tr></thead>
-                        <tbody>{(data.detalleAnual || []).map((r) => <tr key={r.anio}><td>{r.anio}</td><td>{r.esporadico}</td><td>{r.membresia}</td><td>{r.total}</td></tr>)}</tbody>
+                        <tbody>
+                          {(data.detalleAnual || [])
+                            .filter(r => !filtroPeriodo || String(r.anio) === filtroPeriodo)
+                            .map((r) => <tr key={r.anio}><td>{r.anio}</td><td>{r.esporadico}</td><td>{r.membresia}</td><td>{r.total}</td></tr>)}
+                        </tbody>
                       </table>
                     </div>
                   </div>

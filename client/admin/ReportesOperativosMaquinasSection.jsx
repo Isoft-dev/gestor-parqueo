@@ -71,6 +71,12 @@ export default function ReportesOperativosMaquinasSection() {
   const [dataRecargas, setDataRecargas] = useState(null);
   const [dataIncidentes, setDataIncidentes] = useState(null);
 
+  // Estados para filtros interactivos locales
+  const [filtroMaquinaAlertas, setFiltroMaquinaAlertas] = useState('');
+  const [filtroMaquinaMant, setFiltroMaquinaMant] = useState('');
+  const [filtroMaquinaRecargas, setFiltroMaquinaRecargas] = useState('');
+  const [filtroTipoIncidente, setFiltroTipoIncidente] = useState('');
+
   useEffect(() => {
     fetchCatalog('/maquina').then(setCatalogMaquinas);
     fetchCatalog('/tipo-alerta').then(setCatalogTipoAlerta);
@@ -84,6 +90,13 @@ export default function ReportesOperativosMaquinasSection() {
     setDataMantenimientos(null);
     setDataRecargas(null);
     setDataIncidentes(null);
+    
+    // Limpiar filtros locales
+    setFiltroMaquinaAlertas('');
+    setFiltroMaquinaMant('');
+    setFiltroMaquinaRecargas('');
+    setFiltroTipoIncidente('');
+    setFEstadoResolucion(''); // También limpiar el de resolución
   }, [tab]);
 
   const generate = async () => {
@@ -203,8 +216,9 @@ export default function ReportesOperativosMaquinasSection() {
   })();
 
   const incidentesDetalleFiltrado = incidentesDetalle.filter((r) => {
-    if (!fEstadoResolucion) return true;
-    return String(r.estadoClave || '').toLowerCase() === fEstadoResolucion;
+    const matchEstado = !fEstadoResolucion || String(r.estadoClave || '').toLowerCase() === fEstadoResolucion.toLowerCase();
+    const matchTipo = !filtroTipoIncidente || r.tipoIncidente === filtroTipoIncidente;
+    return matchEstado && matchTipo;
   });
 
   return (
@@ -342,13 +356,38 @@ export default function ReportesOperativosMaquinasSection() {
                 </article>
               </div>
               <div className="reporte-inc-chart-wrap">
-                <h3 className="reporte-inc-subtitle">Alertas por máquina</h3>
+                <h3 className="reporte-inc-subtitle">Alertas por máquina (¡Haz clic en una barra!)</h3>
                 <div style={{ height: 280 }}>
-                  <Bar data={alertasChartData} options={{ responsive: true, maintainAspectRatio: false }} />
+                  <Bar 
+                    data={alertasChartData} 
+                    options={{ 
+                      responsive: true, 
+                      maintainAspectRatio: false,
+                      onClick: (e, elements, chart) => {
+                        if (elements.length > 0) {
+                          setFiltroMaquinaAlertas(chart.data.labels[elements[0].index]);
+                        }
+                      }
+                    }} 
+                  />
                 </div>
               </div>
               <div className="reporte-inc-table-wrap">
-                <h3 className="reporte-inc-subtitle">Detalle de alertas</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                  <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de alertas</h3>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    {filtroMaquinaAlertas && (
+                      <button 
+                        type="button" 
+                        className="admin-btn-ghost" 
+                        onClick={() => setFiltroMaquinaAlertas('')}
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                      >
+                        Quitar filtro: {filtroMaquinaAlertas} ✖
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <div className="crudx-table-scroll">
                   <table className="crudx-table reporte-inc-table">
                     <thead>
@@ -362,16 +401,18 @@ export default function ReportesOperativosMaquinasSection() {
                       </tr>
                     </thead>
                     <tbody>
-                      {dataAlertas.detalle.map((r) => (
-                        <tr key={String(r.alertaId)}>
-                          <td>{r.maquina}</td>
-                          <td>{r.tipoAlerta}</td>
-                          <td>{r.motivo}</td>
-                          <td>{r.fechaGeneracion ? new Date(r.fechaGeneracion).toLocaleString('es-GT') : '—'}</td>
-                          <td>{r.estadoActual}</td>
-                          <td>{r.fechaAtencion ? new Date(r.fechaAtencion).toLocaleString('es-GT') : '—'}</td>
-                        </tr>
-                      ))}
+                      {dataAlertas.detalle
+                        .filter(r => !filtroMaquinaAlertas || r.maquina === filtroMaquinaAlertas)
+                        .map((r) => (
+                          <tr key={String(r.alertaId)}>
+                            <td>{r.maquina}</td>
+                            <td>{r.tipoAlerta}</td>
+                            <td>{r.motivo}</td>
+                            <td>{r.fechaGeneracion ? new Date(r.fechaGeneracion).toLocaleString('es-GT') : '—'}</td>
+                            <td>{r.estadoActual}</td>
+                            <td>{r.fechaAtencion ? new Date(r.fechaAtencion).toLocaleString('es-GT') : '—'}</td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
@@ -414,7 +455,17 @@ export default function ReportesOperativosMaquinasSection() {
                 </div>
               </div>
               <div className="reporte-inc-table-wrap">
-                <h3 className="reporte-inc-subtitle">Detalle de mantenimientos</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                  <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de mantenimientos</h3>
+                  <input 
+                    type="text" 
+                    placeholder="Buscar por máquina..." 
+                    value={filtroMaquinaMant}
+                    onChange={(e) => setFiltroMaquinaMant(e.target.value)}
+                    className="admin-input"
+                    style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                  />
+                </div>
                 <div className="crudx-table-scroll">
                   <table className="crudx-table reporte-inc-table">
                     <thead>
@@ -426,14 +477,16 @@ export default function ReportesOperativosMaquinasSection() {
                       </tr>
                     </thead>
                     <tbody>
-                      {dataMantenimientos.detalle.map((r) => (
-                        <tr key={String(r.mantenimientoId)}>
-                          <td>{r.maquina}</td>
-                          <td>{r.tipoMaquina}</td>
-                          <td>{r.fechaMantenimiento ? new Date(r.fechaMantenimiento).toLocaleString('es-GT') : '—'}</td>
-                          <td>{r.descripcion}</td>
-                        </tr>
-                      ))}
+                      {dataMantenimientos.detalle
+                        .filter(r => r.maquina?.toLowerCase().includes(filtroMaquinaMant.toLowerCase()))
+                        .map((r) => (
+                          <tr key={String(r.mantenimientoId)}>
+                            <td>{r.maquina}</td>
+                            <td>{r.tipoMaquina}</td>
+                            <td>{r.fechaMantenimiento ? new Date(r.fechaMantenimiento).toLocaleString('es-GT') : '—'}</td>
+                            <td>{r.descripcion}</td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
@@ -455,7 +508,17 @@ export default function ReportesOperativosMaquinasSection() {
                 </article>
               </div>
               <div className="reporte-inc-table-wrap">
-                <h3 className="reporte-inc-subtitle">Detalle de recargas</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                  <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de recargas</h3>
+                  <input 
+                    type="text" 
+                    placeholder="Buscar por máquina..." 
+                    value={filtroMaquinaRecargas}
+                    onChange={(e) => setFiltroMaquinaRecargas(e.target.value)}
+                    className="admin-input"
+                    style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                  />
+                </div>
                 <div className="crudx-table-scroll">
                   <table className="crudx-table reporte-inc-table">
                     <thead>
@@ -466,13 +529,15 @@ export default function ReportesOperativosMaquinasSection() {
                       </tr>
                     </thead>
                     <tbody>
-                      {dataRecargas.detalle.map((r) => (
-                        <tr key={String(r.recargaId)}>
-                          <td>{r.maquina}</td>
-                          <td>{r.fechaRecarga ? new Date(r.fechaRecarga).toLocaleString('es-GT') : '—'}</td>
-                          <td>{r.descripcion}</td>
-                        </tr>
-                      ))}
+                      {dataRecargas.detalle
+                        .filter(r => r.maquina?.toLowerCase().includes(filtroMaquinaRecargas.toLowerCase()))
+                        .map((r) => (
+                          <tr key={String(r.recargaId)}>
+                            <td>{r.maquina}</td>
+                            <td>{r.fechaRecarga ? new Date(r.fechaRecarga).toLocaleString('es-GT') : '—'}</td>
+                            <td>{r.descripcion}</td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
@@ -537,21 +602,68 @@ export default function ReportesOperativosMaquinasSection() {
               </div>
 
               <div className="reporte-inc-chart-wrap">
-                <h3 className="reporte-inc-subtitle">Incidentes por tipo</h3>
+                <h3 className="reporte-inc-subtitle">Incidentes por tipo (¡Haz clic en una barra!)</h3>
                 <div style={{ height: 280 }}>
-                  <Bar data={incidentesTipoChartData} options={{ responsive: true, maintainAspectRatio: false }} />
+                  <Bar 
+                    data={incidentesTipoChartData} 
+                    options={{ 
+                      responsive: true, 
+                      maintainAspectRatio: false,
+                      onClick: (e, elements, chart) => {
+                        if (elements.length > 0) {
+                          setFiltroTipoIncidente(chart.data.labels[elements[0].index]);
+                        }
+                      }
+                    }} 
+                  />
                 </div>
               </div>
 
               <div className="reporte-inc-chart-wrap">
-                <h3 className="reporte-inc-subtitle">Proporción resueltos vs pendientes</h3>
+                <h3 className="reporte-inc-subtitle">Proporción resueltos vs pendientes (¡Haz clic en un segmento!)</h3>
                 <div style={{ height: 260, maxWidth: 360 }}>
-                  <Pie data={incidentesPieData} />
+                  <Pie 
+                    data={incidentesPieData} 
+                    options={{
+                      onClick: (e, elements, chart) => {
+                        if (elements.length > 0) {
+                          const label = chart.data.labels[elements[0].index];
+                          // Convertir "Resueltos" a "resuelto", "Pendientes" a "pendiente"
+                          const clave = label.toLowerCase().slice(0, -1);
+                          setFEstadoResolucion(clave);
+                        }
+                      }
+                    }}
+                  />
                 </div>
               </div>
 
               <div className="reporte-inc-table-wrap">
-                <h3 className="reporte-inc-subtitle">Detalle de incidentes</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                  <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de incidentes</h3>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    {filtroTipoIncidente && (
+                      <button 
+                        type="button" 
+                        className="admin-btn-ghost" 
+                        onClick={() => setFiltroTipoIncidente('')}
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                      >
+                        Tipo: {filtroTipoIncidente} ✖
+                      </button>
+                    )}
+                    {fEstadoResolucion && (
+                      <button 
+                        type="button" 
+                        className="admin-btn-ghost" 
+                        onClick={() => setFEstadoResolucion('')}
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                      >
+                        Estado: {fEstadoResolucion} ✖
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <div className="crudx-table-scroll">
                   <table className="crudx-table reporte-inc-table">
                     <thead>

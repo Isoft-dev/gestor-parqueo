@@ -33,7 +33,7 @@ async function parseJsonSafe(res) {
   }
 }
 
-function TiempoEstadiaPieChart({ rows }) {
+function TiempoEstadiaPieChart({ rows, onPieClick }) {
   const items = (Array.isArray(rows) ? rows : [])
     .map((r) => ({
       dia: r.diaSemana,
@@ -106,6 +106,13 @@ function TiempoEstadiaPieChart({ rows }) {
         },
       },
     },
+    onClick: (event, elements, chart) => {
+      if (elements && elements.length > 0 && onPieClick) {
+        const dataIndex = elements[0].index;
+        const labelClicked = chart.data.labels[dataIndex];
+        onPieClick(labelClicked);
+      }
+    },
   };
 
   return (
@@ -143,6 +150,12 @@ export default function ReportesPage() {
     entradas_salidas: null,
     tiempo_estadia: null,
   });
+  
+  // Estados para filtros dinámicos locales
+  const [filtroPlaca, setFiltroPlaca] = useState('');
+  const [filtroTipoCliente, setFiltroTipoCliente] = useState('Todos');
+  const [filtroDia, setFiltroDia] = useState('');
+
   const data = dataByTab[tabMov];
 
   useEffect(() => {
@@ -153,6 +166,9 @@ export default function ReportesPage() {
       entradas_salidas: null,
       tiempo_estadia: null,
     });
+    setFiltroPlaca('');
+    setFiltroTipoCliente('Todos');
+    setFiltroDia('');
   }, [tabMov, seccion]);
 
   const generar = async () => {
@@ -284,7 +300,17 @@ export default function ReportesPage() {
                     </article>
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Top 10 vehículos más frecuentes</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Top 10 vehículos más frecuentes</h3>
+                      <input 
+                        type="text" 
+                        placeholder="Buscar placa..." 
+                        value={filtroPlaca}
+                        onChange={(e) => setFiltroPlaca(e.target.value)}
+                        className="admin-input"
+                        style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                      />
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead>
@@ -298,16 +324,18 @@ export default function ReportesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {(Array.isArray(data.top10) ? data.top10 : []).map((r, i) => (
-                            <tr key={`${r.placa}-${i}`}>
-                              <td>{i + 1}</td>
-                              <td>{r.placa}</td>
-                              <td>{r.modelo}</td>
-                              <td>{r.color}</td>
-                              <td>{r.tipoCliente}</td>
-                              <td>{r.visitas}</td>
-                            </tr>
-                          ))}
+                          {(Array.isArray(data.top10) ? data.top10 : [])
+                            .filter(r => r.placa?.toLowerCase().includes(filtroPlaca.toLowerCase()))
+                            .map((r, i) => (
+                              <tr key={`${r.placa}-${i}`}>
+                                <td>{i + 1}</td>
+                                <td>{r.placa}</td>
+                                <td>{r.modelo}</td>
+                                <td>{r.color}</td>
+                                <td>{r.tipoCliente}</td>
+                                <td>{r.visitas}</td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
@@ -333,7 +361,32 @@ export default function ReportesPage() {
                     </article>
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de flujo vehicular</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de flujo vehicular</h3>
+                      
+                      {/* Controles de Filtro Dinámico */}
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <input 
+                          type="text" 
+                          placeholder="Buscar placa..." 
+                          value={filtroPlaca}
+                          onChange={(e) => setFiltroPlaca(e.target.value)}
+                          className="admin-input"
+                          style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                        />
+                        <select 
+                          value={filtroTipoCliente} 
+                          onChange={(e) => setFiltroTipoCliente(e.target.value)}
+                          className="admin-input"
+                          style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                        >
+                          <option value="Todos">Todos los clientes</option>
+                          <option value="Esporádico">Esporádico</option>
+                          <option value="Mensual">Mensual</option>
+                        </select>
+                      </div>
+                    </div>
+
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead>
@@ -348,17 +401,23 @@ export default function ReportesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {(Array.isArray(data.detalle) ? data.detalle : []).map((r, i) => (
-                            <tr key={`${r.referencia}-${i}`}>
-                              <td>{r.tipoCliente}</td>
-                              <td>{r.referencia}</td>
-                              <td>{r.placa}</td>
-                              <td>{r.horaEntrada ? new Date(r.horaEntrada).toLocaleString('es-GT') : '—'}</td>
-                              <td>{r.horaSalida ? new Date(r.horaSalida).toLocaleString('es-GT') : '—'}</td>
-                              <td>{r.tiempoEstadia}</td>
-                              <td>{r.estadoTicket}</td>
-                            </tr>
-                          ))}
+                          {(Array.isArray(data.detalle) ? data.detalle : [])
+                            .filter(r => {
+                              const matchPlaca = r.placa?.toLowerCase().includes(filtroPlaca.toLowerCase());
+                              const matchTipo = filtroTipoCliente === 'Todos' || r.tipoCliente === filtroTipoCliente;
+                              return matchPlaca && matchTipo;
+                            })
+                            .map((r, i) => (
+                              <tr key={`${r.referencia}-${i}`}>
+                                <td>{r.tipoCliente}</td>
+                                <td>{r.referencia}</td>
+                                <td>{r.placa}</td>
+                                <td>{r.horaEntrada ? new Date(r.horaEntrada).toLocaleString('es-GT') : '—'}</td>
+                                <td>{r.horaSalida ? new Date(r.horaSalida).toLocaleString('es-GT') : '—'}</td>
+                                <td>{r.tiempoEstadia}</td>
+                                <td>{r.estadoTicket}</td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
@@ -395,12 +454,24 @@ export default function ReportesPage() {
                   </div>
                   <div className="reporte-inc-chart-wrap">
                     <h3 className="reporte-inc-subtitle">
-                      Distribución de registros por día de la semana (gráfica circular)
+                      Distribución de registros por día de la semana (¡Haz clic en un segmento!)
                     </h3>
-                    <TiempoEstadiaPieChart rows={data.promedioPorDiaSemana} />
+                    <TiempoEstadiaPieChart rows={data.promedioPorDiaSemana} onPieClick={setFiltroDia} />
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Promedio por día de la semana</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Promedio por día de la semana</h3>
+                      {filtroDia && (
+                        <button 
+                          type="button" 
+                          className="admin-btn-ghost" 
+                          onClick={() => setFiltroDia('')}
+                          style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                        >
+                          Quitar filtro: {filtroDia} ✖
+                        </button>
+                      )}
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead>
@@ -411,13 +482,15 @@ export default function ReportesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {(Array.isArray(data.promedioPorDiaSemana) ? data.promedioPorDiaSemana : []).map((r) => (
-                            <tr key={r.diaSemana}>
-                              <td>{r.diaSemana}</td>
-                              <td>{r.promedioEtiqueta}</td>
-                              <td>{r.cantidadRegistros}</td>
-                            </tr>
-                          ))}
+                          {(Array.isArray(data.promedioPorDiaSemana) ? data.promedioPorDiaSemana : [])
+                            .filter(r => !filtroDia || r.diaSemana === filtroDia)
+                            .map((r) => (
+                              <tr key={r.diaSemana}>
+                                <td>{r.diaSemana}</td>
+                                <td>{r.promedioEtiqueta}</td>
+                                <td>{r.cantidadRegistros}</td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>

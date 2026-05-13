@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArcElement,
   BarElement,
@@ -50,10 +50,22 @@ export default function ReportesFinancierosSection() {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
 
+  // Estados para filtros interactivos
+  const [filtroFecha, setFiltroFecha] = useState('');
+  const [filtroReferencia, setFiltroReferencia] = useState('');
+  const [filtroMes, setFiltroMes] = useState('');
+  const [filtroPlaca, setFiltroPlaca] = useState('');
+  const [filtroMaquina, setFiltroMaquina] = useState('');
+
   useEffect(() => {
     // Al cambiar de subpestaña se oculta el reporte anterior.
     setError('');
     setData(null);
+    setFiltroFecha('');
+    setFiltroReferencia('');
+    setFiltroMes('');
+    setFiltroPlaca('');
+    setFiltroMaquina('');
   }, [tab]);
 
   const generate = async () => {
@@ -219,16 +231,28 @@ export default function ReportesFinancierosSection() {
                     <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Vuelto</div><div className="admin-kpi-value">Q{Number(data.totalVuelto || 0).toFixed(2)}</div></article>
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle por máquina</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle por máquina</h3>
+                      <input 
+                        type="text" 
+                        placeholder="Buscar máquina..." 
+                        value={filtroMaquina}
+                        onChange={(e) => setFiltroMaquina(e.target.value)}
+                        className="admin-input"
+                        style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                      />
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead><tr><th>Máquina</th><th>Transacciones</th><th>Monto cobrado</th><th>Vuelto</th><th>Promedio</th><th>Automáticas</th></tr></thead>
                         <tbody>
-                          {data.detalle.map((r) => (
-                            <tr key={String(r.maquinaId)}>
-                              <td>{r.maquina}</td><td>{r.totalTransacciones}</td><td>Q{Number(r.montoTotalCobrado || 0).toFixed(2)}</td><td>Q{Number(r.montoTotalVuelto || 0).toFixed(2)}</td><td>Q{Number(r.promedioCobro || 0).toFixed(2)}</td><td>{r.transaccionesAutomaticas}</td>
-                            </tr>
-                          ))}
+                          {(data.detalle || [])
+                            .filter(r => r.maquina?.toLowerCase().includes(filtroMaquina.toLowerCase()))
+                            .map((r) => (
+                              <tr key={String(r.maquinaId)}>
+                                <td>{r.maquina}</td><td>{r.totalTransacciones}</td><td>Q{Number(r.montoTotalCobrado || 0).toFixed(2)}</td><td>Q{Number(r.montoTotalVuelto || 0).toFixed(2)}</td><td>Q{Number(r.promedioCobro || 0).toFixed(2)}</td><td>{r.transaccionesAutomaticas}</td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
@@ -244,8 +268,23 @@ export default function ReportesFinancierosSection() {
               {data.porMes?.length ? (
                 <>
                   <div className="reporte-inc-chart-wrap">
-                    <h3 className="reporte-inc-subtitle">Tendencia mensual de recaudación</h3>
-                    <div style={{ height: 280 }}><Line data={lineData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+                    <h3 className="reporte-inc-subtitle">Tendencia mensual de recaudación (¡Haz clic en un punto para filtrar!)</h3>
+                    <div style={{ height: 280 }}>
+                      <Line 
+                        data={lineData} 
+                        options={{ 
+                          responsive: true, 
+                          maintainAspectRatio: false,
+                          onClick: (event, elements, chart) => {
+                            if (elements.length > 0) {
+                              const dataIndex = elements[0].index;
+                              const labelClicked = chart.data.labels[dataIndex];
+                              setFiltroMes(labelClicked);
+                            }
+                          }
+                        }} 
+                      />
+                    </div>
                   </div>
                   <div className="reporte-inc-table-wrap">
                     <h3 className="reporte-inc-subtitle">Resumen mensual</h3>
@@ -261,14 +300,42 @@ export default function ReportesFinancierosSection() {
                     </div>
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de pagos</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de pagos</h3>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        {filtroMes && (
+                          <button 
+                            type="button" 
+                            className="admin-btn-ghost" 
+                            onClick={() => setFiltroMes('')}
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                          >
+                            Quitar filtro: {filtroMes} ✖
+                          </button>
+                        )}
+                        <input 
+                          type="text" 
+                          placeholder="Buscar por placa..." 
+                          value={filtroPlaca}
+                          onChange={(e) => setFiltroPlaca(e.target.value)}
+                          className="admin-input"
+                          style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                        />
+                      </div>
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead><tr><th>Cliente</th><th>Placa</th><th>Fecha pago</th><th>Monto</th><th>Método pago</th></tr></thead>
                         <tbody>
-                          {(data.detalle || []).map((r) => (
-                            <tr key={String(r.id)}><td>{r.cliente}</td><td>{r.placa}</td><td>{r.fechaPago ? new Date(r.fechaPago).toLocaleString('es-GT') : '—'}</td><td>Q{Number(r.monto || 0).toFixed(2)}</td><td>{r.metodoPago}</td></tr>
-                          ))}
+                          {(data.detalle || [])
+                            .filter(r => {
+                              const matchPlaca = r.placa?.toLowerCase().includes(filtroPlaca.toLowerCase());
+                              const matchMes = filtroMes ? (r.fechaPago || '').startsWith(filtroMes) : true;
+                              return matchPlaca && matchMes;
+                            })
+                            .map((r) => (
+                              <tr key={String(r.id)}><td>{r.cliente}</td><td>{r.placa}</td><td>{r.fechaPago ? new Date(r.fechaPago).toLocaleString('es-GT') : '—'}</td><td>Q{Number(r.monto || 0).toFixed(2)}</td><td>{r.metodoPago}</td></tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
@@ -304,16 +371,62 @@ export default function ReportesFinancierosSection() {
                     <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Esporádicos</div><div className="admin-kpi-value">Q{Number(data.ingresoEsporadico || 0).toFixed(2)}</div></article>
                     <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Membresía</div><div className="admin-kpi-value">Q{Number(data.ingresoMensual || 0).toFixed(2)}</div></article>
                   </div>
-                  <div className="reporte-inc-chart-wrap"><h3 className="reporte-inc-subtitle">Ingresos diarios por tipo de cliente</h3><div style={{ height: 280 }}><Bar data={barTotalesData} options={{ responsive: true, maintainAspectRatio: false }} /></div></div>
+                  <div className="reporte-inc-chart-wrap">
+                    <h3 className="reporte-inc-subtitle">Ingresos diarios por tipo de cliente (¡Haz clic en una barra para filtrar la tabla!)</h3>
+                    <div style={{ height: 280 }}>
+                      <Bar 
+                        data={barTotalesData} 
+                        options={{ 
+                          responsive: true, 
+                          maintainAspectRatio: false,
+                          onClick: (event, elements, chart) => {
+                            if (elements.length > 0) {
+                              const dataIndex = elements[0].index;
+                              const labelClicked = chart.data.labels[dataIndex];
+                              setFiltroFecha(labelClicked); // Filtro interactivo cruzado (drill-down)
+                            }
+                          }
+                        }} 
+                      />
+                    </div>
+                  </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de transacciones</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de transacciones</h3>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        {filtroFecha && (
+                          <button 
+                            type="button" 
+                            className="admin-btn-ghost" 
+                            onClick={() => setFiltroFecha('')}
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                          >
+                            Quitar filtro: {filtroFecha} ✖
+                          </button>
+                        )}
+                        <input 
+                          type="text" 
+                          placeholder="Buscar por referencia..." 
+                          value={filtroReferencia}
+                          onChange={(e) => setFiltroReferencia(e.target.value)}
+                          className="admin-input"
+                          style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                        />
+                      </div>
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead><tr><th>Fecha</th><th>Tipo cliente</th><th>Monto</th><th>Método pago</th><th>Referencia</th></tr></thead>
                         <tbody>
-                          {(data.detalleTransacciones || []).map((r) => (
-                            <tr key={`${r.referencia}-${r.fecha}`}><td>{r.fecha ? new Date(r.fecha).toLocaleString('es-GT') : '—'}</td><td>{r.tipoCliente}</td><td>Q{Number(r.monto || 0).toFixed(2)}</td><td>{r.metodoPago || '—'}</td><td>{r.referencia}</td></tr>
-                          ))}
+                          {(data.detalleTransacciones || [])
+                            .filter(r => {
+                              const matchRef = r.referencia?.toLowerCase().includes(filtroReferencia.toLowerCase());
+                              const matchFecha = filtroFecha ? (r.fecha || '').startsWith(filtroFecha) : true;
+                              return matchRef && matchFecha;
+                            })
+                            .map((r) => (
+                              <tr key={`${r.referencia}-${r.fecha}`}><td>{r.fecha ? new Date(r.fecha).toLocaleString('es-GT') : '—'}</td><td>{r.tipoCliente}</td><td>Q{Number(r.monto || 0).toFixed(2)}</td><td>{r.metodoPago || '—'}</td><td>{r.referencia}</td></tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>

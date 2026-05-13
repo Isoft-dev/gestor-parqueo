@@ -41,11 +41,14 @@ export default function ReportesMembresiasClientesSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [filtroBusquedaMora, setFiltroBusquedaMora] = useState('');
 
   useEffect(() => {
     // Limpia resultados al cambiar de subreporte para evitar residuos visuales.
     setError('');
     setData(null);
+    setEstadoFiltro('');
+    setFiltroBusquedaMora('');
   }, [tab]);
 
   const buscarClientes = async () => {
@@ -119,6 +122,15 @@ export default function ReportesMembresiasClientesSection() {
         backgroundColor: (data?.porEstado || []).map((x) => x.color || '#64748b'),
       },
     ],
+  };
+
+  const pieOptionsEstado = {
+    onClick: (e, elements, chart) => {
+      if (elements.length > 0) {
+        const label = chart.data.labels[elements[0].index];
+        setEstadoFiltro(label);
+      }
+    }
   };
 
   const estadosOpciones = [...new Set((data?.detalle || []).map((x) => x.estadoActual).filter(Boolean))];
@@ -206,21 +218,37 @@ export default function ReportesMembresiasClientesSection() {
                     <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Monto pendiente</div><div className="admin-kpi-value">Q{Number(data.montoTotalReferencia || 0).toFixed(2)}</div></article>
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de mora</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de mora</h3>
+                      <input 
+                        type="text" 
+                        placeholder="Buscar cliente o placa..." 
+                        value={filtroBusquedaMora}
+                        onChange={(e) => setFiltroBusquedaMora(e.target.value)}
+                        className="admin-input"
+                        style={{ padding: '0.4rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                      />
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead><tr><th>Cliente</th><th>Correo</th><th>Teléfono</th><th>Placa</th><th>Vencimiento</th><th>Días mora</th></tr></thead>
                         <tbody>
-                          {data.detalle.map((r) => (
-                            <tr key={String(r.memId)}>
-                              <td>{r.nombreCompleto}</td>
-                              <td>{r.correo}</td>
-                              <td>{r.telefono}</td>
-                              <td>{r.placa}</td>
-                              <td>{r.fechaVencimiento || '—'}</td>
-                              <td>{r.diasMora}</td>
-                            </tr>
-                          ))}
+                          {data.detalle
+                            .filter(r => {
+                              if (!filtroBusquedaMora) return true;
+                              const s = filtroBusquedaMora.toLowerCase();
+                              return r.nombreCompleto?.toLowerCase().includes(s) || r.placa?.toLowerCase().includes(s);
+                            })
+                            .map((r) => (
+                              <tr key={String(r.memId)}>
+                                <td>{r.nombreCompleto}</td>
+                                <td>{r.correo}</td>
+                                <td>{r.telefono}</td>
+                                <td>{r.placa}</td>
+                                <td>{r.fechaVencimiento || '—'}</td>
+                                <td>{r.diasMora}</td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
@@ -241,8 +269,8 @@ export default function ReportesMembresiasClientesSection() {
                     <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Vencidas</div><div className="admin-kpi-value">{data.resumen?.vencidas ?? 0}</div></article>
                   </div>
                   <div className="reporte-inc-chart-wrap">
-                    <h3 className="reporte-inc-subtitle">Proporción por estado</h3>
-                    <div style={{ height: 260, maxWidth: 360 }}><Pie data={pieDataEstado} /></div>
+                    <h3 className="reporte-inc-subtitle">Proporción por estado (¡Haz clic en un segmento!)</h3>
+                    <div style={{ height: 260, maxWidth: 360 }}><Pie data={pieDataEstado} options={pieOptionsEstado} /></div>
                   </div>
                   <section className="reporte-inc-card" style={{ marginTop: '0.5rem' }}>
                     <form className="reporte-inc-form" onSubmit={(e) => e.preventDefault()}>
