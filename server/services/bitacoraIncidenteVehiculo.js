@@ -1,11 +1,38 @@
-import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
+import { executeProcedure, executeSql } from '../db/oracle.js';
 
 export async function getAll() {
-  return executeCursor(`BEGIN SP_BITACORA_INC_VEH_GET_ALL(:cursor); END;`);
+  return executeSql(
+    `SELECT b.BIV_ID, b.BIV_DESCRIPCION, b.BIV_FECHA_HORA,
+            b.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.CLI_ID,
+            c.CLI_PRIMER_NOMBRE, c.CLI_PRIMER_APELLIDO, c.CLI_CORREO,
+            b.INC_ID, i.INC_TIPO, i.INC_DESCRIPCION,
+            b.BIV_RESUELTO, b.BIV_FECHA_RESOLUCION,
+            b.USU_ID, u.USU_PRIMER_NOMBRE, u.USU_PRIMER_APELLIDO
+       FROM PAR_BITACORA_INCIDENTE_VEHICULO b
+       JOIN PAR_VEHICULO v ON b.VEH_ID = v.VEH_ID
+       JOIN PAR_INCIDENTE i ON b.INC_ID = i.INC_ID
+       LEFT JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
+       LEFT JOIN PAR_USUARIO u ON b.USU_ID = u.USU_ID
+      ORDER BY b.BIV_FECHA_HORA DESC`
+  );
 }
 
 export async function getById(id) {
-  const rows = await executeCursor(`BEGIN SP_BITACORA_INC_VEH_GET_BY_ID(:id, :cursor); END;`, { id });
+  const rows = await executeSql(
+    `SELECT b.BIV_ID, b.BIV_DESCRIPCION, b.BIV_FECHA_HORA,
+            b.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.CLI_ID,
+            c.CLI_PRIMER_NOMBRE, c.CLI_PRIMER_APELLIDO, c.CLI_CORREO,
+            b.INC_ID, i.INC_TIPO, i.INC_DESCRIPCION,
+            b.BIV_RESUELTO, b.BIV_FECHA_RESOLUCION,
+            b.USU_ID, u.USU_PRIMER_NOMBRE, u.USU_PRIMER_APELLIDO
+       FROM PAR_BITACORA_INCIDENTE_VEHICULO b
+       JOIN PAR_VEHICULO v ON b.VEH_ID = v.VEH_ID
+       JOIN PAR_INCIDENTE i ON b.INC_ID = i.INC_ID
+       LEFT JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
+       LEFT JOIN PAR_USUARIO u ON b.USU_ID = u.USU_ID
+      WHERE b.BIV_ID = :id`,
+    { id }
+  );
   return rows[0] || null;
 }
 

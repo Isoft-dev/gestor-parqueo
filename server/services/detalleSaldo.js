@@ -1,4 +1,6 @@
 import { executeSql, executeProcedure } from '../db/oracle.js';
+import { insertMachineAlerta } from '../utils/systemAlert.js';
+import { isTipoMaquinaCobro } from '../utils/tipoMaquinaRules.js';
 
 async function hasUmbralMinimoColumn() {
   const rows = await executeSql(
@@ -45,7 +47,33 @@ export async function getById(id) {
   return rows[0] || null;
 }
 
+async function assertMaquinaTipoCobro(maqId) {
+  const rows = await executeSql(
+    `SELECT m.MAQ_ID, tm.TMA_TIPO
+       FROM PAR_MAQUINA m
+       JOIN PAR_TIPO_MAQUINA tm ON m.TMA_ID = tm.TMA_ID
+      WHERE m.MAQ_ID = :maqId`,
+    { maqId }
+  );
+  const t = rows[0]?.TMA_TIPO;
+  if (!t || !isTipoMaquinaCobro(t)) {
+    throw new Error(
+      'El detalle de saldo solo aplica a máquinas cuyo tipo (TMA_TIPO) sea de cobro.'
+    );
+  }
+}
+
 export async function create(data) {
+  await assertMaquinaTipoCobro(data.MAQ_ID);
+
+  const sdiRows = await executeSql(
+    `SELECT SDI_VALOR FROM PAR_SALDO_DISPONIBLE WHERE SDI_ID = :id`,
+    { id: data.SDI_ID ?? null }
+  );
+  const valorUnit = Number(sdiRows[0]?.SDI_VALOR ?? 0);
+  const cantidad = Number(data.DSA_CANTIDAD ?? 0);
+  const subtotalCalc = Number((valorUnit * cantidad).toFixed(2));
+
   const withUmbral = await hasUmbralMinimoColumn();
   const identity = await executeSql(
     `SELECT GENERATION_TYPE
@@ -53,15 +81,24 @@ export async function create(data) {
       WHERE TABLE_NAME='PAR_DETALLE_SALDO' AND COLUMN_NAME='DSA_ID'`
   );
   const useIdentity = String(identity[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS' || !data.DSA_ID;
+
+  let umbralMin = null;
+  if (withUmbral) {
+    umbralMin =
+      data.DSA_UMBRAL_MINIMO != null && data.DSA_UMBRAL_MINIMO !== ''
+        ? Number(data.DSA_UMBRAL_MINIMO)
+        : null;
+  }
+
   if (useIdentity) {
     if (withUmbral) {
       await executeSql(
         `INSERT INTO PAR_DETALLE_SALDO (DSA_CANTIDAD, DSA_SUBTOTAL, DSA_UMBRAL_MINIMO, SDI_ID, MAQ_ID)
          VALUES (:DSA_CANTIDAD, :DSA_SUBTOTAL, :DSA_UMBRAL_MINIMO, :SDI_ID, :MAQ_ID)`,
         {
-          DSA_CANTIDAD: data.DSA_CANTIDAD ?? null,
-          DSA_SUBTOTAL: data.DSA_SUBTOTAL ?? null,
-          DSA_UMBRAL_MINIMO: data.DSA_UMBRAL_MINIMO ?? null,
+          DSA_CANTIDAD: cantidad,
+          DSA_SUBTOTAL: subtotalCalc,
+          DSA_UMBRAL_MINIMO: umbralMin,
           SDI_ID: data.SDI_ID ?? null,
           MAQ_ID: data.MAQ_ID ?? null,
         },
@@ -72,8 +109,8 @@ export async function create(data) {
         `INSERT INTO PAR_DETALLE_SALDO (DSA_CANTIDAD, DSA_SUBTOTAL, SDI_ID, MAQ_ID)
          VALUES (:DSA_CANTIDAD, :DSA_SUBTOTAL, :SDI_ID, :MAQ_ID)`,
         {
-          DSA_CANTIDAD: data.DSA_CANTIDAD ?? null,
-          DSA_SUBTOTAL: data.DSA_SUBTOTAL ?? null,
+          DSA_CANTIDAD: cantidad,
+          DSA_SUBTOTAL: subtotalCalc,
           SDI_ID: data.SDI_ID ?? null,
           MAQ_ID: data.MAQ_ID ?? null,
         },
@@ -86,19 +123,38 @@ export async function create(data) {
         ORDER BY DSA_ID DESC`,
       { maqId: data.MAQ_ID ?? null, sdiId: data.SDI_ID ?? null }
     );
-    return rows[0] ? getById(rows[0].DSA_ID) : null;
+    const created = rows[0] ? await getById(rows[0].DSA_ID) : null;
+    let warning = null;
+    if (
+      created &&
+      withUmbral &&
+      umbralMin != null &&
+      Number.isFinite(umbralMin) &&
+      cantidad <= umbralMin
+    ) {
+      warning =
+        `Cantidad (${cantidad}) en o por debajo del umbral mínimo (${umbralMin}). Considere recargar la máquina.`;
+      await insertMachineAlerta({
+        maqId: data.MAQ_ID,
+        motivo: 'Umbral mínimo de billetes',
+        descripcion: `DSA_ID ${created.DSA_ID}: cantidad ${cantidad}, umbral ${umbralMin} (SDI_ID ${data.SDI_ID}).`,
+        preferSaldoBajo: true,
+      });
+    }
+    return created ? { ...created, warning } : null;
   }
   await executeProcedure(
     `BEGIN SP_DETALLE_SALDO_CREATE(:DSA_ID, :DSA_CANTIDAD, :DSA_SUBTOTAL, :SDI_ID, :MAQ_ID); END;`,
     {
       DSA_ID: data.DSA_ID ?? null,
-      DSA_CANTIDAD: data.DSA_CANTIDAD ?? null,
-      DSA_SUBTOTAL: data.DSA_SUBTOTAL ?? null,
+      DSA_CANTIDAD: cantidad,
+      DSA_SUBTOTAL: subtotalCalc,
       SDI_ID: data.SDI_ID ?? null,
       MAQ_ID: data.MAQ_ID ?? null,
     }
   );
-  return getById(data.DSA_ID);
+  const row = await getById(data.DSA_ID);
+  return row ? { ...row, warning: null } : null;
 }
 
 export async function getByMachineId(maqId) {

@@ -23,22 +23,59 @@ function daysUntilVencimiento(vencDate) {
 }
 
 /**
- * Índice de etapa: 0 = -3 días, 1 = -2, 2 = mismo día, 3 = día después.
+ * Definicion de etapas de recordatorio. Mapeo directo dias-hasta-vencimiento → metadata.
+ * Cada etapa se relaciona con un TNO_TIPO buscando por substring (case-insensitive),
+ * de modo que el orden de TNO_ID en la tabla no afecta el comportamiento.
  */
-function stageIndex(daysUntil) {
-  if (daysUntil === 3) return 0;
-  if (daysUntil === 2) return 1;
-  if (daysUntil === 0) return 2;
-  if (daysUntil === -1) return 3;
-  return -1;
+const STAGE_DEFS = [
+  {
+    daysUntil: 3,
+    asunto: 'Recordatorio: tu membresía vence en 3 días',
+    etapaCorta: '3 días antes',
+    tipoMatch: '-3d',
+  },
+  {
+    daysUntil: 2,
+    asunto: 'Recordatorio: tu membresía vence en 2 días',
+    etapaCorta: '2 días antes',
+    tipoMatch: '-2d',
+  },
+  {
+    daysUntil: 1,
+    asunto: 'Recordatorio: tu membresía vence mañana',
+    etapaCorta: '1 día antes',
+    tipoMatch: '-1d',
+  },
+  {
+    daysUntil: 0,
+    asunto: 'Aviso: tu membresía vence hoy',
+    etapaCorta: 'día del vencimiento',
+    tipoMatch: 'venc',
+  },
+  {
+    daysUntil: -1,
+    asunto: 'Aviso: tu membresía venció ayer',
+    etapaCorta: 'día siguiente al vencimiento',
+    tipoMatch: '+1d',
+  },
+];
+
+function stageDefForDaysUntil(daysUntil) {
+  return STAGE_DEFS.find((d) => d.daysUntil === daysUntil) || null;
 }
 
-function proximaFechaParaEtapa(vencimiento, stageIdx) {
+/**
+ * Próxima fecha de envío programada según la etapa actual.
+ * Si todavía hay etapas posteriores, apunta al siguiente hito; si ya es la última, +1 día.
+ */
+function proximaFechaParaStage(vencimiento, daysUntil) {
   const V = truncDate(vencimiento);
-  if (stageIdx === 0) return addDays(V, -2);
-  if (stageIdx === 1) return V;
-  if (stageIdx === 2) return addDays(V, 1);
-  return addDays(V, 2);
+  const idx = STAGE_DEFS.findIndex((d) => d.daysUntil === daysUntil);
+  if (idx === -1) return addDays(V, 2);
+  const next = STAGE_DEFS[idx + 1];
+  if (!next) return addDays(V, 2);
+  // daysUntil del siguiente hito → fecha = V - daysUntil
+  return addDays(V, -next.daysUntil);
 }
 
 async function listTiposNotificacion() {
@@ -47,29 +84,29 @@ async function listTiposNotificacion() {
   );
 }
 
-/** Recordatorios de vencimiento: excluye tipos de suspensión u otros; orden estable por TNO_ID. */
-function reminderTiposOrdered(tipos) {
-  return tipos
-    .filter((r) => {
-      const t = String(r.TNO_TIPO ?? r.tno_tipo ?? '').toLowerCase();
-      return !t.includes('susp');
-    })
-    .sort((a, b) => Number(a.TNO_ID ?? a.tno_id) - Number(b.TNO_ID ?? b.tno_id));
+/** Tipos de recordatorio (excluye suspensión). */
+function reminderTipos(tipos) {
+  return tipos.filter((r) => {
+    const t = String(r.TNO_TIPO ?? r.tno_tipo ?? '').toLowerCase();
+    return !t.includes('susp');
+  });
 }
 
-function tnoIdForStage(tipos, stageIdx) {
-  if (!tipos.length) return null;
-  const rec = reminderTiposOrdered(tipos);
-  if (rec.length >= 4) {
-    const row = rec[stageIdx];
-    return row ? row.TNO_ID ?? row.tno_id : null;
-  }
-  if (rec.length > 0) {
-    const row = rec[Math.min(stageIdx, rec.length - 1)];
-    return row.TNO_ID ?? row.tno_id;
-  }
-  const row = tipos[stageIdx] ?? tipos[tipos.length - 1];
-  return row.TNO_ID ?? row.tno_id;
+/**
+ * Devuelve el TNO_ID que corresponde a una etapa, buscando por TNO_TIPO substring
+ * (más robusto que depender del orden de inserción).
+ */
+function tnoIdForStageDef(tipos, stageDef) {
+  if (!tipos.length || !stageDef) return null;
+  const recs = reminderTipos(tipos);
+  const target = String(stageDef.tipoMatch).toLowerCase();
+  const exact = recs.find((t) =>
+    String(t.TNO_TIPO ?? t.tno_tipo ?? '').toLowerCase().includes(target),
+  );
+  if (exact) return exact.TNO_ID ?? exact.tno_id;
+  // Fallback: si no hay match, usa el último recordatorio disponible
+  const last = recs[recs.length - 1] ?? tipos[tipos.length - 1];
+  return last ? (last.TNO_ID ?? last.tno_id) : null;
 }
 
 async function tipoNotificacionSuspensionId() {
@@ -87,7 +124,9 @@ async function tipoNotificacionSuspensionId() {
 }
 
 /**
- * Suspender membresías con más de 3 días de mora sin pago posterior al vencimiento.
+ * Suspender membresías cuyo periodo ya venció (día calendario siguiente a MEM_FECHA_VENCIMIENTO)
+ * sin un pago registrado que cubra la vigencia (pago con fecha >= vencimiento).
+ * El ingreso con tag queda bloqueado hasta renovar en máquina de cobro («Pagar membresía»).
  */
 export async function suspendMembershipsOverdue() {
   const suspRows = await executeSql(
@@ -110,7 +149,7 @@ export async function suspendMembershipsOverdue() {
   const candidatos = await executeSql(
     `SELECT m.MEM_ID
        FROM PAR_MEMBRESIA m
-      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO) + 3
+      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
         AND m.EME_ID <> :suspId
         AND NOT EXISTS (
           SELECT 1
@@ -126,7 +165,7 @@ export async function suspendMembershipsOverdue() {
     `UPDATE PAR_MEMBRESIA m
         SET EME_ID = :suspId,
             MEM_FECHA_ULTIMO_CAMBIO_ESTADO = SYSDATE
-      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO) + 3
+      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
         AND m.EME_ID <> :suspId
         AND NOT EXISTS (
           SELECT 1
@@ -147,7 +186,7 @@ export async function suspendMembershipsOverdue() {
           SELECT 1 FROM PAR_MEMBRESIA m
            WHERE m.ESP_ID = e.ESP_ID
              AND m.EME_ID = :suspId
-             AND TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO) + 3
+             AND TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
         )`,
       { ees: disponibleEesId, suspId },
       { autoCommit: true },
@@ -169,13 +208,15 @@ export async function suspendMembershipsOverdue() {
       );
       const to = rowsCliente[0]?.CLI_CORREO ?? rowsCliente[0]?.cli_correo;
       const nombre = rowsCliente[0]?.CLI_PRIMER_NOMBRE ?? rowsCliente[0]?.cli_primer_nombre ?? '';
+      const asuntoSusp = 'Membresía suspendida por vencimiento';
+      const cuerpoSusp = `Hola ${nombre}, tu membresía (MEM_ID ${memId}) quedó suspendida por vencimiento del periodo pagado. Puedes renovarla en la máquina de cobro (opción Pagar membresía) o en recepción.`;
       let exito = 0;
       try {
         if (to) {
           await sendPlainMail({
             to,
-            subject: 'Membresía suspendida por mora',
-            text: `Hola ${nombre}, tu membresía (MEM_ID ${memId}) fue suspendida automáticamente por mora superior a 3 días. Regulariza tu pago en recepción.`,
+            subject: asuntoSusp,
+            text: cuerpoSusp,
           });
           exito = 1;
         }
@@ -193,6 +234,8 @@ export async function suspendMembershipsOverdue() {
         NOT_ULTIMA_FECHA_ENVIO: new Date(),
         NOT_PROXIMA_FECHA_ENVIO: prox,
         NOT_EXITO: exito,
+        NOT_ASUNTO: asuntoSusp,
+        NOT_CUERPO: cuerpoSusp,
       });
     } catch (e) {
       await insertSystemAlerta({
@@ -206,7 +249,7 @@ export async function suspendMembershipsOverdue() {
 }
 
 /**
- * Recordatorios: 3 días antes, 2, vencimiento, día siguiente.
+ * Recordatorios: 3 días antes, 2, 1, vencimiento, día siguiente.
  * Respeta pago antes del hito, evita duplicado mismo día mismo TNO, NOT_PROXIMA_FECHA_ENVIO al siguiente hito.
  */
 export async function sendMembershipDueReminders() {
@@ -220,7 +263,7 @@ export async function sendMembershipDueReminders() {
        JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
        JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
       WHERE LOWER(em.EME_ESTADO) LIKE '%activ%'
-        AND TRUNC(m.MEM_FECHA_VENCIMIENTO) - TRUNC(SYSDATE) IN (3, 2, 0, -1)`,
+        AND TRUNC(m.MEM_FECHA_VENCIMIENTO) - TRUNC(SYSDATE) IN (3, 2, 1, 0, -1)`,
   );
 
   let sent = 0;
@@ -230,10 +273,10 @@ export async function sendMembershipDueReminders() {
     if (!memId || !venc) continue;
 
     const daysUntil = daysUntilVencimiento(venc);
-    const stageIdx = stageIndex(daysUntil);
-    if (stageIdx < 0) continue;
+    const stageDef = stageDefForDaysUntil(daysUntil);
+    if (!stageDef) continue;
 
-    const tnoId = tnoIdForStage(tipos, stageIdx);
+    const tnoId = tnoIdForStageDef(tipos, stageDef);
     if (tnoId == null) continue;
 
     const yaHoy = await executeSql(
@@ -285,15 +328,39 @@ export async function sendMembershipDueReminders() {
 
     const to = row.CLI_CORREO ?? row.cli_correo;
     const nombre = row.CLI_PRIMER_NOMBRE ?? row.cli_primer_nombre ?? '';
-    const proxEnvio = proximaFechaParaEtapa(venc, stageIdx);
+    const proxEnvio = proximaFechaParaStage(venc, daysUntil);
+    const asunto = stageDef.asunto;
+    const etapaTxt = stageDef.etapaCorta;
+    const fechaVencTxt = (() => {
+      const d = truncDate(venc);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dd}/${mm}/${d.getFullYear()}`;
+    })();
+    const cuerpoFraseVenc = (() => {
+      if (daysUntil === 0) return 'vence HOY';
+      if (daysUntil === -1) return 'venció el ' + fechaVencTxt;
+      if (daysUntil === 1) return 'vence MAÑANA (' + fechaVencTxt + ')';
+      return 'vence el ' + fechaVencTxt;
+    })();
+    const cuerpo = [
+      `Hola ${nombre || 'cliente'},`,
+      '',
+      `Te recordamos que tu membresía de parqueo (ID ${memId}) ${cuerpoFraseVenc}.`,
+      `Etapa de aviso: ${etapaTxt}.`,
+      '',
+      'Para renovar puedes acercarte a una máquina de cobro y elegir la opción "Pagar membresía", o pasar por recepción.',
+      '',
+      'Gracias por confiar en el servicio de parqueo.',
+    ].join('\n');
+
     let exito = 0;
-    const etapas = ['3 días antes del vencimiento', '2 días antes del vencimiento', 'día del vencimiento', 'día siguiente al vencimiento'];
     try {
       if (to) {
         await sendPlainMail({
           to,
-          subject: 'Recordatorio membresía parqueo',
-          text: `Hola ${nombre}, recordatorio (${etapas[stageIdx] || 'vencimiento'}). MEM_ID ${memId}. Revisa el pago de tu mensualidad.`,
+          subject: asunto,
+          text: cuerpo,
         });
         exito = 1;
       }
@@ -311,6 +378,8 @@ export async function sendMembershipDueReminders() {
       NOT_ULTIMA_FECHA_ENVIO: new Date(),
       NOT_PROXIMA_FECHA_ENVIO: proxEnvio,
       NOT_EXITO: exito,
+      NOT_ASUNTO: asunto,
+      NOT_CUERPO: cuerpo,
     });
     sent += 1;
   }

@@ -2,9 +2,11 @@ node_modules/
 server/data/
 *.log
 client/dist/
+# Caché de Vite (pre-bundle de dependencias); no versionar
+.vite/
+client/.vite/
 .env
 server/.env
-server/scripts/
 
 .vscode/*
 !.vscode/extensions.json

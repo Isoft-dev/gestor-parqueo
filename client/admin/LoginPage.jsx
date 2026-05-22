@@ -1,20 +1,20 @@
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth, isAdminPanelUser } from '../context/AuthContext.jsx';
+import { canAccessAdminPanel, getAdminHomePath } from './adminRoleAccess.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname || '/admin';
-
+  const from = location.state?.from?.pathname || null;
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   if (user) {
-    return <Navigate to={isAdminPanelUser(user) ? from : '/'} replace />;
+    return <Navigate to={canAccessAdminPanel(user) ? (from || getAdminHomePath(user)) : '/'} replace />;
   }
 
   async function onSubmit(e) {
@@ -23,7 +23,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const session = await login(correo.trim(), password);
-      navigate(isAdminPanelUser(session) ? from : '/', { replace: true });
+      navigate(canAccessAdminPanel(session) ? (from || getAdminHomePath(session)) : '/', { replace: true });
     } catch (err) {
       const msg = String(err?.message || '');
       if (/desactivad/i.test(msg)) {
@@ -40,13 +40,21 @@ export default function LoginPage() {
 
   return (
     <>
-      <Link to="/" className="ops-header-auth-link login-page-back">
-        ← Volver al gestor de cabinas
-      </Link>
+      <div className="login-page-back" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Link to="/maquina-entrada" className="ops-header-auth-link">
+          Ir a máquina de entrada
+        </Link>
+        <Link to="/maquina-cobro" className="ops-header-auth-link">
+          Ir a máquina de cobro
+        </Link>
+        <Link to="/maquina-salida" className="ops-header-auth-link">
+          Ir a máquina de salida
+        </Link>
+      </div>
       <div className="admin-page login-page-shell">
         <div className="admin-panel-block login-page-card">
           <h1 className="admin-page-title login-page-title">Iniciar sesión</h1>
-          <p className="admin-page-desc">Acceso al panel de administración.</p>
+          <p className="admin-page-desc">Acceso al panel del sistema según el rol asignado.</p>
           <form onSubmit={onSubmit} className="login-page-form">
           <label>
             <span className="login-page-label">Correo</span>

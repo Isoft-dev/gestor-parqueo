@@ -2,8 +2,8 @@ import * as service from '../services/registroMantenimiento.js';
 
 function businessStatus(err) {
   const msg = String(err?.message || '');
-  if (/no encontrado/i.test(msg)) return 404;
-  if (/requerid|fk|ORA-02291|ORA-01400/i.test(msg)) return 400;
+  if (/no encontrad/i.test(msg)) return 404;
+  if (/requerid|fk|ORA-02291|ORA-01400|debe ser|solo puede|no puede/i.test(msg)) return 400;
   return 500;
 }
 
@@ -25,6 +25,14 @@ export async function create(req, res) {
     const { MAQ_ID } = req.body;
     if (!MAQ_ID) return res.status(400).json({ error: 'MAQ_ID es requerido' });
     res.status(201).json(await service.create(req.body));
+  } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
+}
+
+export async function update(req, res) {
+  try {
+    const existing = await service.getById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Registro de mantenimiento no encontrado' });
+    res.json(await service.updateDescription(req.params.id, req.body));
   } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
 }
 

@@ -1,4 +1,5 @@
 import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
+import { isTipoMaquinaCobro } from '../utils/tipoMaquinaRules.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_RECARGO_MAQUINA_GET_ALL(:cursor); END;`);
@@ -24,6 +25,18 @@ async function getNextIdTx(conn, tableName, columnName) {
 }
 
 export async function create(data) {
+  const maqTipo = await executeSql(
+    `SELECT tm.TMA_TIPO
+       FROM PAR_MAQUINA m
+       JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
+      WHERE m.MAQ_ID = :maqId`,
+    { maqId: data.MAQ_ID ?? null }
+  );
+  const tma = maqTipo[0]?.TMA_TIPO;
+  if (!tma || !isTipoMaquinaCobro(tma)) {
+    throw new Error('La recarga de billetes aplica solo a máquinas de tipo cobro');
+  }
+
   const detalles = Array.isArray(data.RECARGA_DETALLE_SALDO) ? data.RECARGA_DETALLE_SALDO : [];
   if (!detalles.length) {
     if ((await isIdentityAlways()) || !data.RMA_ID) {
@@ -56,22 +69,42 @@ export async function create(data) {
   try {
     conn = await getConnection();
     const useIdentity = (await isIdentityAlways()) || !data.RMA_ID;
-    const rmaId = useIdentity
-      ? await getNextIdTx(conn, 'PAR_RECARGO_MAQUINA', 'RMA_ID')
-      : Number(data.RMA_ID);
-
-    await conn.execute(
-      `INSERT INTO PAR_RECARGO_MAQUINA (RMA_ID, MAQ_ID, RMA_MANTENIMIENTO_FECHA, RMA_DESCRIPCION)
-       VALUES (:RMA_ID, :MAQ_ID, :RMA_MANTENIMIENTO_FECHA, :RMA_DESCRIPCION)`,
-      {
-        RMA_ID: rmaId,
-        MAQ_ID: data.MAQ_ID ?? null,
-        RMA_MANTENIMIENTO_FECHA: data.RMA_MANTENIMIENTO_FECHA
-          ? new Date(data.RMA_MANTENIMIENTO_FECHA)
-          : new Date(),
-        RMA_DESCRIPCION: data.RMA_DESCRIPCION ?? null,
-      }
-    );
+    let rmaId = Number(data.RMA_ID ?? 0);
+    if (useIdentity) {
+      await conn.execute(
+        `INSERT INTO PAR_RECARGO_MAQUINA (MAQ_ID, RMA_MANTENIMIENTO_FECHA, RMA_DESCRIPCION)
+         VALUES (:MAQ_ID, :RMA_MANTENIMIENTO_FECHA, :RMA_DESCRIPCION)`,
+        {
+          MAQ_ID: data.MAQ_ID ?? null,
+          RMA_MANTENIMIENTO_FECHA: data.RMA_MANTENIMIENTO_FECHA
+            ? new Date(data.RMA_MANTENIMIENTO_FECHA)
+            : new Date(),
+          RMA_DESCRIPCION: data.RMA_DESCRIPCION ?? null,
+        }
+      );
+      const createdRes = await conn.execute(
+        `SELECT RMA_ID
+           FROM PAR_RECARGO_MAQUINA
+          WHERE MAQ_ID = :maqId
+          ORDER BY RMA_ID DESC`,
+        { maqId: data.MAQ_ID ?? null }
+      );
+      rmaId = Number(createdRes.rows?.[0]?.RMA_ID || 0);
+    } else {
+      rmaId = Number(data.RMA_ID);
+      await conn.execute(
+        `INSERT INTO PAR_RECARGO_MAQUINA (RMA_ID, MAQ_ID, RMA_MANTENIMIENTO_FECHA, RMA_DESCRIPCION)
+         VALUES (:RMA_ID, :MAQ_ID, :RMA_MANTENIMIENTO_FECHA, :RMA_DESCRIPCION)`,
+        {
+          RMA_ID: rmaId,
+          MAQ_ID: data.MAQ_ID ?? null,
+          RMA_MANTENIMIENTO_FECHA: data.RMA_MANTENIMIENTO_FECHA
+            ? new Date(data.RMA_MANTENIMIENTO_FECHA)
+            : new Date(),
+          RMA_DESCRIPCION: data.RMA_DESCRIPCION ?? null,
+        }
+      );
+    }
 
     for (const d of detalles) {
       const sdiId = Number(d.SDI_ID);
@@ -128,7 +161,7 @@ export async function create(data) {
       { maqId: data.MAQ_ID ?? null }
     );
     await conn.commit();
-    return getById(rmaId);
+    return rmaId ? getById(rmaId) : null;
   } catch (err) {
     if (conn) {
       try { await conn.rollback(); } catch { /* ignore */ }

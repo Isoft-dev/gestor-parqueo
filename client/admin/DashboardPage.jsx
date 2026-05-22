@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useAdminDashboard } from '../hooks/useAdminDashboard.js';
 import { ADMIN_NAV_ROUTES, adminPath } from './adminNavConfig.js';
+import HelpHint from '../components/HelpHint.jsx';
 
 function pick(row, ...names) {
   if (!row) return undefined;
@@ -20,12 +21,18 @@ export default function DashboardPage() {
   return (
     <div className="admin-page admin-dashboard">
       <header className="admin-page-header admin-dashboard-intro">
-        <div>
+        <div className="admin-page-header__title-main">
           <h1 className="admin-page-title">Dashboard</h1>
-          <p className="admin-page-desc">
-            Resumen operativo del parqueo. Los datos se actualizan solos cada pocos segundos mientras
-            mantengas esta vista abierta.
-          </p>
+          <HelpHint label="Mostrar ayuda del dashboard" title="Guia del dashboard">
+            <p>
+              Resumen operativo del parqueo con actualizacion automatica mientras mantengas esta
+              vista abierta.
+            </p>
+            <p>
+              Usa los accesos rapidos y las tarjetas para detectar alertas, ocupacion y estado
+              general sin entrar todavia a cada modulo.
+            </p>
+          </HelpHint>
         </div>
         <div className="admin-dashboard-meta">
           {loading ? (
@@ -70,13 +77,6 @@ export default function DashboardPage() {
             {loading && stats.alertasPendientes == null ? '—' : stats.alertasPendientes}
           </div>
           <div className="admin-kpi-hint">Sin fecha de atención registrada</div>
-        </article>
-        <article className="admin-kpi admin-kpi--alerts2">
-          <div className="admin-kpi-label">Alertas en estado «activo»</div>
-          <div className="admin-kpi-value">
-            {loading && stats.alertasActivasCatalogo == null ? '—' : stats.alertasActivasCatalogo}
-          </div>
-          <div className="admin-kpi-hint">Según catálogo PAR_ESTADO_ALERTA</div>
         </article>
         <article className="admin-kpi admin-kpi--spaces">
           <div className="admin-kpi-label">Espacios reservados (mensuales)</div>
@@ -173,16 +173,6 @@ export default function DashboardPage() {
               <span className="admin-quick-desc">{r.description}</span>
             </Link>
           ))}
-          <Link
-            className="admin-quick-card admin-quick-card--muted"
-            to={adminPath('reportes')}
-          >
-            <span className="admin-quick-icon" aria-hidden="true">
-              📘
-            </span>
-            <span className="admin-quick-title">Reportes</span>
-            <span className="admin-quick-desc">Disponible en un sprint posterior</span>
-          </Link>
         </div>
       </section>
     </div>

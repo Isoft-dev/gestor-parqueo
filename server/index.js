@@ -37,6 +37,8 @@ import detalleMaquinaTicketRoutes from './routes/detalleMaquinaTicket.js';
 import detallePagoMembresiaRoutes from './routes/detallePagoMembresia.js';
 import bitacoraIncidenteVehiculoRoutes from './routes/bitacoraIncidenteVehiculo.js';
 import notificacionRoutes from './routes/notificacion.js';
+import cobroPoliticaRoutes from './routes/cobroPolitica.js';
+import reportesRoutes from './routes/reportes.js';
 import { startDailyJobs } from './jobs/dailyJobs.js';
 
 const app = express();
@@ -96,6 +98,8 @@ app.use('/api/detalle-maquina-ticket', detalleMaquinaTicketRoutes);
 app.use('/api/detalle-pago-membresia', detallePagoMembresiaRoutes);
 app.use('/api/bitacora-incidente-vehiculo', bitacoraIncidenteVehiculoRoutes);
 app.use('/api/notificacion', notificacionRoutes);
+app.use('/api/cobro-politica', cobroPoliticaRoutes);
+app.use('/api/reportes', reportesRoutes);
 
 app.listen(PORT, () => {
   console.log(`Servidor en http://localhost:${PORT}`);
