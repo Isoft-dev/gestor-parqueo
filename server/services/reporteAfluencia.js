@@ -12,12 +12,20 @@ function parseYmd(s) {
   return dt;
 }
 
+function daysInclusive(desde, hasta) {
+  const a = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate());
+  const b = new Date(hasta.getFullYear(), hasta.getMonth(), hasta.getDate());
+  return Math.floor((b - a) / (24 * 60 * 60 * 1000)) + 1;
+}
+
 function validateRango(desdeStr, hastaStr) {
   const desde = parseYmd(desdeStr);
   const hasta = parseYmd(hastaStr);
   if (!desde) return { error: 'La fecha de inicio no es válida (use AAAA-MM-DD).' };
   if (!hasta) return { error: 'La fecha de fin no es válida (use AAAA-MM-DD).' };
   if (desde > hasta) return { error: 'La fecha de inicio no puede ser posterior a la fecha de fin.' };
+  const span = daysInclusive(desde, hasta);
+  if (span > 731) return { error: 'El rango máximo permitido es de 731 días (2 años).' };
   return {
     periodo: {
       desde: `${desde.getFullYear()}-${String(desde.getMonth() + 1).padStart(2, '0')}-${String(desde.getDate()).padStart(2, '0')}`,

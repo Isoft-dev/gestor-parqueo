@@ -4,6 +4,8 @@ import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { API_BASE } from '../config.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { filterOperativeMachines } from '../utils/machineStatus.js';
+import { getPlateValidationMessage, normalizePlateInput, PLATE_MAX_LENGTH } from '../utils/plate.js';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
@@ -134,6 +136,44 @@ function pickDefaultCobroMaqId(cobroList, maqList) {
   return String(sorted[0]?.MAQ_ID ?? '');
 }
 
+const ASSISTANCE_OVERLAY_MS = 4000;
+const QUOTE_REFRESH_MS = 30000;
+
+function getRoundedMinutes(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.round(n));
+}
+
+function getStayMinutesFromQuote(quote, nowMs = Date.now()) {
+  const entryAt = quote?.ticket?.TIC_FECHA_HORA_ENTRADA;
+  if (entryAt) {
+    const entryMs = new Date(entryAt).getTime();
+    if (Number.isFinite(entryMs)) {
+      return Math.max(0, Math.round((nowMs - entryMs) / (1000 * 60)));
+    }
+  }
+  return getRoundedMinutes(quote?.estadia?.minutosTotales);
+}
+
+function formatStayDuration(totalMinutes) {
+  const mins = getRoundedMinutes(totalMinutes);
+  const hours = Math.floor(mins / 60);
+  const remainingMinutes = mins % 60;
+  return `${hours} h (${remainingMinutes} min)`;
+}
+
+async function fetchTicketQuoteByCodigo(ticCodigo) {
+  const res = await fetch(`${API_BASE}/ticket/quote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ TIC_CODIGO: ticCodigo }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
 export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = false, entradaOnly = false, salidaOnly = false }) {
   const { user, logout } = useAuth();
   const fileRef = useRef(null);
@@ -190,6 +230,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const [assistMsg, setAssistMsg] = useState('');
   const onlyKiosk = cobroOnly || entradaOnly || salidaOnly;
   const [denominacionesDisponibles, setDenominacionesDisponibles] = useState([5, 10, 20, 50]);
+  const [quoteNowMs, setQuoteNowMs] = useState(() => Date.now());
   const [memPayQ, setMemPayQ] = useState('');
   const [memPayList, setMemPayList] = useState([]);
   const [memPaySelected, setMemPaySelected] = useState(null);
@@ -211,10 +252,16 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   /** Kiosco máquina de salida (solo presentación). */
   const [salidaKioskState, setSalidaKioskState] = useState('idle'); // idle | processing | success | error
   const [salidaKioskNotice, setSalidaKioskNotice] = useState({ text: '', severity: 'error' }); // warn | error
+  const [assistOverlay, setAssistOverlay] = useState(null);
   const montoTotalCalculado = Number(quote?.montoTotal || 0);
   const horasCalculadas = Number(
     quote?.estadia?.horasCobradas ?? quote?.estadia?.horasFacturables ?? 0,
   );
+  const totalStayMinutes = getStayMinutesFromQuote(quote, quoteNowMs);
+  const facturableStayMinutes = getRoundedMinutes(quote?.estadia?.minutosFacturables);
+  const totalStayLabel = formatStayDuration(totalStayMinutes);
+  const facturableStayLabel = formatStayDuration(facturableStayMinutes);
+  const showFacturableStay = quote != null && facturableStayMinutes !== totalStayMinutes;
   const montoRecibidoNum = Number(montoRecibido);
   const vueltoCalculado =
     Number.isFinite(montoRecibidoNum) && montoRecibidoNum >= montoTotalCalculado
@@ -387,6 +434,66 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     return `${base} (${m?.MAQ_ID ?? '?'})`;
   }
 
+  function getMachineById(maqIdValue) {
+    const targetId = String(maqIdValue || '').trim();
+    if (!targetId) return null;
+    return (
+      maquinas.find((m) => String(m?.MAQ_ID) === targetId)
+      || maquinasCobro.find((m) => String(m?.MAQ_ID) === targetId)
+      || maquinasEntrada.find((m) => String(m?.MAQ_ID) === targetId)
+      || maquinasSalida.find((m) => String(m?.MAQ_ID) === targetId)
+      || null
+    );
+  }
+
+  function getAssistScreenForMachine(maqIdValue) {
+    const machine = getMachineById(maqIdValue);
+    const tipoRaw = tiposMaquina.find((t) => String(t?.TMA_ID) === String(machine?.TMA_ID))?.TMA_TIPO;
+    if (isTipoMaquinaCobro(tipoRaw)) return 'cobro';
+    if (isTipoMaquinaEntrada(tipoRaw)) return 'entrada';
+    if (isTipoMaquinaSalida(tipoRaw)) return 'salida';
+    if (cobroOnly) return 'cobro';
+    if (entradaOnly) return 'entrada';
+    if (salidaOnly) return 'salida';
+    return null;
+  }
+
+  function showAssistOverlay({ maqIdValue, ok, message }) {
+    const screen = getAssistScreenForMachine(maqIdValue);
+    if (!screen) return;
+    const machine = getMachineById(maqIdValue);
+    const machineName = machine ? machineLabel(machine) : 'la máquina activa';
+    setAssistOverlay({
+      screen,
+      tone: ok ? 'success' : 'error',
+      title: ok ? 'Asistencia solicitada' : 'No se pudo enviar',
+      text: ok
+        ? `Se notificó asistencia para ${machineName}.`
+        : (message || 'No se pudo enviar la solicitud de asistencia.'),
+    });
+  }
+
+  function renderAssistOverlay(screen) {
+    if (!assistOverlay || assistOverlay.screen !== screen) return null;
+    const iconClassName = assistOverlay.tone === 'error'
+      ? 'ops-kiosk-overlay-icon ops-kiosk-overlay-icon--error'
+      : 'ops-kiosk-overlay-icon ops-kiosk-overlay-icon--success';
+    const textClassName = assistOverlay.tone === 'error'
+      ? 'ops-kiosk-overlay-subtext ops-kiosk-overlay-subtext--error'
+      : 'ops-kiosk-overlay-subtext';
+    return (
+      <div className={`ops-kiosk-overlay ops-kiosk-overlay--${assistOverlay.tone}`}>
+        <div className="ops-kiosk-overlay-state">
+          <div className={iconClassName} aria-hidden="true">
+            {assistOverlay.tone === 'error' ? '!' : 'A'}
+          </div>
+          <h2>{assistOverlay.title}</h2>
+          <p className={textClassName}>{assistOverlay.text}</p>
+        </div>
+      </div>
+    );
+  }
+
   function resetCardSimulator() {
     setCardSim({
       numero: '',
@@ -425,6 +532,34 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   }, []);
 
   useEffect(() => {
+    const ticCodigo = String(quote?.ticket?.TIC_CODIGO || '').trim();
+    if (!ticCodigo || checkoutDone?.COB_ID) return undefined;
+
+    let cancelled = false;
+    const refreshQuote = async () => {
+      try {
+        const data = await fetchTicketQuoteByCodigo(ticCodigo);
+        if (!cancelled) {
+          setQuote(data);
+          setQuoteNowMs(Date.now());
+        }
+      } catch {
+        if (!cancelled) setQuoteNowMs(Date.now());
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      setQuoteNowMs(Date.now());
+      refreshQuote();
+    }, QUOTE_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [quote?.ticket?.TIC_CODIGO, checkoutDone?.COB_ID]);
+
+  useEffect(() => {
     (async () => {
       setCatalogLoading(true);
       try {
@@ -454,40 +589,41 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         setTiposCobro(Array.isArray(dCobro) ? dCobro : []);
         setTiposMaquina(Array.isArray(dTma) ? dTma : []);
         const maqList = Array.isArray(dMaq) ? dMaq : [];
-        setMaquinas(maqList);
+        const operativeMaqList = filterOperativeMachines(maqList);
+        setMaquinas(operativeMaqList);
 
         const tipoById = new Map(
           (Array.isArray(dTma) ? dTma : []).map((t) => [String(t.TMA_ID), t]),
         );
-        const cobroList = maqList.filter((m) => {
+        const cobroList = operativeMaqList.filter((m) => {
           const tipo = tipoById.get(String(m.TMA_ID));
           return isTipoMaquinaCobro(tipo?.TMA_TIPO);
         });
         setMaquinasCobro(cobroList);
-        const pickedCobroMaqId = pickDefaultCobroMaqId(cobroList, maqList);
+        const pickedCobroMaqId = pickDefaultCobroMaqId(cobroList, operativeMaqList);
         setDefaultCobroMaqId(pickedCobroMaqId);
 
-        const entradaList = maqList.filter((m) => {
+        const entradaList = operativeMaqList.filter((m) => {
           const tipo = tipoById.get(String(m.TMA_ID));
           return isTipoMaquinaEntrada(tipo?.TMA_TIPO);
         });
         setMaquinasEntrada(entradaList);
-        const pickedEntradaMaqId = pickDefaultEntradaMaqId(entradaList, maqList);
+        const pickedEntradaMaqId = pickDefaultEntradaMaqId(entradaList, operativeMaqList);
         setDefaultEntradaMaqId(pickedEntradaMaqId);
-        const salidaMaq = maqList.find((m) => {
+        const salidaMaq = operativeMaqList.find((m) => {
           const tipo = tipoById.get(String(m.TMA_ID));
           return isTipoMaquinaSalida(tipo?.TMA_TIPO);
         });
-        const salidaList = maqList.filter((m) => {
+        const salidaList = operativeMaqList.filter((m) => {
           const tipo = tipoById.get(String(m.TMA_ID));
           return isTipoMaquinaSalida(tipo?.TMA_TIPO);
         });
         setMaquinasSalida(salidaList);
-        const salidaByCode = maqList.find((m) =>
+        const salidaByCode = operativeMaqList.find((m) =>
           String(m.MAQ_CODIGO || '').toLowerCase().includes('sal'),
         );
         const pickedSalidaMaqId = String(
-          salidaMaq?.MAQ_ID ?? salidaByCode?.MAQ_ID ?? maqList[0]?.MAQ_ID ?? '',
+          salidaMaq?.MAQ_ID ?? salidaByCode?.MAQ_ID ?? operativeMaqList[0]?.MAQ_ID ?? '',
         );
         setDefaultSalidaMaqId(pickedSalidaMaqId);
         const fromCatalog = (Array.isArray(dSdi) ? dSdi : [])
@@ -539,14 +675,19 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
 
   async function enviarAsistencia(motivoExtra) {
     const maqAsistencia = entradaOnly
-      ? String(vehicleForm.MAQ_ID || '')
+      ? String(vehicleForm.MAQ_ID || defaultEntradaMaqId || pickDefaultEntradaMaqId(maquinasEntrada, maquinas) || '')
       : salidaOnly
-        ? String(exitMaqId || '')
+        ? String(exitMaqId || defaultSalidaMaqId || maquinasSalida[0]?.MAQ_ID || '')
         : cobroOnly
           ? String(maqId || assistMaqId || '')
           : String(assistMaqId || '');
 
     if (!maqAsistencia) {
+      showAssistOverlay({
+        maqIdValue: '',
+        ok: false,
+        message: 'Selecciona la maquina activa para solicitar asistencia.',
+      });
       setAssistMsg('Selecciona la máquina activa para asociar la asistencia.');
       return;
     }
@@ -562,13 +703,23 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
+      showAssistOverlay({
+        maqIdValue: maqAsistencia,
+        ok: true,
+      });
       setAssistMsg(
         data?.ALE_ID != null
           ? `Solicitud registrada (alerta #${data.ALE_ID}). Revisa gestión de alertas.`
           : 'Solicitud enviada al panel.',
       );
     } catch (e) {
-      setAssistMsg(`No se pudo enviar: ${String(e?.message || e)}`);
+      const errorText = `No se pudo enviar: ${String(e?.message || e)}`;
+      setAssistMsg(errorText);
+      showAssistOverlay({
+        maqIdValue: maqAsistencia,
+        ok: false,
+        message: errorText,
+      });
     }
   }
 
@@ -609,6 +760,17 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       }
       return;
     }
+    const placaNormalizada = normalizePlateInput(vehicleForm.VEH_PLACA);
+    const plateValidationMessage = getPlateValidationMessage(placaNormalizada);
+    if (plateValidationMessage) {
+      setMsg(plateValidationMessage);
+      if (entradaOnly) {
+        setEntryNotice({ text: plateValidationMessage, severity: 'warn' });
+        setEntryKioskState('notice');
+      }
+      setVehicleForm((p) => ({ ...p, VEH_PLACA: placaNormalizada }));
+      return;
+    }
     setLoading(true);
     setMsg('');
     try {
@@ -616,7 +778,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          VEH_PLACA: vehicleForm.VEH_PLACA,
+          VEH_PLACA: placaNormalizada,
           VEH_MODELO: vehicleForm.VEH_MODELO,
           VEH_COLOR: vehicleForm.VEH_COLOR,
           TVE_ID: vehicleForm.TVE_ID,
@@ -667,14 +829,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         return;
       }
 
-      const res = await fetch(`${API_BASE}/ticket/quote`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ TIC_CODIGO: ticCodigo }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || res.statusText);
+      const data = await fetchTicketQuoteByCodigo(ticCodigo);
       setQuote(data);
+      setQuoteNowMs(Date.now());
       setCheckoutDone(null);
       setMsg('');
       if (cobroOnly) {
@@ -1252,6 +1409,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     return () => clearTimeout(t);
   }, [salidaOnly, salidaKioskState]);
 
+  useEffect(() => {
+    if (!assistOverlay) return;
+    const t = setTimeout(() => {
+      setAssistOverlay(null);
+    }, ASSISTANCE_OVERLAY_MS);
+    return () => clearTimeout(t);
+  }, [assistOverlay]);
+
   const cobroBottomDisabled =
     cobroOnly && (cobroUiStep !== 'idle' || loading || catalogLoading);
   const cobroCashIngresado = sumaBilletes;
@@ -1495,10 +1660,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                         </div>
                         <div className="ops-cobro-receipt-row">
                           <span>Estadía</span>
-                          <span>
-                            {quote.estadia?.horasFacturables} h ({quote.estadia?.minutosFacturables} min)
-                          </span>
+                          <span>{totalStayLabel}</span>
                         </div>
+                        {showFacturableStay ? (
+                          <div className="ops-cobro-receipt-row">
+                            <span>Tiempo facturable</span>
+                            <span>{facturableStayLabel}</span>
+                          </div>
+                        ) : null}
                         <div className="ops-cobro-receipt-row">
                           <span>Tarifa</span>
                           <span>
@@ -1596,6 +1765,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                     </div>
                   ) : null}
                 </div>
+                {renderAssistOverlay('cobro')}
                 {cobroCardScreenError && (cobroUiStep === 'pago_tarjeta' || cobroUiStep === 'mem_tarjeta') ? (
                   <div className="ops-cobro-card-error-overlay" role="alert" aria-live="assertive">
                     <div className="ops-cobro-state">
@@ -2048,6 +2218,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 </div>
               ) : null}
             </div>
+            {renderAssistOverlay('entrada')}
           </div>
 
           <div className="ops-entry-kiosk-controls">
@@ -2172,6 +2343,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 </div>
               ) : null}
             </div>
+            {renderAssistOverlay('salida')}
           </div>
 
           <div className="ops-entry-kiosk-controls">
@@ -2355,7 +2527,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 type="text"
                 placeholder="Placa"
                 value={vehicleForm.VEH_PLACA}
-                onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: e.target.value.toUpperCase() }))}
+                maxLength={PLATE_MAX_LENGTH}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: normalizePlateInput(e.target.value) }))}
               />
               <input
                 type="text"
@@ -2410,7 +2583,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
               type="text"
               placeholder="Placa"
               value={vehicleForm.VEH_PLACA}
-              onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: e.target.value.toUpperCase() }))}
+              maxLength={PLATE_MAX_LENGTH}
+              onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: normalizePlateInput(e.target.value) }))}
               style={{ padding: '8px 10px', minWidth: 160 }}
             />
             <input
@@ -2531,9 +2705,13 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
               : 'N/D'}
           </p>
           <p style={{ margin: '6px 0' }}>
-            <strong>Tiempo de estadía:</strong> {quote.estadia?.horasFacturables} horas facturables
-            ({quote.estadia?.minutosFacturables} min)
+            <strong>Tiempo de estadía:</strong> {totalStayLabel}
           </p>
+          {showFacturableStay ? (
+            <p style={{ margin: '6px 0' }}>
+              <strong>Tiempo facturable:</strong> {facturableStayLabel}
+            </p>
+          ) : null}
           <p style={{ margin: '6px 0' }}>
             <strong>Tarifa vigente:</strong> {quote.tarifa?.TAR_TIPO} - Q{quote.tarifa?.TAR_PRECIO} / hora
           </p>

@@ -3,7 +3,7 @@ import * as service from '../services/cobro.js';
 function businessStatus(err) {
   const msg = String(err?.message || '');
   if (/no encontrado/i.test(msg)) return 404;
-  if (/no se permite modificar|emitido|aplican solo a transacciones nuevas|faltan campos|required/i.test(msg)) return 400;
+  if (/no se permite modificar|emitido|aplican solo a transacciones nuevas|faltan campos|required|ticket ya saldado|monto recibido|fecha\/hora|tarifa seleccionada|tarifa vigente|TIC_ID es inválido/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict|unico|ORA-00001/i.test(msg)) return 409;
   return 500;
 }
@@ -30,26 +30,19 @@ export async function create(req, res) {
   try {
     const {
       TIC_ID,
-      COB_HORAS_TOTALES,
       TCO_ID,
-      COB_MONTO_TOTAL,
       COB_FECHA_HORA,
-      TAR_ID,
     } = req.body;
     if (
       TIC_ID == null ||
       String(TIC_ID).trim() === '' ||
-      COB_HORAS_TOTALES == null ||
       TCO_ID == null ||
       String(TCO_ID).trim() === '' ||
-      COB_MONTO_TOTAL == null ||
-      !COB_FECHA_HORA ||
-      TAR_ID == null ||
-      String(TAR_ID).trim() === ''
+      !COB_FECHA_HORA
     ) {
       return res.status(400).json({
         error:
-          'Faltan campos requeridos: TIC_ID, COB_HORAS_TOTALES, TCO_ID, COB_MONTO_TOTAL, COB_FECHA_HORA, TAR_ID',
+          'Faltan campos requeridos: TIC_ID, TCO_ID, COB_FECHA_HORA',
       });
     }
     const created = await service.create(req.body);

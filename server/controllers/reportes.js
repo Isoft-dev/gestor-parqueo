@@ -2,6 +2,7 @@ import * as service from '../services/reporteIncidentes.js';
 import * as serviceMem from '../services/reporteMembresias.js';
 import * as serviceMora from '../services/reporteMoraClientes.js';
 import * as serviceMov from '../services/reporteMovimientoVehicular.js';
+import * as serviceMovFreq from '../services/reporteVehiculosFrecuentes.js';
 import * as serviceOps from '../services/reporteOperativoMaquinas.js';
 import * as serviceFin from '../services/reporteFinanciero.js';
 import * as serviceMemCli from '../services/reporteMembresiasClientes.js';
@@ -171,7 +172,7 @@ export async function clientesMoraPdf(req, res) {
 export async function vehiculosFrecuentes(req, res) {
   try {
     const { desde, hasta } = req.query;
-    const data = await serviceMov.getVehiculosFrecuentes(desde, hasta);
+    const data = await serviceMovFreq.getVehiculosFrecuentes(desde, hasta);
     res.json(data);
   } catch (err) {
     if (err?.code === 'VALIDATION') {
@@ -184,8 +185,8 @@ export async function vehiculosFrecuentes(req, res) {
 export async function vehiculosFrecuentesPdf(req, res) {
   try {
     const { desde, hasta } = req.query;
-    const data = await serviceMov.getVehiculosFrecuentes(desde, hasta);
-    const pdfBuffer = await serviceMov.buildVehiculosFrecuentesPdfBuffer(data);
+    const data = await serviceMovFreq.getVehiculosFrecuentes(desde, hasta);
+    const pdfBuffer = await serviceMovFreq.buildVehiculosFrecuentesPdfBuffer(data);
     const safeDesde = String(desde || '').replace(/\D/g, '');
     const safeHasta = String(hasta || '').replace(/\D/g, '');
     res.setHeader('Content-Type', 'application/pdf');

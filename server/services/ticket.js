@@ -11,6 +11,8 @@ import {
   isTipoMaquinaEntrada,
   isTipoMaquinaSalida,
 } from '../utils/tipoMaquinaRules.js';
+import { assertMachineIsOperative, getMachineWithStatusTx } from '../utils/machineStatus.js';
+import { assertValidPlate } from '../utils/plate.js';
 
 /** Recargo fijo (GTQ) por ticket en estado extraviado al momento del cobro. */
 const RECARGO_TICKET_EXTRAVIADO_Q = 100;
@@ -737,8 +739,7 @@ async function buildEntryTicketPdfBuffer({ ticket, maquinaEntradaLabel }) {
 export async function generateEntryTicket({
   VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, MAQ_ID,
 }) {
-  const placa = String(VEH_PLACA || '').trim().toUpperCase();
-  if (!placa) throw new Error('La placa es obligatoria.');
+  const placa = assertValidPlate(VEH_PLACA);
   if (!TVE_ID) throw new Error('TVE_ID es requerido');
   if (!MAQ_ID) throw new Error('MAQ_ID es requerido');
 
@@ -759,15 +760,10 @@ export async function generateEntryTicket({
     );
     if (!tipoVehiculo.rows?.length) throw new Error('TVE_ID no válido');
 
-    const maq = await conn.execute(
-      `SELECT m.MAQ_ID, tm.TMA_TIPO
-         FROM PAR_MAQUINA m
-         JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
-        WHERE m.MAQ_ID = :id`,
-      { id: MAQ_ID }
-    );
-    if (!maq.rows?.length) throw new Error('MAQ_ID no válido');
-    const tmaEntrada = maq.rows[0]?.TMA_TIPO;
+    const maquinaEntrada = await getMachineWithStatusTx(conn, MAQ_ID);
+    if (!maquinaEntrada) throw new Error('MAQ_ID no válido');
+    assertMachineIsOperative(maquinaEntrada, 'generar tickets de entrada');
+    const tmaEntrada = maquinaEntrada.TMA_TIPO;
     if (!tmaEntrada || !isTipoMaquinaEntrada(tmaEntrada)) {
       throw new Error('La generación de ticket requiere una máquina de tipo entrada');
     }
@@ -1014,14 +1010,10 @@ export async function checkoutByCodigo({
       ).toFixed(2)
     );
 
-    const maqTipo = await conn.execute(
-      `SELECT tm.TMA_TIPO
-         FROM PAR_MAQUINA m
-         JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
-        WHERE m.MAQ_ID = :id`,
-      { id: MAQ_ID }
-    );
-    const tmaCobro = maqTipo.rows?.[0]?.TMA_TIPO;
+    const maquinaCobro = await getMachineWithStatusTx(conn, MAQ_ID);
+    if (!maquinaCobro) throw new Error('MAQ_ID no válido');
+    assertMachineIsOperative(maquinaCobro, 'registrar cobros');
+    const tmaCobro = maquinaCobro.TMA_TIPO;
     if (!tmaCobro || !isTipoMaquinaCobro(tmaCobro)) {
       throw new Error('El cobro debe registrarse en una máquina de tipo cobro');
     }
@@ -1233,15 +1225,10 @@ export async function validateExitByCodigo({ TIC_CODIGO, MAQ_ID }) {
       throw new Error('Falta la columna TAR_TIEMPO_GRACIA en PAR_TARIFA');
     }
 
-    const maq = await conn.execute(
-      `SELECT m.MAQ_ID, tm.TMA_TIPO
-         FROM PAR_MAQUINA m
-         JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
-        WHERE m.MAQ_ID = :id`,
-      { id: MAQ_ID }
-    );
-    if (!maq.rows?.length) throw new Error('MAQ_ID no válido');
-    const tmaSalida = maq.rows[0]?.TMA_TIPO;
+    const maquinaSalida = await getMachineWithStatusTx(conn, MAQ_ID);
+    if (!maquinaSalida) throw new Error('MAQ_ID no válido');
+    assertMachineIsOperative(maquinaSalida, 'registrar salidas');
+    const tmaSalida = maquinaSalida.TMA_TIPO;
     if (!tmaSalida || !isTipoMaquinaSalida(tmaSalida)) {
       throw new Error('La validación de salida debe hacerse en una máquina de tipo salida');
     }
@@ -1609,8 +1596,7 @@ async function findEstadoTicketExtraviadoTx(conn) {
 
 /** Protocolo ticket extraviado: marca estado y devuelve cotización vigente. */
 export async function prepararTicketExtraviadoPorPlaca(vehPlaca) {
-  const placa = String(vehPlaca || '').trim().toUpperCase();
-  if (!placa) throw new Error('La placa es obligatoria.');
+  const placa = assertValidPlate(vehPlaca);
   let conn;
   try {
     conn = await getConnection();

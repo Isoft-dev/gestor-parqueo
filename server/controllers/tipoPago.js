@@ -3,7 +3,7 @@ import * as service from '../services/tipoPago.js';
 function businessStatus(err) {
   const msg = String(err?.message || '');
   if (/no encontrado/i.test(msg)) return 404;
-  if (/requerid|pagos asociados|ORA-20001|ORA-02292/i.test(msg)) return 400;
+  if (/requerid|pagos asociados|catálogo es fijo|catalogo es fijo|ORA-20001|ORA-02292/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict/i.test(msg)) return 409;
   return 500;
 }

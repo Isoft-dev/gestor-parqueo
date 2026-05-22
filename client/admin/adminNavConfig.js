@@ -13,9 +13,9 @@ export const ADMIN_NAV_ROUTES = [
   },
   {
     path: 'clientes-mensuales',
-    label: 'Clientes mensuales',
+    label: 'Clientes mensuales y vehículos',
     description:
-      'Administración de clientes, membresías y vehículos vinculados a planes mensuales.',
+      'Administración de clientes mensuales o de alta administrativa, sus membresías y vehículos vinculados.',
     icon: '👤',
     entityKeys: [
       'cliente',
@@ -30,9 +30,9 @@ export const ADMIN_NAV_ROUTES = [
   },
   {
     path: 'tickets-vehiculos',
-    label: 'Tickets y vehículos',
+    label: 'Clientes esporádicos, tickets y vehículos',
     description:
-      'Consulta de tickets y vehículos de clientes esporádicos, cobros y detalle en máquina.',
+      'Consulta de clientes esporádicos capturados por tickets/NIT, sus vehículos, cobros y detalle en máquina.',
     icon: '🚗',
     entityKeys: [
       'estado-ticket',
@@ -95,11 +95,24 @@ export const ADMIN_NAV_ROUTES = [
     icon: '🖨️',
   },
   {
+    path: 'correos-simulados',
+    label: 'Correos simulados',
+    description:
+      'Bandeja de notificaciones de membresías que el sistema "envió" (modo simulate o SMTP).',
+    icon: '✉️',
+  },
+  {
     path: 'reportes',
     label: 'Reportes',
     description:
       'Incidentes, membresías por estado, clientes en mora (vista actual) y PDF.',
     icon: '📘',
+  },
+  {
+    path: 'personalizacion',
+    label: 'Personalización',
+    description: 'Colores del panel, botones y tarjetas con vista previa inmediata.',
+    icon: '\u{1F3A8}',
   },
 ];
 
