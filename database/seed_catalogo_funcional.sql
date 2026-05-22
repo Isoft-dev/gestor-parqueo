@@ -18,7 +18,13 @@
 --   - PAR_TIPO_NOTIFICACION: recordatorios de membresía y «Suspensión mora»
 --     (jobMembershipTasks.js — cron / jobs de membresía).
 --
--- Usuarios demo: admin@gmail.com / empleado@gmail.com — contraseña 1234.
+-- Usuarios demo por rol:
+--   administrador@gmail.com
+--   gerente@gmail.com
+--   guardia@gmail.com
+--   supervisordecamaras@gmail.com
+--   jefedegrupo@gmail.com
+-- Contraseña para todos: 1234.
 -- El API acepta contraseña en texto plano si USU_PASSWORD no empieza por
 -- «scrypt$» (server/services/usuario.js → verifyPassword).
 --
@@ -27,10 +33,10 @@
 -- =============================================================================
 
 DECLARE
-  c        NUMBER;
-  n        NUMBER;
-  disp     NUMBER;
-  ees_disp NUMBER;
+  c              NUMBER;
+  n              NUMBER;
+  total_espacios NUMBER;
+  ees_disp       NUMBER;
 BEGIN
   ---------------------------------------------------------------------------
   -- PAR_ESTADO_ESPACIO (requerido antes de PAR_ESPACIO)
@@ -88,6 +94,11 @@ BEGIN
     INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
     VALUES (DEFAULT, 'Recordatorio -2d', 'Dos días antes del vencimiento');
   END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Recordatorio -1d';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
+    VALUES (DEFAULT, 'Recordatorio -1d', 'Un día antes del vencimiento');
+  END IF;
   SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Recordatorio venc';
   IF c = 0 THEN
     INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
@@ -112,32 +123,87 @@ BEGIN
     INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
     VALUES (DEFAULT, 'Administrador', 'Gestiona el sistema');
   END IF;
-  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Empleado';
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Gerente';
   IF c = 0 THEN
     INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
-    VALUES (DEFAULT, 'Empleado', 'Temporal; presentación');
+    VALUES (DEFAULT, 'Gerente', 'Acceso a reportes');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Guardia';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Guardia', 'Acceso a reportar incidentes');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Supervisor de Cámaras';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Supervisor de Cámaras', 'Reporta incidentes y revisa historial de incidentes y alertas');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Jefe de grupo';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Jefe de grupo', 'Reporta incidentes y revisa historial de incidentes y alertas');
   END IF;
 
   ---------------------------------------------------------------------------
   -- PAR_USUARIO (contraseña en plano 1234 — válido con verifyPassword del API)
   ---------------------------------------------------------------------------
-  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'admin@gmail.com';
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'administrador@gmail.com';
   IF c = 0 THEN
     INSERT INTO PAR_USUARIO (
-      USU_ID, USU_PRIMER_NOMBRE, USU_PRIMER_APELLIDO, USU_CORREO, USU_PASSWORD, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
     ) VALUES (
-      DEFAULT, 'Admin', 'Sistema', 'admin@gmail.com', '1234',
+      DEFAULT, 'Ana', 'Lucía', 'Administrador', 'Parqueo',
+      'administrador@gmail.com', '1234', '5555-1001',
       (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Administrador'), 1, SYSDATE
     );
   END IF;
 
-  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'empleado@gmail.com';
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'gerente@gmail.com';
   IF c = 0 THEN
     INSERT INTO PAR_USUARIO (
-      USU_ID, USU_PRIMER_NOMBRE, USU_PRIMER_APELLIDO, USU_CORREO, USU_PASSWORD, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
     ) VALUES (
-      DEFAULT, 'Empleado', 'Demo', 'empleado@gmail.com', '1234',
-      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Empleado'), 1, SYSDATE
+      DEFAULT, 'Gloria', 'María', 'Gerente', 'General',
+      'gerente@gmail.com', '1234', '5555-1002',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Gerente'), 1, SYSDATE
+    );
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'guardia@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Gabriel', 'Andrés', 'Guardia', 'Turno A',
+      'guardia@gmail.com', '1234', '5555-1003',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Guardia'), 1, SYSDATE
+    );
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'supervisordecamaras@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Sara', 'Beatriz', 'Supervisor', 'Cámaras',
+      'supervisordecamaras@gmail.com', '1234', '5555-1004',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Supervisor de Cámaras'), 1, SYSDATE
+    );
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'jefedegrupo@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Julia', 'Noemí', 'Jefe', 'Grupo',
+      'jefedegrupo@gmail.com', '1234', '5555-1005',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Jefe de grupo'), 1, SYSDATE
     );
   END IF;
 
@@ -219,6 +285,8 @@ BEGIN
 
   SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Operativa';
   IF c = 0 THEN INSERT INTO PAR_ESTADO_MAQUINA (EMA_ID, EMA_ESTADO, EMA_DESCRIPCION) VALUES (DEFAULT, 'Operativa', 'En servicio; flujo principal'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Inoperativa';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MAQUINA (EMA_ID, EMA_ESTADO, EMA_DESCRIPCION) VALUES (DEFAULT, 'Inoperativa', 'Creada pero aún no activada'); END IF;
   SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Mantenimiento';
   IF c = 0 THEN INSERT INTO PAR_ESTADO_MAQUINA (EMA_ID, EMA_ESTADO, EMA_DESCRIPCION) VALUES (DEFAULT, 'Mantenimiento', 'Mantenimiento programado'); END IF;
   SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Fuera de servicio';
@@ -259,18 +327,18 @@ BEGIN
   IF c = 0 THEN INSERT INTO PAR_TIPO_VEHICULO (TVE_ID, TVE_TIPO, TVE_DESCRIPCION) VALUES (DEFAULT, 'Moto', 'Motocicleta'); END IF;
 
   ---------------------------------------------------------------------------
-  -- PAR_ESPACIO: al menos 500 filas en estado «Disponible» (EES_ESTADO exacto)
+  -- PAR_ESPACIO: capacidad inicial mínima de 500 filas sin alterar ocupación actual
   ---------------------------------------------------------------------------
   SELECT MIN(EES_ID) INTO ees_disp FROM PAR_ESTADO_ESPACIO WHERE EES_ESTADO = 'Disponible';
 
-  SELECT COUNT(*) INTO disp
-    FROM PAR_ESPACIO e
-    JOIN PAR_ESTADO_ESPACIO es ON es.EES_ID = e.EES_ID
-   WHERE es.EES_ESTADO = 'Disponible';
+  SELECT COUNT(*) INTO total_espacios FROM PAR_ESPACIO;
 
-  IF disp < 500 THEN
-    SELECT COUNT(*) INTO n FROM PAR_ESPACIO;
-    FOR i IN 1 .. (500 - disp) LOOP
+  IF total_espacios < 500 THEN
+    SELECT NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(ESP_CODIGO, '[0-9]+$'))), 0)
+      INTO n
+      FROM PAR_ESPACIO
+     WHERE REGEXP_LIKE(ESP_CODIGO, '[0-9]+$');
+    FOR i IN 1 .. (500 - total_espacios) LOOP
       n := n + 1;
       INSERT INTO PAR_ESPACIO (ESP_ID, ESP_CODIGO, EES_ID, ESP_UBICACION)
       VALUES (DEFAULT, 'CAT-' || LPAD(TO_CHAR(n), 5, '0'), ees_disp, 'Capacidad inicial');

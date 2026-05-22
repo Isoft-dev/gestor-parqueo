@@ -4,7 +4,7 @@
 -- Prerrequisitos:
 --   - Tablas PAR_* creadas; catálogos mínimos cargados (seed_demo_hu / seed_catalogo_funcional).
 --   - PAR_TARIFA con precio por hora y TAR_TIEMPO_GRACIA (p. ej. esporádico 15 min).
---   - PAR_ESTADO_TICKET con estado «Pagado» (LIKE %pagad%).
+--   - PAR_ESTADO_TICKET con estados «Pagado» (LIKE %pagad%) y «Validado» (LIKE %valid%).
 --   - PAR_TIPO_COBRO «Efectivo» y PAR_TIPO_VEHICULO al menos una fila.
 --   - PAR_MAQUINA: entrada / cobro / salida.
 --     [!] IMPORTANTE: Para que los IDs cuadren correctamente con el código del backend,
@@ -39,6 +39,7 @@ DECLARE
   c_seeded       NUMBER;
   v_tve_id       NUMBER;
   v_eti_pagado   NUMBER;
+  v_eti_validado NUMBER;
   v_tco_id       NUMBER;
   v_tar_id       NUMBER;
   v_precio       NUMBER;
@@ -65,8 +66,10 @@ DECLARE
   v_color        VARCHAR2(40);
   v_veh_id       NUMBER;
   v_tic_id       NUMBER;
+  v_cli_id       NUMBER;
 
   v_nit          VARCHAR2(32);
+  v_cmp_nit      VARCHAR2(64);
 
   k_target       CONSTANT PLS_INTEGER := 1100;
   v_minimo_q     CONSTANT NUMBER := 5;
@@ -207,6 +210,13 @@ BEGIN
     RAISE_APPLICATION_ERROR(-20003, 'No hay estado de ticket «Pagado» (LIKE %pagad%).');
   END IF;
 
+  SELECT MIN(ETI_ID) INTO v_eti_validado
+    FROM PAR_ESTADO_TICKET
+   WHERE LOWER(NVL(ETI_ESTADO, '')) LIKE '%valid%';
+  IF v_eti_validado IS NULL THEN
+    RAISE_APPLICATION_ERROR(-20007, 'No hay estado de ticket «Validado» (LIKE %valid%).');
+  END IF;
+
   SELECT MIN(TCO_ID) INTO v_tco_id
     FROM PAR_TIPO_COBRO
    WHERE LOWER(NVL(TCO_TIPO, '')) LIKE '%efect%';
@@ -333,18 +343,22 @@ BEGIN
       v_veh_id,
       CAST(v_entrada AS DATE),
       CAST(v_salida AS DATE),
-      v_eti_pagado
+      v_eti_validado
     )
     RETURNING TIC_ID INTO v_tic_id;
 
     v_fh_ent := CAST(v_entrada AS DATE);
     v_fh_sal := CAST(v_salida AS DATE);
-    v_fh_cob :=
-        v_fh_ent
-      + (v_fh_sal - v_fh_ent)
-      * (0.25 + DBMS_RANDOM.VALUE(0, 1) * 0.65);
-    IF v_fh_cob >= v_fh_sal THEN
-      v_fh_cob := v_fh_ent + (v_fh_sal - v_fh_ent) * 0.5;
+    IF v_gracia > 0 THEN
+      v_fh_cob := v_fh_sal - NUMTODSINTERVAL(DBMS_RANDOM.VALUE(0, LEAST(v_gracia, 12)), 'MINUTE');
+    ELSE
+      v_fh_cob := v_fh_sal;
+    END IF;
+    IF v_fh_cob <= v_fh_ent THEN
+      v_fh_cob := v_fh_ent + NUMTODSINTERVAL(1, 'MINUTE');
+    END IF;
+    IF v_fh_cob > v_fh_sal THEN
+      v_fh_cob := v_fh_sal;
     END IF;
 
     -- ~14 % con NIT ficticio (factura); el resto anónimo (NULL), sin alta en PAR_CLIENTE
@@ -352,6 +366,42 @@ BEGIN
       v_nit := TO_CHAR(TRUNC(DBMS_RANDOM.VALUE(3000000, 99999999)));
     ELSE
       v_nit := NULL;
+    END IF;
+
+    IF v_nit IS NOT NULL THEN
+      v_cmp_nit := REGEXP_REPLACE(UPPER(TRIM(v_nit)), '[^0-9A-Z]', '');
+      BEGIN
+        SELECT CLI_ID
+          INTO v_cli_id
+          FROM (
+            SELECT CLI_ID
+              FROM PAR_CLIENTE
+             WHERE CLI_NIT IS NOT NULL
+               AND REGEXP_REPLACE(UPPER(TRIM(CLI_NIT)), '[^0-9A-Z]', '') = v_cmp_nit
+             ORDER BY CLI_ID DESC
+          )
+         WHERE ROWNUM = 1;
+      EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+          INSERT INTO PAR_CLIENTE (
+            CLI_PRIMER_NOMBRE, CLI_SEGUNDO_NOMBRE,
+            CLI_PRIMER_APELLIDO, CLI_SEGUNDO_APELLIDO, CLI_DPI, CLI_NIT,
+            CLI_CORREO, CLI_TELEFONO, CLI_ZONA, CLI_CALLE, CLI_NUMERO,
+            CLI_COLONIA, CLI_CIUDAD, CLI_CODIGO_POSTAL, CLI_ACTIVO, CLI_FECHA_REGISTRO
+          ) VALUES (
+            'Cliente', NULL,
+            'Esporadico', SUBSTR(v_cmp_nit, GREATEST(1, LENGTH(v_cmp_nit) - 3)),
+            LPAD(SUBSTR(v_cmp_nit, 1, 13), 13, '0'), v_nit,
+            'ticket.' || LOWER(v_cmp_nit) || '@mail.demo', NULL, NULL, NULL, NULL,
+            NULL, 'Guatemala', NULL, 1, SYSDATE
+          )
+          RETURNING CLI_ID INTO v_cli_id;
+      END;
+
+      UPDATE PAR_VEHICULO
+         SET CLI_ID = v_cli_id
+       WHERE VEH_ID = v_veh_id
+         AND CLI_ID IS NULL;
     END IF;
 
     v_rec := monto_cob + TRUNC(DBMS_RANDOM.VALUE(0, 25));
@@ -406,7 +456,7 @@ BEGIN
 
   COMMIT;
   DBMS_OUTPUT.PUT_LINE(
-    'OK: insertados ' || v_inserted || ' tickets + 3 DMT/ticket (entrada/cobro/salida), placa R######, CLI_ID NULL.'
+    'OK: insertados ' || v_inserted || ' tickets validados + 3 DMT/ticket (entrada/cobro/salida), con cliente esporadico cuando hubo NIT.'
   );
 END;
 /

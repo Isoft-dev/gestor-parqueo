@@ -20,11 +20,6 @@ function isOcupadoState(s) {
   return x.includes('ocup') || x.includes('busy') || x.includes('used');
 }
 
-function isReservadoState(s) {
-  const x = norm(s);
-  return x.includes('reserv');
-}
-
 function pick(row, ...names) {
   if (!row) return undefined;
   for (const n of names) {
@@ -63,7 +58,6 @@ export function useAdminDashboard() {
     espaciosReservadosOcupados: null,
     espaciosReservadosLibres: null,
     alertasPendientes: null,
-    alertasActivasCatalogo: null,
     membresiasActivas: null,
     membresiasSuspendidas: null,
     ultimasAlertas: [],
@@ -79,7 +73,6 @@ export function useAdminDashboard() {
       const requests = [
         ['espacio', '/espacio'],
         ['alerta', '/alerta'],
-        ['estado-alerta', '/estado-alerta'],
         ['membresia', '/membresia'],
         ['estado-membresia', '/estado-membresia'],
       ];
@@ -98,14 +91,7 @@ export function useAdminDashboard() {
         throw new Error(failed.join(' · '));
       }
       setSectionErrors([]);
-      const [espacios, alertas, estadosAlerta, membresias, estadosMembresia] = settled.map((r) => r.value);
-
-      const estadosPorId = {};
-      for (const e of estadosAlerta) {
-        const id = pick(e, 'EAL_ID');
-        const texto = norm(pick(e, 'EAL_ESTADO'));
-        if (id != null) estadosPorId[id] = texto;
-      }
+      const [espacios, alertas, membresias, estadosMembresia] = settled.map((r) => r.value);
 
       let disponibles = 0;
       const espaciosById = {};
@@ -123,13 +109,9 @@ export function useAdminDashboard() {
       }
 
       let pendientesAtencion = 0;
-      let activasCatalogo = 0;
       for (const a of alertas) {
-        const fid = pick(a, 'EAL_ID');
-        const label = estadosPorId[fid] || '';
         const sinAtencion = !pick(a, 'ALE_FECHA_ATENCION');
         if (sinAtencion) pendientesAtencion += 1;
-        if (label.includes('activ') && !label.includes('inactiv')) activasCatalogo += 1;
       }
 
       const estadoMembresiaPorId = {};
@@ -142,7 +124,7 @@ export function useAdminDashboard() {
       let memAct = 0;
       let memSusp = 0;
       let reservadosOcupados = 0;
-      let reservadosLibres = 0;
+      let membresiasActivasConEspacio = 0;
       for (const m of membresias) {
         const estadoLabel =
           norm(pick(m, 'EME_ESTADO')) || estadoMembresiaPorId[pick(m, 'EME_ID')] || '';
@@ -155,13 +137,15 @@ export function useAdminDashboard() {
 
         memAct += 1;
         const espId = pick(m, 'ESP_ID');
+        if (espId == null || String(espId).trim() === '') continue;
+
+        membresiasActivasConEspacio += 1;
         const espacioEstado = espaciosById[String(espId)] || '';
-        if (isReservadoState(espacioEstado) && isOcupadoState(espacioEstado)) {
+        if (isOcupadoState(espacioEstado)) {
           reservadosOcupados += 1;
-        } else if (isReservadoState(espacioEstado) && isDisponibleState(espacioEstado)) {
-          reservadosLibres += 1;
         }
       }
+      const reservadosLibres = Math.max(0, membresiasActivasConEspacio - reservadosOcupados);
 
       const ultimasAlertas = [...alertas]
         .sort((a, b) => {
@@ -177,7 +161,6 @@ export function useAdminDashboard() {
         espaciosReservadosOcupados: reservadosOcupados,
         espaciosReservadosLibres: reservadosLibres,
         alertasPendientes: pendientesAtencion,
-        alertasActivasCatalogo: activasCatalogo,
         membresiasActivas: memAct,
         membresiasSuspendidas: memSusp,
         ultimasAlertas,

@@ -1,4 +1,6 @@
 import * as service from '../services/notificacion.js';
+import { getMailMode } from '../utils/mailer.js';
+import { runDailyMembershipJobs } from '../services/jobMembershipTasks.js';
 
 function businessStatus(err) {
   const msg = String(err?.message || '');
@@ -29,4 +31,22 @@ export async function create(req, res) {
     }
     res.status(201).json(await service.create(req.body));
   } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
+}
+
+/** Bandeja de correos simulados (lista + estado del modo mail). */
+export async function getInbox(_req, res) {
+  try {
+    const items = await service.getInbox();
+    res.json({ mailMode: getMailMode(), items });
+  } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
+}
+
+/** Forzar la ejecucion del job diario desde el panel admin. */
+export async function runJobsNow(_req, res) {
+  try {
+    const result = await runDailyMembershipJobs();
+    res.json({ ok: true, mailMode: getMailMode(), result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 }

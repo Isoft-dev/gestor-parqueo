@@ -10,6 +10,7 @@ import {
 } from './espacioCapacity.js';
 import { insertSystemAlerta } from '../utils/systemAlert.js';
 import { isTipoMaquinaEntrada } from '../utils/tipoMaquinaRules.js';
+import { assertMachineIsOperative, getMachineWithStatusTx } from '../utils/machineStatus.js';
 
 function norm(s) {
   return String(s ?? '')
@@ -620,6 +621,13 @@ export async function validateTagAndRegisterEntry(memCodigoRaw, opts = {}) {
     if (!isTipoMaquinaEntrada(mrows[0].TMA_TIPO)) {
       throw new Error('La máquina indicada no es de entrada');
     }
+    const machine = await getMachineWithStatusTx(
+      {
+        execute: async (sql, binds) => ({ rows: await executeSql(sql, binds) }),
+      },
+      mid,
+    );
+    assertMachineIsOperative(machine, 'autorizar entradas con membresía');
     maqIdAutoriza = mid;
   }
 

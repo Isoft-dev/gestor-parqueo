@@ -1,4 +1,5 @@
 import { executeCursor, executeProcedure, executeDelete, executeSql } from '../db/oracle.js';
+import { assertFixedPaymentCatalogLocked } from '../utils/fixedPaymentCatalogs.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_TIPO_COBRO_GET_ALL(:cursor); END;`);
@@ -10,6 +11,7 @@ export async function getById(id) {
 }
 
 export async function create(data) {
+  assertFixedPaymentCatalogLocked();
   const identity = await executeSql(
     `SELECT GENERATION_TYPE
        FROM USER_TAB_IDENTITY_COLS
@@ -44,6 +46,7 @@ export async function create(data) {
 }
 
 export async function update(id, data) {
+  assertFixedPaymentCatalogLocked();
   await executeProcedure(`BEGIN SP_TIPO_COBRO_UPDATE(:id, :TCO_TIPO, :TCO_DESCRIPCION); END;`, {
     id,
     TCO_TIPO: data.TCO_TIPO ?? null,
@@ -53,6 +56,7 @@ export async function update(id, data) {
 }
 
 export async function deleteItem(id) {
+  assertFixedPaymentCatalogLocked();
   try {
     return await executeDelete(`BEGIN SP_TIPO_COBRO_DELETE(:id, :deleted); END;`, { id });
   } catch (err) {

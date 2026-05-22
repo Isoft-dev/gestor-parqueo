@@ -39,6 +39,7 @@ function fmtPeriodo(desde, hasta) {
 function fmtDuracionMin(mins) {
   const n = Number(mins);
   if (!Number.isFinite(n) || n < 0) return '—';
+  if (n > 0 && n < 1) return '< 1 min';
   const total = Math.round(n);
   const h = Math.floor(total / 60);
   const m = total % 60;
@@ -66,12 +67,31 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
             v.VEH_PLACA,
             v.VEH_MODELO,
             v.VEH_COLOR,
-            v.CLI_ID,
+            CASE
+              WHEN v.CLI_ID IS NULL THEN 'Esporádico'
+              WHEN EXISTS (
+                     SELECT 1
+                       FROM PAR_MEMBRESIA m
+                       JOIN PAR_VEHICULO vx ON vx.VEH_ID = m.VEH_ID
+                      WHERE vx.CLI_ID = v.CLI_ID
+                   ) THEN 'Mensual registrado'
+              ELSE 'Esporádico'
+            END AS TIPO_CLIENTE,
             COUNT(*) AS TOTAL_VISITAS
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
       WHERE TRUNC(t.TIC_FECHA_HORA_ENTRADA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
-      GROUP BY t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR, v.CLI_ID
+      GROUP BY t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+               CASE
+                 WHEN v.CLI_ID IS NULL THEN 'Esporádico'
+                 WHEN EXISTS (
+                        SELECT 1
+                          FROM PAR_MEMBRESIA m
+                          JOIN PAR_VEHICULO vx ON vx.VEH_ID = m.VEH_ID
+                         WHERE vx.CLI_ID = v.CLI_ID
+                      ) THEN 'Mensual registrado'
+                 ELSE 'Esporádico'
+               END
       ORDER BY COUNT(*) DESC, v.VEH_PLACA`,
     periodo
   );
@@ -82,7 +102,7 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
     modelo: r.VEH_MODELO ?? r.veh_modelo ?? '—',
     color: r.VEH_COLOR ?? r.veh_color ?? '—',
     visitas: Number(r.TOTAL_VISITAS ?? r.total_visitas ?? 0),
-    tipoCliente: (r.CLI_ID ?? r.cli_id) != null ? 'Mensual registrado' : 'Esporádico',
+    tipoCliente: r.TIPO_CLIENTE ?? r.tipo_cliente ?? 'Esporádico',
   }));
 
   return {
@@ -207,32 +227,26 @@ export async function getTiempoPromedioEstadia(desdeStr, hastaStr) {
     `SELECT t.TIC_CODIGO,
             v.VEH_PLACA,
             t.TIC_FECHA_HORA_ENTRADA,
-            t.TIC_FECHA_HORA_SALIDA,
-            c.COB_FECHA_HORA
+            t.TIC_FECHA_HORA_SALIDA
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
        JOIN PAR_ESTADO_TICKET e ON e.ETI_ID = t.ETI_ID
-       LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
-      WHERE LOWER(e.ETI_ESTADO) LIKE '%pagad%'
-        AND t.TIC_FECHA_HORA_ENTRADA IS NOT NULL
+      WHERE t.TIC_FECHA_HORA_ENTRADA IS NOT NULL
+        AND t.TIC_FECHA_HORA_SALIDA IS NOT NULL
+        AND t.TIC_FECHA_HORA_SALIDA >= t.TIC_FECHA_HORA_ENTRADA
         AND (
-              t.TIC_FECHA_HORA_SALIDA IS NOT NULL
-              OR c.COB_FECHA_HORA IS NOT NULL
+              LOWER(e.ETI_ESTADO) LIKE '%valid%'
+              OR LOWER(e.ETI_ESTADO) LIKE '%pagad%'
             )
-        AND NVL(t.TIC_FECHA_HORA_SALIDA, c.COB_FECHA_HORA) >= t.TIC_FECHA_HORA_ENTRADA
-        AND TRUNC(NVL(t.TIC_FECHA_HORA_SALIDA, c.COB_FECHA_HORA)) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
-      ORDER BY NVL(t.TIC_FECHA_HORA_SALIDA, c.COB_FECHA_HORA) DESC`,
+        AND TRUNC(t.TIC_FECHA_HORA_SALIDA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
+      ORDER BY t.TIC_FECHA_HORA_SALIDA DESC`,
     periodo
   );
 
   const detalle = rows
     .map((r) => {
       const entrada = r.TIC_FECHA_HORA_ENTRADA ?? r.tic_fecha_hora_entrada;
-      const salida =
-        r.TIC_FECHA_HORA_SALIDA ??
-        r.tic_fecha_hora_salida ??
-        r.COB_FECHA_HORA ??
-        r.cob_fecha_hora;
+      const salida = r.TIC_FECHA_HORA_SALIDA ?? r.tic_fecha_hora_salida;
       const mins = Math.max(0, (new Date(salida).getTime() - new Date(entrada).getTime()) / (1000 * 60));
       return {
         codigo: r.TIC_CODIGO ?? r.tic_codigo ?? '—',

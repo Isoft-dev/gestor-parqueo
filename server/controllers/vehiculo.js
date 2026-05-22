@@ -3,7 +3,7 @@ import * as service from '../services/vehiculo.js';
 function businessStatus(err) {
   const msg = String(err?.message || '');
   if (/no encontrado/i.test(msg)) return 404;
-  if (/misma placa|misma VEH_PLACA|requerid/i.test(msg)) return 400;
+  if (/misma placa|misma VEH_PLACA|requerid|placa/i.test(msg)) return 400;
   if (/duplicad|ya existe|conflict/i.test(msg)) return 409;
   return 500;
 }

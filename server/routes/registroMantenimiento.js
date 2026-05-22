@@ -5,4 +5,5 @@ router.get('/', ctrl.getAll);
 router.get('/maquina/:maqId', ctrl.getByMachine);
 router.get('/:id', ctrl.getById);
 router.post('/', ctrl.create);
+router.put('/:id', ctrl.update);
 export default router;

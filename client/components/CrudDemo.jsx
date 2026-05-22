@@ -2,6 +2,16 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { API_BASE } from '../config.js';
 import { buildLabelMapFromCrudFields, getDbColumnLabel } from '../utils/dbColumnLabel.js';
+import HelpHint from './HelpHint.jsx';
+import {
+  filterManualMachineStatuses,
+  filterMaintenanceResultMachineStatuses,
+  filterMaintenanceEligibleMachines,
+  filterOperativeMachines,
+  getMaintenanceMovementForMachine,
+  isMachineStatusMaintenance,
+  pickInoperativeMachineStatusId,
+} from '../utils/machineStatus.js';
 
 // ── CONFIG ────────────────────────────────────────────────────
 // ops: c=create, u=update, d=delete
@@ -12,7 +22,7 @@ const SECTIONS = {
     entities: [
       { key: 'estado-ticket', label: 'Estado Ticket', id: 'ETI_ID',
         fields: [{ k:'ETI_ID',l:'ID',req:true },{ k:'ETI_ESTADO',l:'Estado',req:true }],
-        ops:{c:true,u:false,d:false} },
+        ops:{c:false,u:false,d:false} },
       { key: 'tarifa', label: 'Tarifa', id: 'TAR_ID',
         fields: [{ k:'TAR_ID',l:'ID',req:true },{ k:'TAR_TIPO',l:'Tipo',req:true },{ k:'TAR_PRECIO',l:'Precio',t:'number',req:true },{ k:'TAR_TIEMPO_GRACIA',l:'Tiempo Gracia (min)',t:'number',req:true }],
         ops:{c:true,u:true,d:true} },
@@ -39,7 +49,7 @@ const SECTIONS = {
       },
       { key: 'tipo-cobro', label: 'Tipo Cobro', id: 'TCO_ID',
         fields: [{ k:'TCO_ID',l:'ID',req:true },{ k:'TCO_TIPO',l:'Tipo',req:true },{ k:'TCO_DESCRIPCION',l:'Descripción' }],
-        ops:{c:true,u:true,d:true} },
+        ops:{c:false,u:false,d:false} },
       { key: 'cobro', label: 'Cobro', id: 'COB_ID',
         fields: [{ k:'COB_ID',l:'ID',req:true },{ k:'TIC_ID',l:'TIC_ID',req:true,t:'number' },{ k:'COB_NIT',l:'NIT / CF' },{ k:'COB_HORAS_TOTALES',l:'Horas',t:'number',req:true },{ k:'TCO_ID',l:'Tipo de cobro',req:true,t:'select',catalog:'tipo-cobro',valueKey:'TCO_ID',labelKey:'TCO_TIPO' },{ k:'COB_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'COB_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'COB_VUELTO',l:'Vuelto',t:'number' },{ k:'COB_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true },{ k:'TAR_ID',l:'Tarifa',req:true,t:'select',catalog:'tarifa',valueKey:'TAR_ID',labelKey:'TAR_TIPO' }],
         ops:{c:true,u:false,d:false} },
@@ -53,14 +63,18 @@ const SECTIONS = {
     entities: [
       { key: 'estado-maquina', label: 'Estado Máquina', id: 'EMA_ID',
         fields: [{ k:'EMA_ID',l:'ID',req:true },{ k:'EMA_ESTADO',l:'Estado',req:true },{ k:'EMA_DESCRIPCION',l:'Descripción' }],
-        ops:{c:true,u:true,d:true} },
+        ops:{c:false,u:true,d:false},
+        updateFields:['EMA_DESCRIPCION'],
+        readOnlyOnUpdate:['EMA_ID','EMA_ESTADO'] },
       { key: 'tipo-maquina', label: 'Tipo Máquina', id: 'TMA_ID',
         fields: [{ k:'TMA_ID',l:'ID',req:true },{ k:'TMA_TIPO',l:'Tipo',req:true },{ k:'TMA_DESCRIPCION',l:'Descripción' }],
-        ops:{c:true,u:true,d:true} },
+        ops:{c:false,u:true,d:false},
+        updateFields:['TMA_DESCRIPCION'],
+        readOnlyOnUpdate:['TMA_ID','TMA_TIPO'] },
       { key: 'saldo-disponible', label: 'Saldo Disponible', id: 'SDI_ID',
         fields: [{ k:'SDI_ID',l:'ID',req:true },{ k:'SDI_TIPO',l:'Tipo (billete/moneda)',req:true },{ k:'SDI_VALOR',l:'Valor',t:'number' }],
-        ops:{c:true,u:true,d:false} },
-      { key: 'detalle-saldo', label: 'Detalle Saldo', id: 'DSA_ID',
+        ops:{c:false,u:false,d:false} },
+      { key: 'detalle-saldo', label: 'Recargo Máquina', id: 'DSA_ID',
         fields: [{ k:'DSA_ID',l:'ID',req:true },{ k:'DSA_CANTIDAD',l:'Cantidad',t:'number' },{ k:'DSA_SUBTOTAL',l:'Subtotal',t:'number' },{ k:'DSA_UMBRAL_MINIMO',l:'Umbral mínimo',t:'number' },{ k:'SDI_ID',l:'SDI_ID',req:true },{ k:'MAQ_ID',l:'MAQ_ID',req:true }],
         ops:{c:false,u:false,d:false} },
       { key: 'maquina', label: 'Máquina', id: 'MAQ_ID',
@@ -87,8 +101,11 @@ const SECTIONS = {
           },
           { k:'MAQ_FECHA_ULTIMA_RECARGA',l:'Última Recarga',t:'datetime-local' },
         ],
-        ops:{c:true,u:true,d:false} },
-      { key: 'recargo-maquina', label: 'Recargo Máquina', id: 'RMA_ID',
+        ops:{c:true,u:true,d:false},
+        updateFields:['EMA_ID'],
+        readOnlyOnCreate:['EMA_ID'],
+        readOnlyOnUpdate:['MAQ_ID'] },
+      { key: 'recargo-maquina', label: 'Detalle Saldo', id: 'RMA_ID',
         fields: [
           { k:'RMA_ID',l:'ID',req:true },
           {
@@ -100,20 +117,42 @@ const SECTIONS = {
             valueKey:'MAQ_ID',
             labelKey:'MAQ_CODIGO',
             maquinaSoloCobro:true,
+            maquinaSoloOperativa:true,
           },
           { k:'RMA_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },
           { k:'RMA_DESCRIPCION',l:'Descripción' },
           { k:'RECARGA_DETALLE_SALDO',l:'Detalle billetes' },
         ],
-        ops:{c:true,u:false,d:false} },
+        ops:{c:false,u:false,d:false} },
       { key: 'registro-mantenimiento', label: 'Reg. Mantenimiento', id: 'REM_ID',
         fields: [
           { k:'REM_ID',l:'ID',req:true },
           { k:'MAQ_ID',l:'Máquina',req:true,t:'select',catalog:'maquina',valueKey:'MAQ_ID',labelKey:'MAQ_CODIGO' },
+          {
+            k:'REM_TIPO_MOVIMIENTO',
+            l:'Movimiento',
+            req:true,
+            t:'select',
+            options:[
+              { value:'INICIO', label:'Inicio' },
+              { value:'FINALIZACION', label:'Finalización' },
+            ],
+          },
+          {
+            k:'REM_ESTADO_RESULTANTE_EMA_ID',
+            l:'Estado al finalizar',
+            t:'select',
+            catalog:'estado-maquina',
+            valueKey:'EMA_ID',
+            labelKey:'EMA_ESTADO',
+            estadoMaquinaResultadoMantenimiento:true,
+          },
           { k:'REM_MANTENIMIENTO_FECHA',l:'Fecha',t:'datetime-local' },
           { k:'REM_DESCRIPCION',l:'Descripción' },
         ],
-        ops:{c:true,u:false,d:false} },
+        ops:{c:true,u:true,d:false},
+        updateFields:['REM_DESCRIPCION'],
+        readOnlyOnUpdate:['REM_ID'] },
       { key: 'tipo-alerta', label: 'Tipo Alerta', id: 'TAL_ID',
         fields: [{ k:'TAL_ID',l:'ID',req:true },{ k:'TAL_TIPO',l:'Tipo de alerta',req:true },{ k:'TAL_DESCRIPCION',l:'Descripción' }],
         ops:{c:false,u:true,d:false}, updateFields:['TAL_DESCRIPCION'], readOnlyOnUpdate:['TAL_ID','TAL_TIPO'] },
@@ -206,7 +245,7 @@ const SECTIONS = {
         ops:{c:true,u:true,d:false}, updateFields:['BIV_FECHA_RESOLUCION','USU_ID'] },
       { key: 'tipo-pago', label: 'Tipo de Pago', id: 'TPA_ID',
         fields: [{ k:'TPA_ID',l:'ID',req:true },{ k:'TPA_TIPO',l:'Tipo',req:true },{ k:'TPA_DESCRIPCION',l:'Descripción' }],
-        ops:{c:true,u:true,d:true} },
+        ops:{c:false,u:false,d:false} },
       { key: 'pago', label: 'Pago', id: 'PAG_ID',
         fields: [{ k:'PAG_ID',l:'ID',req:true },{ k:'TPA_ID',l:'TPA_ID',req:true },{ k:'PAG_MONTO_TOTAL',l:'Monto Total',t:'number',req:true },{ k:'PAG_MONTO_RECIBIDO',l:'Monto Recibido',t:'number' },{ k:'PAG_VUELTO',l:'Vuelto',t:'number' },{ k:'PAG_FECHA_HORA',l:'Fecha/Hora',t:'datetime-local',req:true }],
         ops:{c:true,u:false,d:false} },
@@ -255,6 +294,38 @@ function calcMembresiaVencimientoInput(fechaInicio, duracionDias) {
 
 function round2(n) {
   return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+function shouldHideFieldOnCreate(entityKey, fieldKey) {
+  return entityKey === 'bitacora-incidente-vehiculo' && ['BIV_FECHA_RESOLUCION', 'USU_ID'].includes(fieldKey);
+}
+
+function shouldHideFieldForCurrentForm(entityKey, fieldKey, form, isNewRecord = false) {
+  if (
+    entityKey === 'registro-mantenimiento'
+    && fieldKey === 'REM_ESTADO_RESULTANTE_EMA_ID'
+    && String(form?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase() !== 'FINALIZACION'
+  ) {
+    return true;
+  }
+  if (
+    entityKey === 'registro-mantenimiento'
+    && isNewRecord
+    && fieldKey === 'REM_DESCRIPCION'
+    && String(form?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase() === 'FINALIZACION'
+  ) {
+    return true;
+  }
+  if (
+    entityKey === 'maquina'
+    && fieldKey === 'MAQ_FECHA_ULTIMA_RECARGA'
+  ) {
+    return true;
+  }
+  return false;
+}
+function isCurrentSessionUser(rowUserId, sessionUserId) {
+  if (rowUserId == null || sessionUserId == null) return false;
+  return String(rowUserId).trim() !== '' && String(rowUserId) === String(sessionUserId);
 }
 function emptyForm(fields) {
   return Object.fromEntries(
@@ -354,13 +425,13 @@ function getAdminListContextHint(sectionPath, entityKey) {
   const HINTS = {
     'clientes-mensuales': {
       cliente:
-        'Todas las fichas de cliente (con o sin vehículo/membresía). Usa la búsqueda por nombre, apellido o DPI para acotar.',
+        'Clientes mensuales o de alta administrativa. Los esporádicos capturados por NIT en tickets se consultan en Tickets y vehículos.',
       membresia:
         'Contratos mensuales: unen un vehículo con un espacio fijo y el tipo de plan elegido.',
       'detalle-pago-membresia':
         'Cada fila representa un pago aplicado a una membresía. Puedes filtrar por placa con la búsqueda.',
       vehiculo:
-        'Vehículos vinculados a un cliente mensual, incluso si todavía no tienen una membresía activa.',
+        'Vehículos vinculados a clientes mensuales. Los vehículos de clientes esporádicos con NIT permanecen en Tickets y vehículos.',
       'tipo-vehiculo': 'Tipos de vehículo disponibles (sedán, SUV, etc.) para clasificar cada placa.',
       'tipo-membresia': 'Planes disponibles: duración, precio y nombre comercial para nuevas membresías.',
       'estado-membresia': 'Estados posibles del contrato (activa, vencida, suspendida…).',
@@ -375,7 +446,7 @@ function getAdminListContextHint(sectionPath, entityKey) {
       ticket:
         'Tickets de visitantes sin plan mensual. Usa el buscador para filtrar por código o placa.',
       vehiculo:
-        'Vehículos de visita: placas sin cliente (entrada esporádica). Si un vehículo queda vinculado a un cliente, pasa al apartado Clientes mensuales.',
+        'Vehículos esporádicos: placas de visita sin cliente o ligadas a clientes esporádicos capturados por NIT. No se mezclan con Clientes mensuales.',
       cobro: 'Historial de cobros al salir: montos, NIT o consumidor final y máquina donde se pagó.',
       'tipo-cobro': 'Tipos de cobro que el cajero elige al cerrar un ticket (efectivo, tarjeta, etc.).',
       'detalle-maquina-ticket':
@@ -394,8 +465,8 @@ function getAdminListContextHint(sectionPath, entityKey) {
       'saldo-disponible':
         'Billetes o monedas que la caja de una máquina puede recibir o devolver.',
       'detalle-saldo':
-        'Cantidad física por cada denominación dentro de una máquina de cobro. La tabla solo aparece después de elegir máquina y aplicar el filtro.',
-      'recargo-maquina': 'Registro de recargas de efectivo hechas en caja.',
+        'Selecciona una máquina de cobro y agrega billetes por denominación para registrar la recarga. La tabla solo aparece después de elegir máquina y aplicar el filtro.',
+      'recargo-maquina': 'Consulta el historial de recargas de efectivo hechas en caja. Aquí solo se busca y visualiza.',
       'registro-mantenimiento': 'Intervenciones técnicas o preventivas sobre cada equipo.',
     },
     tarifas: {
@@ -418,6 +489,71 @@ function getAdminListContextHint(sectionPath, entityKey) {
   const specific = HINTS[sectionPath]?.[entityKey];
   if (specific) return specific;
   return 'Consulta o edita los registros de esta lista. Usa «+ Nuevo» para altas y «Editar» en cada fila cuando aplique.';
+}
+
+function getAdminListContextHelpModel(sectionPath, entityKey) {
+  const detailedHints = {
+    'tickets-vehiculos': {
+      ticket: {
+        summary:
+          'Tickets de visitantes sin plan mensual. Usa la busqueda para localizar el caso por codigo o placa.',
+        steps: [
+          'Si un ticket vence por tiempo de gracia, el cliente vera una alerta al intentar salir y debe acercarse a administracion.',
+          'Busca el ticket y cambia su estado a "Volver a cobrar".',
+          'Ese cambio atiende automaticamente la alerta para que el cliente pueda pagar de nuevo y salir.',
+          'Si el ticket se extravio, completa primero el proceso administrativo fuera del sistema y luego cambia el estado a "Extraviado" o usa el panel de ticket extraviado.',
+        ],
+        note: 'Al cobrar un ticket marcado como extraviado se aplica el recargo correspondiente.',
+      },
+    },
+    maquinas: {
+      'detalle-saldo': {
+        summary: 'Selecciona una maquina de cobro para ver el efectivo disponible por denominacion.',
+        steps: [
+          'Filtra por maquina para cargar la tabla de denominaciones.',
+          'Usa el boton "Recargar" en la fila del billete o moneda que estas agregando.',
+          'Ingresa la cantidad de unidades agregadas.',
+          'El sistema actualiza el saldo y registra la recarga en el historial de la maquina.',
+        ],
+      },
+      'recargo-maquina': {
+        summary: 'Consulta el historial de recargas de efectivo hechas en caja.',
+        note: 'La recarga se ejecuta desde Detalle saldo; aqui solo se busca y visualiza.',
+      },
+      'registro-mantenimiento': {
+        summary: 'Intervenciones tecnicas o preventivas sobre cada equipo.',
+        steps: [
+          'Selecciona la maquina que sera intervenida.',
+          'Si la maquina esta operativa, el formulario registrara un INICIO y la movera a mantenimiento.',
+          'Si la maquina ya esta en mantenimiento, el formulario solo permitira una FINALIZACION.',
+          'Al finalizar, elige un estado resultante valido: Operativa o Fuera de servicio.',
+        ],
+      },
+    },
+  };
+
+  const detailed = detailedHints[sectionPath]?.[entityKey];
+  if (detailed) return detailed;
+
+  const summary = getAdminListContextHint(sectionPath, entityKey);
+  return summary ? { summary } : null;
+}
+
+function renderAdminListContextHint(help) {
+  if (!help) return null;
+  return (
+    <>
+      {help.summary ? <p>{help.summary}</p> : null}
+      {help.steps?.length ? (
+        <ol>
+          {help.steps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      ) : null}
+      {help.note ? <p>{help.note}</p> : null}
+    </>
+  );
 }
 
 function escapeHtml(s) {
@@ -473,8 +609,9 @@ function isTipoMaquinaCobroClient(tmaTipo) {
 }
 
 /** Solo máquinas cuyo tipo es de cobro (para filtro en Detalle saldo). */
-function maquinasTipoCobroList(catalogOptions) {
-  const maqs = catalogOptions?.maquina || [];
+function maquinasTipoCobroList(catalogOptions, { onlyOperative = false } = {}) {
+  const maqsBase = catalogOptions?.maquina || [];
+  const maqs = onlyOperative ? filterOperativeMachines(maqsBase) : maqsBase;
   const tipos = catalogOptions?.['tipo-maquina'] || [];
   return maqs.filter((m) => {
     const t = tipos.find((t0) => String(t0.TMA_ID) === String(m.TMA_ID));
@@ -482,10 +619,60 @@ function maquinasTipoCobroList(catalogOptions) {
   });
 }
 
+function maquinasOperativasList(catalogOptions) {
+  return filterOperativeMachines(catalogOptions?.maquina || []);
+}
+
+function maquinasMantenimientoElegiblesList(catalogOptions) {
+  return filterMaintenanceEligibleMachines(catalogOptions?.maquina || []);
+}
+
+function findMachineById(catalogOptions, maqId) {
+  if (maqId == null || String(maqId).trim() === '') return null;
+  return (catalogOptions?.maquina || []).find((row) => String(row.MAQ_ID) === String(maqId)) || null;
+}
+
+function maintenanceMovementOptionsForMachine(machine) {
+  const movement = getMaintenanceMovementForMachine(machine);
+  if (!movement) return [];
+  if (movement === 'FINALIZACION') return [{ value: 'FINALIZACION', label: 'Finalización' }];
+  return [{ value: 'INICIO', label: 'Inicio' }];
+}
+
+function maintenanceMovementHelp(machine) {
+  if (!machine) {
+    return 'Selecciona una máquina operativa o en mantenimiento para que el movimiento se defina automáticamente.';
+  }
+  const estado = String(machine.EMA_ESTADO ?? '').trim() || 'Sin estado';
+  if (isMachineStatusMaintenance(estado)) {
+    return `La máquina está en ${estado}; este registro cerrará el mantenimiento con una finalización.`;
+  }
+  const movement = getMaintenanceMovementForMachine(machine);
+  if (movement === 'INICIO') {
+    return `La máquina está ${estado}; este registro abrirá el mantenimiento con un inicio.`;
+  }
+  return `La máquina está ${estado} y no admite movimientos de mantenimiento desde este formulario.`;
+}
+
 function isMaquinaCobroRow(row, catalogOptions) {
   const tipos = catalogOptions?.['tipo-maquina'] || [];
   const tipo = tipos.find((t) => String(t.TMA_ID) === String(row?.TMA_ID));
   return tipo != null && isTipoMaquinaCobroClient(tipo.TMA_TIPO);
+}
+
+function isMachineStatusMaintenanceById(catalogOptions, emaId) {
+  if (emaId == null || String(emaId).trim() === '') return false;
+  const estados = catalogOptions?.['estado-maquina'] || [];
+  const estado = estados.find((row) => String(row.EMA_ID) === String(emaId));
+  return estado != null && isMachineStatusMaintenance(estado.EMA_ESTADO);
+}
+
+function machineManualStatusOptions(catalogOptions, currentEmaId) {
+  const rows = catalogOptions?.['estado-maquina'] || [];
+  const manualRows = filterManualMachineStatuses(rows);
+  if (!isMachineStatusMaintenanceById(catalogOptions, currentEmaId)) return manualRows;
+  const current = rows.find((row) => String(row.EMA_ID) === String(currentEmaId));
+  return current ? [current, ...manualRows] : manualRows;
 }
 
 /** Texto para opciones del `select` de incidente: solo tipo (sin descripción). */
@@ -578,14 +765,16 @@ function openAlertaDetailPopup(row, formatValue) {
 
 // ── COMPONENT ─────────────────────────────────────────────────
 /**
- * @param {{ filterEntityKeys?: string[]; sessionUserId?: string | number | null }} props
+ * @param {{ filterEntityKeys?: string[]; entityAccessMap?: Record<string, { ops?: { c?: boolean, u?: boolean, d?: boolean } }>, sessionUserId?: string | number | null, sessionIsFullAdmin?: boolean }} props
  * Si `filterEntityKeys` está definido, se ocultan las pestañas ME-MS / MC / PA y solo se listan esas entidades.
+ * `entityAccessMap`: sobreescribe permisos por entidad sin alterar la configuración base.
  * `sessionUserId`: USU_ID del admin logueado (bitácora: marca quién resolvió el incidente).
  * `sectionPath`: ruta del módulo en `/admin` (muestra textos de ayuda acordes a cada lista).
  */
 const emptyBivFilter = { placa: '', resuelto: '', desde: '', hasta: '' };
 const emptyAlertaFilter = { eal: '', tal: '', maq: '' };
 const emptyTicketFilter = { eti: '', q: '' };
+const emptyCobroFilter = { q: '' };
 const emptyClienteFilter = { q: '' };
 const emptyMembresiaFilter = { q: '', eme: '' };
 const emptyDetalleMaqTicketFilter = { q: '', tx: '' };
@@ -596,7 +785,13 @@ const emptyDpmPlacaFilter = { placa: '' };
 const emptyMaquinaFilter = { tma: '' };
 const emptyVehiculoFilter = { q: '', tve: '' };
 
-export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null, sectionPath = '' }) {
+export default function CrudDemo({
+  filterEntityKeys = null,
+  entityAccessMap = null,
+  sessionUserId = null,
+  sessionIsFullAdmin = false,
+  sectionPath = '',
+}) {
   const readOnlyFieldStyle = {
     background: '#e5e7eb',
     color: '#4b5563',
@@ -604,9 +799,26 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     cursor: 'default',
   };
   const [searchParams, setSearchParams] = useSearchParams();
+  const applyEntityAccess = useMemo(
+    () => (baseEntity) => {
+      if (!baseEntity) return baseEntity;
+      const override = entityAccessMap?.[baseEntity.key];
+      if (!override) return baseEntity;
+      return {
+        ...baseEntity,
+        ...override,
+        ops: override.ops ? { ...baseEntity.ops, ...override.ops } : baseEntity.ops,
+      };
+    },
+    [entityAccessMap],
+  );
   const filteredEntities = useMemo(
-    () => (filterEntityKeys?.length ? collectEntitiesByKeys(filterEntityKeys) : null),
-    [filterEntityKeys],
+    () => (
+      filterEntityKeys?.length
+        ? collectEntitiesByKeys(filterEntityKeys).map(applyEntityAccess)
+        : null
+    ),
+    [filterEntityKeys, applyEntityAccess],
   );
 
   const [section, setSection] = useState('me-ms');
@@ -616,11 +828,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   const [form, setForm]        = useState({});
   const [editId, setEditId]    = useState(null);
   const [msg, setMsg]          = useState('');
-  const [editRowSnapshot, setEditRowSnapshot] = useState(null);
   const [machineView, setMachineView] = useState({ maqId: null, title: '', rows: [] });
   const [bivFilter, setBivFilter] = useState(emptyBivFilter);
   const [alertaFilter, setAlertaFilter] = useState(emptyAlertaFilter);
   const [ticketFilter, setTicketFilter] = useState(emptyTicketFilter);
+  const [cobroFilter, setCobroFilter] = useState(emptyCobroFilter);
   const [clienteFilter, setClienteFilter] = useState(emptyClienteFilter);
   const [membresiaFilter, setMembresiaFilter] = useState(emptyMembresiaFilter);
   const [detalleMaqTicketFilter, setDetalleMaqTicketFilter] = useState(emptyDetalleMaqTicketFilter);
@@ -636,7 +848,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   /** Catálogos para campos `t: 'select'` (clave = segmento API, p. ej. tipo-vehiculo). */
   const [catalogOptions, setCatalogOptions] = useState({});
   const bivQueryKey = searchParams.toString();
-  const formatAlertaDetailValue = (key, value, row) => {
+  const formatAlertaDetailValue = (key, value) => {
     if (key === 'MAQ_ID') return labelMaquina({ MAQ_ID: value }, catalogOptions);
     if (key === 'EAL_ID') return labelEstadoAlerta(value, catalogOptions);
     if (key === 'ALE_USU_ID_RESOLVIO') return labelUsuario(value, catalogOptions);
@@ -644,41 +856,48 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     return value;
   };
 
-  useEffect(() => {
-    if (!entity) return;
+  async function refreshCatalogOptionsForEntity(targetEntity = entity) {
+    if (!targetEntity) return {};
     const catsBase = [
       ...new Set(
-        entity.fields.filter((f) => f.t === 'select' && f.catalog).map((f) => f.catalog),
+        targetEntity.fields.filter((f) => f.t === 'select' && f.catalog).map((f) => f.catalog),
       ),
     ];
     const cats =
-      entity.key === 'alerta'
+      targetEntity.key === 'alerta'
         ? [...new Set([...catsBase, 'tipo-maquina', 'tipo-alerta'])]
-        : entity.key === 'ticket'
+        : targetEntity.key === 'ticket'
             ? [...new Set([...catsBase, 'estado-ticket'])]
-            : entity.key === 'detalle-saldo'
+            : targetEntity.key === 'detalle-saldo'
               ? [...new Set([...catsBase, 'maquina', 'tipo-maquina'])]
-              : entity.key === 'recargo-maquina'
+              : targetEntity.key === 'recargo-maquina'
                 ? [...new Set([...catsBase, 'tipo-maquina'])]
-                : catsBase;
-    if (!cats.length) return;
+                : targetEntity.key === 'registro-mantenimiento'
+                  ? [...new Set([...catsBase, 'tipo-maquina'])]
+                  : catsBase;
+    if (!cats.length) return {};
+    const updates = {};
+    await Promise.all(
+      cats.map(async (cat) => {
+        try {
+          const res = await fetch(`${API_BASE}/${cat}`, { cache: 'no-store' });
+          const data = await res.json();
+          updates[cat] = Array.isArray(data) ? data : [];
+        } catch {
+          updates[cat] = [];
+        }
+      }),
+    );
+    setCatalogOptions((prev) => ({ ...prev, ...updates }));
+    return updates;
+  }
+
+  useEffect(() => {
+    if (!entity) return;
     let cancelled = false;
     (async () => {
-      const updates = {};
-      await Promise.all(
-        cats.map(async (cat) => {
-          try {
-            const res = await fetch(`${API_BASE}/${cat}`, { cache: 'no-store' });
-            const data = await res.json();
-            updates[cat] = Array.isArray(data) ? data : [];
-          } catch {
-            updates[cat] = [];
-          }
-        }),
-      );
-      if (!cancelled) {
-        setCatalogOptions((prev) => ({ ...prev, ...updates }));
-      }
+      await refreshCatalogOptionsForEntity(entity);
+      if (cancelled) return;
     })();
     return () => {
       cancelled = true;
@@ -712,6 +931,20 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       q: searchParams.get('q') || '',
     });
   }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
+
+  useEffect(() => {
+    if (entity?.key !== 'cobro') return;
+    setCobroFilter({
+      q: searchParams.get('cob_q') || '',
+    });
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL â†’ form solo cuando cambia la query
+
+  useEffect(() => {
+    if (editId !== '__new__') return;
+    if (entity?.ops?.c !== false) return;
+    setEditId(null);
+    setForm(entity ? emptyForm(entity.fields) : {});
+  }, [entity?.key, entity?.ops?.c, editId]);
 
   useEffect(() => {
     if (entity?.key !== 'cliente') return;
@@ -790,6 +1023,50 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     });
   }, [entity?.key, editId, catalogOptions?.['estado-ticket']]);
 
+  /** Nueva máquina: inicia como «Inoperativa» y se activa luego desde edición. */
+  useEffect(() => {
+    if (entity?.key !== 'maquina' || editId !== '__new__') return;
+    const inoperativaId = pickInoperativeMachineStatusId(catalogOptions?.['estado-maquina']);
+    if (!inoperativaId) return;
+    setForm((prev) => {
+      if (prev?.EMA_ID != null && String(prev.EMA_ID).trim() !== '') return prev;
+      return { ...prev, EMA_ID: inoperativaId };
+    });
+  }, [entity?.key, editId, catalogOptions?.['estado-maquina']]);
+
+  /** Nuevo mantenimiento: el movimiento se define segÃºn el estado actual de la mÃ¡quina. */
+  useEffect(() => {
+    if (entity?.key !== 'registro-mantenimiento' || editId !== '__new__') return;
+    const machine = findMachineById(catalogOptions, form?.MAQ_ID);
+    const nextMovement = getMaintenanceMovementForMachine(machine);
+    setForm((prev) => {
+      const currentMovement = String(prev?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase();
+      if (currentMovement === nextMovement) return prev;
+      return { ...prev, REM_TIPO_MOVIMIENTO: nextMovement };
+    });
+  }, [entity?.key, editId, form?.MAQ_ID, catalogOptions]);
+
+  useEffect(() => {
+    if (entity?.key !== 'registro-mantenimiento') return;
+    if (String(form?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase() === 'FINALIZACION') return;
+    setForm((prev) => (
+      String(prev?.REM_ESTADO_RESULTANTE_EMA_ID ?? '').trim() === ''
+        ? prev
+        : { ...prev, REM_ESTADO_RESULTANTE_EMA_ID: '' }
+    ));
+  }, [entity?.key, form?.REM_TIPO_MOVIMIENTO]);
+
+  useEffect(() => {
+    if (entity?.key !== 'registro-mantenimiento' || editId !== '__new__') return;
+    if (String(form?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase() !== 'FINALIZACION') return;
+    setForm((prev) => (
+      String(prev?.REM_DESCRIPCION ?? '').trim() === ''
+        ? prev
+        : { ...prev, REM_DESCRIPCION: '' }
+    ));
+  }, [entity?.key, editId, form?.REM_TIPO_MOVIMIENTO]);
+
+
   /** Nueva membresía: vencimiento automático según `TME_DURACION`. */
   useEffect(() => {
     if (entity?.key !== 'membresia' || editId !== '__new__') return;
@@ -841,8 +1118,8 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         if (!rQuote.ok) throw new Error(dQuote.error || dQuote.message || rQuote.statusText);
         if (cancelled) return;
         const horas = Number(
-          dQuote?.estadia?.horasCobradas ??
           dQuote?.estadia?.horasFacturables ??
+          dQuote?.estadia?.horasCobradas ??
           dQuote?.cobro?.horas ??
           0,
         );
@@ -867,23 +1144,6 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       clearTimeout(t);
     };
   }, [entity?.key, editId, form?.TIC_ID]);
-
-  /** Nuevo cobro: al cambiar tarifa, recalcula monto por horas * precio. */
-  useEffect(() => {
-    if (entity?.key !== 'cobro' || editId !== '__new__') return;
-    const tarifaId = String(form?.TAR_ID ?? '').trim();
-    const horas = Number(form?.COB_HORAS_TOTALES ?? 0);
-    if (!tarifaId || !Number.isFinite(horas)) return;
-    const tarifa = (catalogOptions?.tarifa || []).find((t) => String(t?.TAR_ID) === tarifaId);
-    const precio = Number(tarifa?.TAR_PRECIO ?? 0);
-    if (!Number.isFinite(precio) || precio <= 0) return;
-    const monto = round2(horas * precio);
-    setForm((prev) => (
-      String(prev?.COB_MONTO_TOTAL ?? '') === String(monto)
-        ? prev
-        : { ...prev, COB_MONTO_TOTAL: String(monto) }
-    ));
-  }, [entity?.key, editId, form?.TAR_ID, form?.COB_HORAS_TOTALES, catalogOptions?.tarifa]);
 
   /** Nuevo cobro: vuelto automático según monto recibido y total. */
   useEffect(() => {
@@ -920,6 +1180,14 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
           return;
         }
         listUrl = `${API_BASE}/detalle-saldo/maquina/${encodeURIComponent(String(dsMaq).trim())}`;
+      }
+      if (entity.key === 'recargo-maquina') {
+        const rmaMaq = searchParams.get('rma_maq_id');
+        if (rmaMaq == null || String(rmaMaq).trim() === '') {
+          setRows([]);
+          return;
+        }
+        listUrl = `${API_BASE}/recargo-maquina/maquina/${encodeURIComponent(String(rmaMaq).trim())}`;
       }
       if (entity.key === 'cliente') {
         const p = new URLSearchParams();
@@ -1021,6 +1289,16 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
           });
         }
       }
+      if (entity.key === 'cobro') {
+        const q = (searchParams.get('cob_q') || '').trim().toUpperCase();
+        if (q) {
+          list = list.filter((r) => {
+            const nit = String(r.COB_NIT ?? r.cob_nit ?? '').trim().toUpperCase();
+            const ticId = String(r.TIC_ID ?? r.tic_id ?? '').trim().toUpperCase();
+            return nit.includes(q) || ticId.includes(q);
+          });
+        }
+      }
       if (entity.key === 'membresia') {
         const q = (searchParams.get('mem_q') || '').trim().toUpperCase();
         const eme = (searchParams.get('mem_eme') || '').trim();
@@ -1097,7 +1375,6 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     setEntity(e);
     setEditId(null);
     setForm(emptyForm(e.fields));
-    setEditRowSnapshot(null);
     setMsg('');
   }
 
@@ -1121,10 +1398,18 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
       else if (fd.t === 'select') f[fd.k] = v != null && v !== '' ? String(v) : '';
       else f[fd.k] = v ?? '';
     });
-    setForm(f); setEditId(row[entity.id]); setEditRowSnapshot(row);
+    if (!sessionIsFullAdmin && sessionUserId != null && String(sessionUserId).trim() !== '') {
+      if (entity?.key === 'alerta') {
+        f.ALE_USU_ID_RESOLVIO = String(sessionUserId);
+      }
+      if (entity?.key === 'bitacora-incidente-vehiculo') {
+        f.USU_ID = String(sessionUserId);
+      }
+    }
+    setForm(f); setEditId(row[entity.id]);
   }
 
-  function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); setEditRowSnapshot(null); }
+  function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); }
 
   function applyBivFilters(e) {
     e.preventDefault();
@@ -1176,6 +1461,22 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     ['eti_id', 'q'].forEach((k) => p.delete(k));
     setSearchParams(p, { replace: true });
     setTicketFilter(emptyTicketFilter);
+  }
+
+  function applyCobroFilters(e) {
+    e.preventDefault();
+    const p = new URLSearchParams(searchParams);
+    p.delete('cob_q');
+    const qTrim = cobroFilter.q.trim();
+    if (qTrim) p.set('cob_q', qTrim);
+    setSearchParams(p, { replace: true });
+  }
+
+  function clearCobroFilters() {
+    const p = new URLSearchParams(searchParams);
+    p.delete('cob_q');
+    setSearchParams(p, { replace: true });
+    setCobroFilter(emptyCobroFilter);
   }
 
   function applyClienteFilters(e) {
@@ -1404,6 +1705,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
   async function save(e) {
     e.preventDefault(); setMsg('');
     const isEdit = editId != null && editId !== '__new__';
+    if (!isEdit && entity?.ops?.c === false) {
+      setMsg(`No se permite crear registros en ${entity?.label || 'esta entidad'}.`);
+      cancelEdit();
+      return;
+    }
     const fieldsToUse =
       isEdit && (entity.updateFields || entity.readOnlyOnUpdate)
         ? (() => {
@@ -1412,8 +1718,60 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
             );
             return entity.fields.filter(f => f.k === entity.id || updateKeys.includes(f.k));
           })()
-        : entity.fields.filter(f => !(isEdit && f.createOnly));
+        : entity.fields.filter((f) =>
+          !(isEdit && f.createOnly)
+          && !(editId === '__new__' && shouldHideFieldOnCreate(entity?.key, f.k))
+          && !shouldHideFieldForCurrentForm(entity?.key, f.k, form, editId === '__new__')
+        );
     const payload = preparePayload(fieldsToUse, form);
+    if (entity.key === 'registro-mantenimiento') {
+      if (isEdit) {
+        payload.REM_DESCRIPCION = String(form.REM_DESCRIPCION ?? '').trim() || null;
+      } else {
+        const machine = findMachineById(catalogOptions, form?.MAQ_ID);
+        if (!machine) {
+          setMsg('Selecciona una máquina válida para registrar el mantenimiento.');
+          return;
+        }
+        const expectedMovement = getMaintenanceMovementForMachine(machine);
+        if (!expectedMovement) {
+          const estado = String(machine.EMA_ESTADO ?? 'Sin estado').trim();
+          setMsg(`La máquina seleccionada está ${estado} y no admite movimientos de mantenimiento.`);
+          return;
+        }
+        const mov = String(form.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase();
+        if (!mov) {
+          setMsg('Selecciona una máquina para definir automáticamente el movimiento.');
+          return;
+        }
+        if (!['INICIO', 'FINALIZACION'].includes(mov)) {
+          setMsg('El movimiento de mantenimiento no es válido.');
+          return;
+        }
+        if (mov !== expectedMovement) {
+          const estado = String(machine.EMA_ESTADO ?? 'Sin estado').trim();
+          setMsg(`La máquina está ${estado}, por lo que el movimiento debe ser ${expectedMovement === 'INICIO' ? 'Inicio' : 'Finalización'}.`);
+          return;
+        }
+        payload.REM_TIPO_MOVIMIENTO = mov;
+        if (mov === 'FINALIZACION') {
+          const estadoFinal = String(form.REM_ESTADO_RESULTANTE_EMA_ID ?? '').trim();
+          if (!estadoFinal) {
+            setMsg('Selecciona el estado final de la máquina para cerrar el mantenimiento.');
+            return;
+          }
+          payload.REM_ESTADO_RESULTANTE_EMA_ID = Number(estadoFinal) || estadoFinal;
+        } else {
+          payload.REM_ESTADO_RESULTANTE_EMA_ID = null;
+        }
+      }
+    }
+    if (entity.key === 'maquina') {
+      if (isMachineStatusMaintenanceById(catalogOptions, form?.EMA_ID)) {
+        setMsg('El estado Mantenimiento solo debe asignarse desde Reg. Mantenimiento.');
+        return;
+      }
+    }
     if (entity.key === 'membresia') {
       const placa = String(form.MEM_VEH_PLACA ?? '').trim();
       if (!placa) {
@@ -1471,6 +1829,8 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         }
         payload.ALE_USU_ID_RESOLVIO = null;
         payload.ALE_DESCRIPCION_SOLUCION = null;
+      } else if (!sessionIsFullAdmin && sessionUserId != null && String(sessionUserId).trim() !== '') {
+        payload.ALE_USU_ID_RESOLVIO = sessionUserId;
       }
     }
     if (!isEdit && entity?.key === 'alerta') delete payload.ALE_ID;
@@ -1510,7 +1870,9 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         payload.BIV_FECHA_RESOLUCION != null &&
         String(payload.BIV_FECHA_RESOLUCION).trim() !== '';
       payload.BIV_RESUELTO = tieneFechaResolucion ? 1 : 0;
-      if (tieneFechaResolucion && (payload.USU_ID == null || String(payload.USU_ID).trim() === '')) {
+      if (tieneFechaResolucion && !sessionIsFullAdmin) {
+        payload.USU_ID = sessionUserId;
+      } else if (tieneFechaResolucion && (payload.USU_ID == null || String(payload.USU_ID).trim() === '')) {
         payload.USU_ID = sessionUserId;
       }
     }
@@ -1536,6 +1898,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         payload.CLI_ID = cliIdNum;
       }
     }
+    if (
+      entity.key === 'usuario' &&
+      isEdit &&
+      isCurrentSessionUser(editId, sessionUserId) &&
+      Number(payload.USU_ACTIVO ?? form?.USU_ACTIVO ?? 1) !== 1
+    ) {
+      setMsg('No puedes desactivar la cuenta con la que tienes la sesión actual.');
+      return;
+    }
     try {
       const res = await fetch(
         `${API_BASE}/${entity.key}${isEdit ? '/' + editId : ''}`,
@@ -1559,11 +1930,15 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
         && isEdit
         && payload.CLI_ID != null
       ) {
-        okMsg = 'Vehículo actualizado y vinculado a cliente. Ahora aparece en la sección de Clientes mensuales.';
+        okMsg = 'Vehículo actualizado y vinculado a cliente. La sección donde aparece depende de si el cliente es esporádico o mensual.';
       }
       if (json.warning) okMsg += ' — ' + json.warning;
       setMsg(okMsg);
-      cancelEdit(); load();
+      if (entity.key === 'registro-mantenimiento') {
+        await refreshCatalogOptionsForEntity(entity);
+      }
+      cancelEdit();
+      await load();
     } catch (err) { setMsg('Error: ' + err.message); }
   }
 
@@ -1632,6 +2007,10 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
 
   async function deactivateUsuario(row) {
     try {
+      if (isCurrentSessionUser(row?.USU_ID, sessionUserId)) {
+        setMsg('No puedes desactivar la cuenta con la que tienes la sesión actual.');
+        return;
+      }
       const payload = { ...row, USU_ACTIVO: 0 };
       const res = await fetch(`${API_BASE}/usuario/${row.USU_ID}`, {
         method: 'PUT',
@@ -1665,7 +2044,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     window.open(`${API_BASE}/ticket/${id}/comprobante.pdf`, '_blank');
   }
 
-  const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []);
+  const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []).map(applyEntityAccess);
   const isNewRecord = editId === '__new__';
   const formFields = entity
     ? !isNewRecord && editId && (entity.updateFields || entity.readOnlyOnUpdate)
@@ -1675,17 +2054,28 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
             );
             return entity.fields.filter(f => f.k === entity.id || updateKeys.includes(f.k));
           })()
-        : entity.fields.filter(f => !(editId && !isNewRecord && f.createOnly))
+        : entity.fields.filter((f) => !(editId && !isNewRecord && f.createOnly))
     : [];
 
   const visibleFormFields =
-    entity?.key === 'ticket' && isNewRecord
-      ? formFields.filter((f) => !['TIC_ID', 'TIC_CODIGO', 'TIC_FECHA_HORA_SALIDA'].includes(f.k))
-      : formFields;
+    isNewRecord
+      ? formFields.filter((f) => {
+          if (entity?.key === 'ticket' && ['TIC_ID', 'TIC_CODIGO', 'TIC_FECHA_HORA_SALIDA'].includes(f.k)) {
+            return false;
+          }
+          if (shouldHideFieldOnCreate(entity?.key, f.k)) {
+            return false;
+          }
+          if (shouldHideFieldForCurrentForm(entity?.key, f.k, form, isNewRecord)) {
+            return false;
+          }
+          return true;
+        })
+      : formFields.filter((f) => !shouldHideFieldForCurrentForm(entity?.key, f.k, form, isNewRecord));
 
   const listContextHint = useMemo(() => {
     if (!sectionPath || !entity?.key) return null;
-    return getAdminListContextHint(sectionPath, entity.key);
+    return getAdminListContextHelpModel(sectionPath, entity.key);
   }, [sectionPath, entity?.key]);
 
   return (
@@ -1723,7 +2113,17 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
           {entity && (
             <>
               <div className="crudx-toolbar">
-                <strong>{entity.label}</strong>
+                <div className="crudx-toolbar__title">
+                  <strong>{entity.label}</strong>
+                  {listContextHint ? (
+                    <HelpHint
+                      label={`Mostrar ayuda sobre ${entity.label}`}
+                      title={`Guia de ${entity.label}`}
+                    >
+                      {renderAdminListContextHint(listContextHint)}
+                    </HelpHint>
+                  ) : null}
+                </div>
                 {!loading && rows.length > 0 ? (
                   <span className="crudx-msg" style={{ fontWeight: 500, color: '#475569' }}>
                     {rows.length} registro{rows.length === 1 ? '' : 's'}
@@ -1745,15 +2145,6 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                   </span>
                 )}
               </div>
-
-              {listContextHint ? (
-                <p
-                  className={`crudx-context-hint${['alerta', 'tipo-alerta', 'estado-alerta', 'ticket', 'detalle-saldo'].includes(entity.key) ? ' crudx-context-hint--full' : ''}`}
-                  role="note"
-                >
-                  {listContextHint}
-                </p>
-              ) : null}
 
               {entity.key === 'bitacora-incidente-vehiculo' ? (
                 <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyBivFilters}>
@@ -1894,7 +2285,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                       <option value="" disabled>
                         Seleccione una máquina…
                       </option>
-                      {maquinasTipoCobroList(catalogOptions).map((x) => (
+                      {maquinasTipoCobroList(catalogOptions, { onlyOperative: true }).map((x) => (
                         <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
                           {labelMaquina(x, catalogOptions)}
                         </option>
@@ -1964,7 +2355,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                       <option value="" disabled>
                         Seleccione una máquina…
                       </option>
-                      {maquinasTipoCobroList(catalogOptions).map((x) => (
+                      {maquinasTipoCobroList(catalogOptions, { onlyOperative: true }).map((x) => (
                         <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
                           {labelMaquina(x, catalogOptions)}
                         </option>
@@ -2073,6 +2464,36 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         onClick={clearTicketFilters}
                         disabled={loading}
                         title="Quitar búsqueda y filtros de la lista"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : entity.key === 'cobro' ? (
+                <div className="crudx-ticket-search-block">
+                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyCobroFilters}>
+                    <div className="admin-search-input-wrap">
+                      <input
+                        className="admin-search-input"
+                        type="search"
+                        value={cobroFilter.q}
+                        onChange={(e) => setCobroFilter((f) => ({ ...f, q: e.target.value }))}
+                        placeholder="🔍 Ticket ID o NIT / CF"
+                        autoComplete="off"
+                        aria-label="Buscar cobro por ticket ID o NIT / CF"
+                      />
+                    </div>
+                    <div className="admin-search-actions">
+                      <button type="submit" className="admin-btn-search" disabled={loading}>
+                        Buscar
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn-search-clear"
+                        onClick={clearCobroFilters}
+                        disabled={loading}
+                        title="Quitar búsqueda de cobros"
                       >
                         Limpiar
                       </button>
@@ -2262,7 +2683,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
               ) : null}
 
               {/* Form */}
-              {editId && (
+              {editId && (!isNewRecord || entity?.ops?.c !== false) && (
                 <form onSubmit={save} className="crudx-form-panel">
                   <div className="crudx-form-head crudx-form-head--with-close">
                     <div>
@@ -2298,6 +2719,11 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         el estado queda en Activo y no es editable.
                       </p>
                     ) : null}
+                    {entity.key === 'registro-mantenimiento' && isNewRecord ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        El flujo se define por el estado actual de la máquina: si está <strong>Operativa</strong> se registrará <strong>Inicio</strong>; si ya está en <strong>Mantenimiento</strong> se registrará <strong>Finalización</strong>.
+                      </p>
+                    ) : null}
                     {visibleFormFields.map((f) => {
                       const fieldId = `crud-${entity.key}-${String(f.k).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
                       const ticketVehIdAsPlacaLabel =
@@ -2313,13 +2739,73 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                         !isNewRecord &&
                         (f.k === 'ALE_USU_ID_RESOLVIO' || f.k === 'ALE_DESCRIPCION_SOLUCION') &&
                         !form?.ALE_FECHA_ATENCION;
+                      const lockResolverUserByRole =
+                        !sessionIsFullAdmin &&
+                        !isNewRecord &&
+                        (
+                          (entity?.key === 'alerta' && f.k === 'ALE_USU_ID_RESOLVIO') ||
+                          (entity?.key === 'bitacora-incidente-vehiculo' && f.k === 'USU_ID')
+                        );
+                      const lockOwnSessionActivationToggle =
+                        entity?.key === 'usuario' &&
+                        f.k === 'USU_ACTIVO' &&
+                        !isNewRecord &&
+                        isCurrentSessionUser(editId, sessionUserId);
+                      const lockMachineStatusByMaintenanceFlow =
+                        entity?.key === 'maquina' &&
+                        f.k === 'EMA_ID' &&
+                        isMachineStatusMaintenanceById(catalogOptions, form?.EMA_ID);
                       const fieldDisabled =
                         (f.k === entity.id && editId !== '__new__') ||
                         (isNewRecord && f.k === entity?.id) ||
                         readOnlyOnUpdate ||
                         readOnlyOnCreate ||
                         (entity?.key === 'cobro' && isNewRecord && ['COB_HORAS_TOTALES', 'COB_MONTO_TOTAL', 'COB_VUELTO', 'COB_FECHA_HORA', 'TAR_ID'].includes(f.k)) ||
-                        lockByAlertBusinessRule;
+                        lockByAlertBusinessRule ||
+                        lockResolverUserByRole ||
+                        lockOwnSessionActivationToggle ||
+                        lockMachineStatusByMaintenanceFlow;
+                      const maintenanceMachine =
+                        entity?.key === 'registro-mantenimiento'
+                          ? findMachineById(catalogOptions, form?.MAQ_ID)
+                          : null;
+                      const selectOptions = f.t === 'select'
+                        ? (() => {
+                            if (Array.isArray(f.options)) {
+                              if (entity?.key === 'registro-mantenimiento' && f.k === 'REM_TIPO_MOVIMIENTO') {
+                                return maintenanceMovementOptionsForMachine(maintenanceMachine);
+                              }
+                              return f.options;
+                            }
+                            if (f.catalog === 'estado-maquina' && f.estadoMaquinaResultadoMantenimiento) {
+                              return filterMaintenanceResultMachineStatuses(catalogOptions[f.catalog] || []);
+                            }
+                            if (entity?.key === 'maquina' && f.catalog === 'estado-maquina') {
+                              return machineManualStatusOptions(catalogOptions, form?.EMA_ID);
+                            }
+                            if (f.catalog !== 'maquina') return catalogOptions[f.catalog] || [];
+                            if (entity?.key === 'registro-mantenimiento') {
+                              return maquinasMantenimientoElegiblesList(catalogOptions);
+                            }
+                            if (f.maquinaSoloCobro) {
+                              return maquinasTipoCobroList(catalogOptions, {
+                                onlyOperative: !!f.maquinaSoloOperativa,
+                              });
+                            }
+                            if (f.maquinaSoloOperativa) {
+                              return maquinasOperativasList(catalogOptions);
+                            }
+                            return catalogOptions[f.catalog] || [];
+                          })()
+                        : null;
+                      const lockMaintenanceMovement =
+                        entity?.key === 'registro-mantenimiento' &&
+                        f.k === 'REM_TIPO_MOVIMIENTO' &&
+                        (
+                          String(form?.MAQ_ID ?? '').trim() === '' ||
+                          (Array.isArray(selectOptions) && selectOptions.length <= 1)
+                        );
+                      const effectiveFieldDisabled = fieldDisabled || lockMaintenanceMovement;
                       return (
                         <div
                           key={f.k}
@@ -2337,6 +2823,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                 id={fieldId}
                                 type="checkbox"
                                 checked={!!form[f.k]}
+                                disabled={fieldDisabled}
                                 onChange={(ev) =>
                                   setForm((p) => ({ ...p, [f.k]: ev.target.checked ? 1 : 0 }))
                                 }
@@ -2352,8 +2839,8 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                 className="crudx-select"
                                 value={form[f.k] ?? ''}
                                 required={!!f.req && !(isNewRecord && f.k === entity?.id)}
-                                disabled={fieldDisabled}
-                                style={fieldDisabled ? readOnlyFieldStyle : undefined}
+                                disabled={effectiveFieldDisabled}
+                                style={effectiveFieldDisabled ? readOnlyFieldStyle : undefined}
                                 onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
                                 aria-label={lbl}
                                 title={lbl}
@@ -2365,17 +2852,20 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                 ) : (
                                   <option value="">—</option>
                                 )}
-                                {(f.catalog === 'maquina' && f.maquinaSoloCobro
-                                  ? maquinasTipoCobroList(catalogOptions)
-                                  : (catalogOptions[f.catalog] || [])
-                                ).map((row) => {
+                                {(selectOptions || []).map((row) => {
                                   const val =
-                                    row[f.valueKey] != null ? String(row[f.valueKey]) : '';
+                                    Array.isArray(f.options)
+                                      ? String(row.value ?? '')
+                                      : row[f.valueKey] != null ? String(row[f.valueKey]) : '';
                                   if (val === '') return null;
-                                  const lab = f.catalog === 'usuario'
+                                  const lab = Array.isArray(f.options)
+                                    ? String(row.label ?? val)
+                                    : f.catalog === 'usuario'
                                     ? [row.USU_PRIMER_NOMBRE, row.USU_PRIMER_APELLIDO].filter(Boolean).join(' ') || val
                                     : f.catalog === 'maquina'
-                                      ? labelMaquina(row, catalogOptions)
+                                      ? entity?.key === 'registro-mantenimiento'
+                                        ? `${labelMaquina(row, catalogOptions)} (${String(row.EMA_ESTADO ?? 'Sin estado').trim() || 'Sin estado'})`
+                                        : labelMaquina(row, catalogOptions)
                                       : f.catalog === 'incidente'
                                         ? labelIncidente(row)
                                         : row[f.labelKey] != null
@@ -2388,12 +2878,14 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   );
                                 })}
                               </select>
-                              {f.help ? (
+                              {f.help || (entity?.key === 'registro-mantenimiento' && f.k === 'REM_TIPO_MOVIMIENTO') ? (
                                 <p
                                   className="crudx-form-note"
                                   style={{ margin: '4px 0 0', fontSize: 11, lineHeight: 1.4 }}
                                 >
-                                  {f.help}
+                                  {entity?.key === 'registro-mantenimiento' && f.k === 'REM_TIPO_MOVIMIENTO'
+                                    ? maintenanceMovementHelp(maintenanceMachine)
+                                    : f.help}
                                 </p>
                               ) : null}
                             </>
@@ -2447,10 +2939,16 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                 <p className="crudx-empty" role="status">
                   Elige una máquina de cobro arriba y pulsa «Aplicar filtros» para cargar el detalle de saldo.
                 </p>
+              ) : entity?.key === 'recargo-maquina' && !(searchParams.get('rma_maq_id') || '').trim() ? (
+                <p className="crudx-empty" role="status">
+                  Elige una maquina de cobro arriba y pulsa "Buscar" para consultar el historial.
+                </p>
               ) : rows.length === 0 ? (
                 <p className="crudx-empty" role="status">
                   {entity?.key === 'detalle-saldo'
                     ? 'No hay registros de detalle de saldo para la máquina seleccionada.'
+                    : entity?.key === 'recargo-maquina'
+                      ? 'No hay registros de detalle saldo para la maquina seleccionada.'
                     : entity?.key === 'registro-movimiento-membresia'
                       ? (searchParams.get('rmm_placa') || '').trim()
                         ? 'No hay movimientos de membresía para la placa indicada.'
@@ -2794,7 +3292,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   Desactivar
                                 </button>
                               )}
-                              {entity.key === 'usuario' && Number(row.USU_ACTIVO ?? 1) === 1 && (
+                              {entity.key === 'usuario' && Number(row.USU_ACTIVO ?? 1) === 1 && !isCurrentSessionUser(row.USU_ID, sessionUserId) && (
                                 <button
                                   type="button"
                                   onClick={() => deactivateUsuario(row)}
@@ -2817,7 +3315,7 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
                                   onClick={() => quickRecargarDetalleSaldo(row)}
                                   className="crudx-btn-secondary crudx-btn-xs"
                                 >
-                                  Agregar
+                                  Recargar
                                 </button>
                               )}
                               {entity.key === 'maquina' && (
@@ -2947,3 +3445,5 @@ export default function CrudDemo({ filterEntityKeys = null, sessionUserId = null
     </div>
   );
 }
+
+
