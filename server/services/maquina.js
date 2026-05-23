@@ -1,5 +1,10 @@
-import { executeCursor, executeProcedure, executeSql, getConnection } from '../db/oracle.js';
+import { executeCursor, executeSql, getConnection } from '../db/oracle.js';
 import { isTipoMaquinaCobro } from '../utils/tipoMaquinaRules.js';
+import {
+  ensureInoperativeMachineStatusIdTx,
+  getMachineStatusByIdTx,
+  isMachineStatusMaintenanceName,
+} from '../utils/machineStatus.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_MAQUINA_GET_ALL(:cursor); END;`);
@@ -54,6 +59,40 @@ async function isMaquinaCobroTx(conn, tmaId) {
     { id: tmaId }
   );
   return isTipoMaquinaCobro(rows.rows?.[0]?.TMA_TIPO);
+}
+
+async function assertManualMachineStatusTransitionAllowedTx(conn, maqId, emaId) {
+  if (emaId == null || String(emaId).trim() === '') return;
+  const status = await getMachineStatusByIdTx(conn, emaId);
+  if (!status) throw new Error('Estado de maquina no encontrado');
+
+  const currentRows = await conn.execute(
+    `SELECT m.EMA_ID, em.EMA_ESTADO
+       FROM PAR_MAQUINA m
+       JOIN PAR_ESTADO_MAQUINA em ON em.EMA_ID = m.EMA_ID
+      WHERE m.MAQ_ID = :maqId`,
+    { maqId }
+  );
+  const current = currentRows.rows?.[0] || null;
+  const currentIsMaintenance = isMachineStatusMaintenanceName(current?.EMA_ESTADO);
+  const nextIsMaintenance = isMachineStatusMaintenanceName(status.EMA_ESTADO);
+
+  if (currentIsMaintenance && nextIsMaintenance) return;
+  if (currentIsMaintenance || nextIsMaintenance) {
+    throw new Error('El estado Mantenimiento solo debe cambiarse desde Reg. Mantenimiento');
+  }
+}
+
+function assertMachineImmutableFields(existing, data) {
+  if (data.MAQ_CODIGO != null && String(data.MAQ_CODIGO) !== String(existing?.MAQ_CODIGO ?? '')) {
+    throw new Error('El codigo de la maquina no puede modificarse');
+  }
+  if (data.TMA_ID != null && String(data.TMA_ID) !== String(existing?.TMA_ID ?? '')) {
+    throw new Error('El tipo de maquina no puede modificarse');
+  }
+  if (data.MAQ_FECHA_ULTIMA_RECARGA != null && String(data.MAQ_FECHA_ULTIMA_RECARGA).trim() !== '') {
+    throw new Error('La ultima recarga solo debe actualizarse desde Recargo Maquina');
+  }
 }
 
 /** Umbral mínimo inicial por denominación (Q) al crear máquina de cobro. */
@@ -157,6 +196,10 @@ export async function create(data) {
   const conn = await getConnection();
   try {
     let maqId = data.MAQ_ID ?? null;
+    const initialEstadoId = await ensureInoperativeMachineStatusIdTx(conn);
+    if (initialEstadoId == null) {
+      throw new Error('No se pudo resolver el estado inicial inoperativa para la máquina');
+    }
     if ((await isIdentityAlways()) || !maqId) {
       await conn.execute(
         `INSERT INTO PAR_MAQUINA (MAQ_CODIGO, TMA_ID, EMA_ID, MAQ_FECHA_ULTIMA_RECARGA)
@@ -164,10 +207,8 @@ export async function create(data) {
         {
           MAQ_CODIGO: data.MAQ_CODIGO ?? null,
           TMA_ID: data.TMA_ID ?? null,
-          EMA_ID: data.EMA_ID ?? null,
-          MAQ_FECHA_ULTIMA_RECARGA: data.MAQ_FECHA_ULTIMA_RECARGA
-            ? new Date(data.MAQ_FECHA_ULTIMA_RECARGA)
-            : null,
+          EMA_ID: initialEstadoId,
+          MAQ_FECHA_ULTIMA_RECARGA: null,
         }
       );
       const rows = await conn.execute(
@@ -182,10 +223,8 @@ export async function create(data) {
           MAQ_ID: maqId,
           MAQ_CODIGO: data.MAQ_CODIGO ?? null,
           TMA_ID: data.TMA_ID ?? null,
-          EMA_ID: data.EMA_ID ?? null,
-          MAQ_FECHA_ULTIMA_RECARGA: data.MAQ_FECHA_ULTIMA_RECARGA
-            ? new Date(data.MAQ_FECHA_ULTIMA_RECARGA)
-            : null,
+          EMA_ID: initialEstadoId,
+          MAQ_FECHA_ULTIMA_RECARGA: null,
         }
       );
     }
@@ -219,15 +258,26 @@ export async function getTransactionsByMaqId(maqId) {
 }
 
 export async function update(id, data) {
-  await executeProcedure(
-    `BEGIN SP_MAQUINA_UPDATE(:id, :MAQ_CODIGO, :TMA_ID, :EMA_ID, :MAQ_FECHA_ULTIMA_RECARGA); END;`,
-    {
-      id,
-      MAQ_CODIGO: data.MAQ_CODIGO ?? null,
-      TMA_ID: data.TMA_ID ?? null,
-      EMA_ID: data.EMA_ID ?? null,
-      MAQ_FECHA_ULTIMA_RECARGA: data.MAQ_FECHA_ULTIMA_RECARGA ? new Date(data.MAQ_FECHA_ULTIMA_RECARGA) : null,
-    }
-  );
-  return getById(id);
+  const conn = await getConnection();
+  try {
+    const existing = await getById(id);
+    if (!existing) throw new Error('Maquina no encontrada');
+    assertMachineImmutableFields(existing, data);
+    await assertManualMachineStatusTransitionAllowedTx(conn, id, data.EMA_ID ?? null);
+    await conn.execute(
+      `BEGIN SP_MAQUINA_UPDATE(:id, :MAQ_CODIGO, :TMA_ID, :EMA_ID, :MAQ_FECHA_ULTIMA_RECARGA); END;`,
+      {
+        id,
+        MAQ_CODIGO: existing.MAQ_CODIGO ?? null,
+        TMA_ID: existing.TMA_ID ?? null,
+        EMA_ID: data.EMA_ID ?? existing.EMA_ID ?? null,
+        MAQ_FECHA_ULTIMA_RECARGA: existing.MAQ_FECHA_ULTIMA_RECARGA
+          ? new Date(existing.MAQ_FECHA_ULTIMA_RECARGA)
+          : null,
+      }
+    );
+    return getById(id);
+  } finally {
+    try { await conn.close(); } catch { /* ignore */ }
+  }
 }

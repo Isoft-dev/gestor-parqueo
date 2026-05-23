@@ -61,6 +61,20 @@ function buildPdf(title, periodo, sections) {
   });
 }
 
+function normalizeMaintenanceMovement(value) {
+  const x = String(value ?? '').trim().toUpperCase();
+  if (x === 'FINALIZACION') return 'FINALIZACION';
+  if (x === 'INICIO') return 'INICIO';
+  return 'LEGACY';
+}
+
+function maintenanceMovementLabel(value) {
+  const x = normalizeMaintenanceMovement(value);
+  if (x === 'FINALIZACION') return 'Finalización';
+  if (x === 'INICIO') return 'Inicio';
+  return 'Histórico';
+}
+
 export async function getAlertasPorMaquinaTipo({ desde, hasta, maqId, talId, ealId }) {
   const v = validateRango(desde, hasta);
   if (v.error) {
@@ -145,10 +159,13 @@ export async function getMantenimientosPorMaquina({ desde, hasta }) {
   }
   const rows = await executeSql(
     `SELECT r.REM_ID, r.MAQ_ID, m.MAQ_CODIGO, tm.TMA_TIPO,
-            r.REM_MANTENIMIENTO_FECHA, r.REM_DESCRIPCION
+            r.REM_MANTENIMIENTO_FECHA, r.REM_DESCRIPCION,
+            r.REM_TIPO_MOVIMIENTO, r.REM_ESTADO_RESULTANTE_EMA_ID,
+            em.EMA_ESTADO AS REM_ESTADO_RESULTANTE
        FROM PAR_REGISTRO_MANTENIMIENTO r
        JOIN PAR_MAQUINA m ON m.MAQ_ID = r.MAQ_ID
        LEFT JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = m.TMA_ID
+       LEFT JOIN PAR_ESTADO_MAQUINA em ON em.EMA_ID = r.REM_ESTADO_RESULTANTE_EMA_ID
       WHERE TRUNC(r.REM_MANTENIMIENTO_FECHA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
       ORDER BY r.REM_MANTENIMIENTO_FECHA DESC, r.REM_ID DESC`,
     v.periodo
@@ -160,19 +177,40 @@ export async function getMantenimientosPorMaquina({ desde, hasta }) {
     tipoMaquina: r.TMA_TIPO ?? r.tma_tipo ?? '—',
     fechaMantenimiento: r.REM_MANTENIMIENTO_FECHA ?? r.rem_mantenimiento_fecha,
     descripcion: r.REM_DESCRIPCION ?? r.rem_descripcion ?? '—',
+    tipoMovimientoClave: normalizeMaintenanceMovement(r.REM_TIPO_MOVIMIENTO ?? r.rem_tipo_movimiento),
+    tipoMovimiento: maintenanceMovementLabel(r.REM_TIPO_MOVIMIENTO ?? r.rem_tipo_movimiento),
+    estadoResultanteId: r.REM_ESTADO_RESULTANTE_EMA_ID ?? r.rem_estado_resultante_ema_id ?? null,
+    estadoResultante: r.REM_ESTADO_RESULTANTE ?? r.rem_estado_resultante ?? '—',
   }));
 
   const totalPorMaquinaMap = new Map();
   const byMachineDates = new Map();
+  const movementMap = new Map();
+  const finalStateMap = new Map();
   detalle.forEach((d) => {
     totalPorMaquinaMap.set(d.maquina, (totalPorMaquinaMap.get(d.maquina) || 0) + 1);
-    if (!byMachineDates.has(d.maquina)) byMachineDates.set(d.maquina, []);
-    byMachineDates.get(d.maquina).push(new Date(d.fechaMantenimiento));
+    movementMap.set(d.tipoMovimiento, (movementMap.get(d.tipoMovimiento) || 0) + 1);
+    if (d.tipoMovimientoClave !== 'FINALIZACION') {
+      if (!byMachineDates.has(d.maquina)) byMachineDates.set(d.maquina, []);
+      byMachineDates.get(d.maquina).push(new Date(d.fechaMantenimiento));
+    }
+    if (d.tipoMovimientoClave === 'FINALIZACION') {
+      const finalState = d.estadoResultante && String(d.estadoResultante).trim() !== '' ? d.estadoResultante : 'Sin definir';
+      finalStateMap.set(finalState, (finalStateMap.get(finalState) || 0) + 1);
+    }
   });
 
   const totalPorMaquina = [...totalPorMaquinaMap.entries()]
     .map(([maquina, total]) => ({ maquina, total }))
     .sort((a, b) => b.total - a.total || String(a.maquina).localeCompare(String(b.maquina)));
+
+  const totalPorMovimiento = [...movementMap.entries()]
+    .map(([movimiento, total]) => ({ movimiento, total }))
+    .sort((a, b) => b.total - a.total || String(a.movimiento).localeCompare(String(b.movimiento)));
+
+  const totalPorEstadoFinal = [...finalStateMap.entries()]
+    .map(([estado, total]) => ({ estado, total }))
+    .sort((a, b) => b.total - a.total || String(a.estado).localeCompare(String(b.estado)));
 
   const promedioDiasEntreMantenimientos = [...byMachineDates.entries()].map(([maquina, fechas]) => {
     const sorted = fechas
@@ -196,7 +234,11 @@ export async function getMantenimientosPorMaquina({ desde, hasta }) {
   return {
     periodo: v.periodo,
     totalMantenimientos: detalle.length,
+    totalInicios: detalle.filter((d) => d.tipoMovimientoClave !== 'FINALIZACION').length,
+    totalFinalizaciones: detalle.filter((d) => d.tipoMovimientoClave === 'FINALIZACION').length,
     totalPorMaquina,
+    totalPorMovimiento,
+    totalPorEstadoFinal,
     promedioDiasEntreMantenimientos,
     detalle,
   };
@@ -380,18 +422,40 @@ export async function buildMantenimientosPdfBuffer(data) {
     doc.font('Helvetica').fontSize(10).text(`Período: ${periodo.desde} al ${periodo.hasta}`, { align: 'center' });
     doc.moveDown(0.5);
     doc.font('Helvetica').fontSize(9).text(`Total de mantenimientos: ${data.totalMantenimientos}`);
+    doc.font('Helvetica').fontSize(9).text(`Inicios: ${data.totalInicios} | Finalizaciones: ${data.totalFinalizaciones}`);
     doc.moveDown(0.3);
     drawTable(
-      'Promedio de días entre mantenimientos',
-      ['Máquina', 'Promedio días', 'Mantenimientos'],
+      'Distribución por movimiento',
+      ['Movimiento', 'Total'],
+      [fullW * 0.7, fullW * 0.3],
+      data.totalPorMovimiento.map((r) => [r.movimiento, r.total])
+    );
+    if (data.totalPorEstadoFinal.length) {
+      drawTable(
+        'Resultado de finalizaciones',
+        ['Estado final', 'Total'],
+        [fullW * 0.7, fullW * 0.3],
+        data.totalPorEstadoFinal.map((r) => [r.estado, r.total])
+      );
+    }
+    drawTable(
+      'Promedio de días entre inicios de mantenimiento',
+      ['Máquina', 'Promedio días', 'Inicios considerados'],
       [fullW * 0.45, fullW * 0.25, fullW * 0.3],
       data.promedioDiasEntreMantenimientos.map((r) => [r.maquina, r.promedioDias == null ? 'N/D' : r.promedioDias, r.muestras])
     );
     drawTable(
       'Detalle',
-      ['Máquina', 'Tipo máquina', 'Fecha mantenimiento', 'Descripción'],
-      [fullW * 0.16, fullW * 0.2, fullW * 0.2, fullW * 0.44],
-      data.detalle.map((r) => [r.maquina, r.tipoMaquina, new Date(r.fechaMantenimiento).toLocaleString('es-GT'), r.descripcion])
+      ['Máquina', 'Tipo máquina', 'Movimiento', 'Fecha', 'Estado final', 'Descripción'],
+      [fullW * 0.14, fullW * 0.17, fullW * 0.14, fullW * 0.16, fullW * 0.15, fullW * 0.24],
+      data.detalle.map((r) => [
+        r.maquina,
+        r.tipoMaquina,
+        r.tipoMovimiento,
+        new Date(r.fechaMantenimiento).toLocaleString('es-GT'),
+        r.tipoMovimientoClave === 'FINALIZACION' ? r.estadoResultante : '—',
+        r.descripcion,
+      ])
     );
     doc.end();
   });

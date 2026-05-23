@@ -9,7 +9,14 @@
 ´´ bash
 
 ```
-git clone 
+cd server
+npm install
+npm run dev
+
+# si quieres cargar catálogos demo manualmente
+npm run db:seed-catalogo-funcional
+
+cd ../client
 npm install
 npm run dev
 ```

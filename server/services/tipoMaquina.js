@@ -44,10 +44,16 @@ export async function create({ TMA_ID, TMA_TIPO, TMA_DESCRIPCION }) {
   return getById(TMA_ID);
 }
 
-export async function update(id, { TMA_TIPO, TMA_DESCRIPCION }) {
+export async function update(id, { TMA_DESCRIPCION }) {
+  const current = await getById(id);
+  if (!current) throw new Error('Tipo de maquina no encontrado');
   await executeProcedure(
     `BEGIN SP_TIPO_MAQUINA_UPDATE(:id, :TMA_TIPO, :TMA_DESCRIPCION); END;`,
-    { id, TMA_TIPO, TMA_DESCRIPCION: TMA_DESCRIPCION ?? null }
+    {
+      id,
+      TMA_TIPO: current.TMA_TIPO ?? null,
+      TMA_DESCRIPCION: TMA_DESCRIPCION ?? current.TMA_DESCRIPCION ?? null,
+    }
   );
   return getById(id);
 }

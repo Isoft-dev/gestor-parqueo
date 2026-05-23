@@ -12,12 +12,20 @@ function parseYmd(s) {
   return dt;
 }
 
+function daysInclusive(desde, hasta) {
+  const a = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate());
+  const b = new Date(hasta.getFullYear(), hasta.getMonth(), hasta.getDate());
+  return Math.floor((b - a) / (24 * 60 * 60 * 1000)) + 1;
+}
+
 function validateRango(desdeStr, hastaStr) {
   const desde = parseYmd(desdeStr);
   const hasta = parseYmd(hastaStr);
   if (!desde) return { error: 'La fecha de inicio no es válida (use AAAA-MM-DD).' };
   if (!hasta) return { error: 'La fecha de fin no es válida (use AAAA-MM-DD).' };
   if (desde > hasta) return { error: 'La fecha de inicio no puede ser posterior a la fecha de fin.' };
+  const span = daysInclusive(desde, hasta);
+  if (span > 731) return { error: 'El rango máximo permitido es de 731 días (2 años).' };
   return {
     desde,
     hasta,
@@ -56,10 +64,10 @@ function validateMeses(mesInicio, mesFin) {
   const b = parseYm(mesFin);
   if (!a) return { error: 'El mes inicio no es válido (use AAAA-MM).' };
   if (!b) return { error: 'El mes fin no es válido (use AAAA-MM).' };
-  const keyA = a.y * 100 + a.mo;
-  const keyB = b.y * 100 + b.mo;
-  if (keyA > keyB) return { error: 'El mes inicio no puede ser mayor al mes fin.' };
-  if (keyB - keyA > 36) return { error: 'El rango máximo permitido es de 36 meses.' };
+  const monthDiff = (b.y - a.y) * 12 + (b.mo - a.mo);
+  const inclusiveMonths = monthDiff + 1;
+  if (monthDiff < 0) return { error: 'El mes inicio no puede ser mayor al mes fin.' };
+  if (inclusiveMonths > 36) return { error: 'El rango máximo permitido es de 36 meses.' };
   return {
     mesInicio: `${a.y}-${String(a.mo).padStart(2, '0')}`,
     mesFin: `${b.y}-${String(b.mo).padStart(2, '0')}`,
@@ -120,10 +128,21 @@ export async function getCobrosProcesadosPorMaquina({ desde, hasta }) {
   }
 
   const rows = await executeSql(
-    `WITH dmt_last AS (
-      SELECT d.TIC_ID, d.MAQ_ID,
-             ROW_NUMBER() OVER (PARTITION BY d.TIC_ID ORDER BY d.DMT_HORA_TRANSACCION DESC, d.DMT_ID DESC) AS rn
+    `WITH dmt_cobro AS (
+      SELECT d.TIC_ID,
+             d.MAQ_ID,
+             ROW_NUMBER() OVER (
+               PARTITION BY d.TIC_ID
+               ORDER BY
+                 CASE WHEN d.DMT_TRANSACCION = 'PROCESAMIENTO_COBRO' THEN 0 ELSE 1 END,
+                 d.DMT_HORA_TRANSACCION DESC,
+                 d.DMT_ID DESC
+             ) AS rn
         FROM PAR_DETALLE_MAQUINA_TICKET d
+        LEFT JOIN PAR_MAQUINA mq ON mq.MAQ_ID = d.MAQ_ID
+        LEFT JOIN PAR_TIPO_MAQUINA tm ON tm.TMA_ID = mq.TMA_ID
+       WHERE d.DMT_TRANSACCION = 'PROCESAMIENTO_COBRO'
+          OR LOWER(TRIM(tm.TMA_TIPO)) = 'cobro'
     )
     SELECT NVL(m.MAQ_ID, -1) AS MAQ_ID,
            NVL(m.MAQ_CODIGO, 'Sin máquina') AS MAQ_CODIGO,
@@ -134,8 +153,8 @@ export async function getCobrosProcesadosPorMaquina({ desde, hasta }) {
            SUM(CASE WHEN NVL(c.COB_PROCESADO_MAQUINA, 0) = 1 THEN 1 ELSE 0 END) AS AUTO_CNT,
            SUM(CASE WHEN NVL(c.COB_PROCESADO_MAQUINA, 0) <> 1 THEN 1 ELSE 0 END) AS MANUAL_CNT
       FROM PAR_COBRO c
-      LEFT JOIN dmt_last dl ON dl.TIC_ID = c.TIC_ID AND dl.rn = 1
-      LEFT JOIN PAR_MAQUINA m ON m.MAQ_ID = dl.MAQ_ID
+      LEFT JOIN dmt_cobro dc ON dc.TIC_ID = c.TIC_ID AND dc.rn = 1
+      LEFT JOIN PAR_MAQUINA m ON m.MAQ_ID = dc.MAQ_ID
      WHERE TRUNC(c.COB_FECHA_HORA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
      GROUP BY NVL(m.MAQ_ID, -1), NVL(m.MAQ_CODIGO, 'Sin máquina')
      ORDER BY COUNT(*) DESC, NVL(m.MAQ_CODIGO, 'Sin máquina')`,

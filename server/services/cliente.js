@@ -1,6 +1,22 @@
 import oracledb from 'oracledb';
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
+const EXISTS_TICKET_CLIENT = `EXISTS (
+  SELECT 1
+    FROM PAR_VEHICULO v
+    JOIN PAR_TICKET t ON t.VEH_ID = v.VEH_ID
+   WHERE v.CLI_ID = c.CLI_ID
+)`;
+
+const EXISTS_MEMBERSHIP_CLIENT = `EXISTS (
+  SELECT 1
+    FROM PAR_VEHICULO v
+    JOIN PAR_MEMBRESIA m ON m.VEH_ID = v.VEH_ID
+   WHERE v.CLI_ID = c.CLI_ID
+)`;
+
+const IS_CLIENTE_ESPORADICO = `(${EXISTS_TICKET_CLIENT} AND NOT ${EXISTS_MEMBERSHIP_CLIENT})`;
+
 export async function getAll(opts = {}) {
   const mode = String(opts.mode || '').trim().toLowerCase(); // mensual | esporadico | ''
   const qRaw = String(opts.q || '').trim();
@@ -8,20 +24,11 @@ export async function getAll(opts = {}) {
   const where = [];
 
   if (mode === 'mensual') {
-    // Sin filtro por membresía/vehículo: en admin "Clientes mensuales" debe verse cualquier ficha
-    // (alta de cliente, flota sin plan aún, o ya con membresía). El listado esporádico sigue acotado aparte.
+    // Clientes mensuales/admin: se excluyen únicamente las fichas puramente esporádicas
+    // capturadas desde tickets con NIT y sin ninguna membresía asociada.
+    where.push(`NOT ${IS_CLIENTE_ESPORADICO}`);
   } else if (mode === 'esporadico') {
-    where.push(
-      `EXISTS (SELECT 1 FROM PAR_VEHICULO v WHERE v.CLI_ID = c.CLI_ID)`
-    );
-    where.push(
-      `NOT EXISTS (
-         SELECT 1
-           FROM PAR_VEHICULO v
-           JOIN PAR_MEMBRESIA m ON m.VEH_ID = v.VEH_ID
-          WHERE v.CLI_ID = c.CLI_ID
-       )`
-    );
+    where.push(IS_CLIENTE_ESPORADICO);
   }
 
   if (qRaw) {

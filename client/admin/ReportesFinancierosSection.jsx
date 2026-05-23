@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  Chart as ChartJS,
-  Legend,
-  LineElement,
-  LinearScale,
-  PointElement,
-  Tooltip,
-} from 'chart.js';
-import { Bar, Line, Pie } from 'react-chartjs-2';
+import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import { API_BASE } from '../config.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, LineElement, PointElement, Tooltip, Legend);
+import {
+  REPORT_PALETTE,
+  buildCartesianOptions,
+  buildDoughnutOptions,
+  buildLegendItems,
+  createCenterTextPlugin,
+  createVerticalGradient,
+  formatCurrency,
+  formatNumber,
+} from './reportChartUtils.js';
+import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -39,6 +37,11 @@ async function parseJsonSafe(res) {
   }
 }
 
+function clickedLabel(elements, chart) {
+  if (!elements?.length || !chart?.data?.labels?.length) return '';
+  return String(chart.data.labels[elements[0].index] || '');
+}
+
 export default function ReportesFinancierosSection() {
   const initial = useMemo(() => defaultRange(), []);
   const [tab, setTab] = useState('cobros_maquina');
@@ -50,10 +53,22 @@ export default function ReportesFinancierosSection() {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
 
+  const [filtroFecha, setFiltroFecha] = useState('');
+  const [filtroReferencia, setFiltroReferencia] = useState('');
+  const [filtroMes, setFiltroMes] = useState('');
+  const [filtroPlaca, setFiltroPlaca] = useState('');
+  const [filtroMaquina, setFiltroMaquina] = useState('');
+  const [filtroMetodoPago, setFiltroMetodoPago] = useState('');
+
   useEffect(() => {
-    // Al cambiar de subpestaña se oculta el reporte anterior.
     setError('');
     setData(null);
+    setFiltroFecha('');
+    setFiltroReferencia('');
+    setFiltroMes('');
+    setFiltroPlaca('');
+    setFiltroMaquina('');
+    setFiltroMetodoPago('');
   }, [tab]);
 
   const generate = async () => {
@@ -98,53 +113,159 @@ export default function ReportesFinancierosSection() {
     window.open(`${API_BASE}${pathByTab[tab]}?${q}`, '_blank', 'noopener,noreferrer');
   };
 
+  const cobrosDetalle = useMemo(() => (Array.isArray(data?.detalle) ? data.detalle : []), [data]);
+  const cobrosBarData = {
+    labels: cobrosDetalle.map((row) => row.maquina),
+    datasets: [
+      {
+        label: 'Cobrado',
+        data: cobrosDetalle.map((row) => Number(row.montoTotalCobrado || 0)),
+        borderRadius: 12,
+        borderSkipped: false,
+        maxBarThickness: 34,
+        backgroundColor(context) {
+          return createVerticalGradient(context.chart, '#93c5fd', REPORT_PALETTE.blue);
+        },
+      },
+      {
+        label: 'Vuelto',
+        data: cobrosDetalle.map((row) => Number(row.montoTotalVuelto || 0)),
+        borderRadius: 12,
+        borderSkipped: false,
+        maxBarThickness: 34,
+        backgroundColor(context) {
+          return createVerticalGradient(context.chart, '#fde68a', REPORT_PALETTE.amber);
+        },
+      },
+    ],
+  };
+
+  const totalAutomaticas = cobrosDetalle.reduce((sum, row) => sum + Number(row.transaccionesAutomaticas || 0), 0);
+  const totalManuales = cobrosDetalle.reduce(
+    (sum, row) => sum + Math.max(0, Number(row.totalTransacciones || 0) - Number(row.transaccionesAutomaticas || 0)),
+    0
+  );
+  const cobrosMixData = {
+    labels: ['Automaticas', 'Asistidas'],
+    datasets: [
+      {
+        data: [totalAutomaticas, totalManuales],
+        backgroundColor: [REPORT_PALETTE.teal, REPORT_PALETTE.violet],
+        borderWidth: 0,
+        hoverOffset: 10,
+      },
+    ],
+  };
+
+  const pagosPorMes = useMemo(() => (Array.isArray(data?.porMes) ? data.porMes : []), [data]);
+  const pagosDetalle = useMemo(() => (Array.isArray(data?.detalle) ? data.detalle : []), [data]);
   const lineData = {
-    labels: (data?.porMes || []).map((x) => x.anioMes),
+    labels: pagosPorMes.map((row) => row.anioMes),
     datasets: [
       {
         label: 'Monto recaudado',
-        data: (data?.porMes || []).map((x) => Number(x.montoTotalRecaudado || 0)),
-        borderColor: '#2563eb',
-        backgroundColor: '#93c5fd',
-        tension: 0.25,
+        data: pagosPorMes.map((row) => Number(row.montoTotalRecaudado || 0)),
+        borderColor: REPORT_PALETTE.blue,
+        backgroundColor(context) {
+          const { chart } = context;
+          return createVerticalGradient(chart, 'rgba(37, 99, 235, 0.28)', 'rgba(37, 99, 235, 0.02)');
+        },
+        fill: true,
+        tension: 0.35,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#ffffff',
+        pointBorderColor: REPORT_PALETTE.blue,
+        pointBorderWidth: 2,
+      },
+    ],
+  };
+
+  const pagosPorMetodo = useMemo(() => {
+    const byMethod = new Map();
+    pagosDetalle.forEach((row) => {
+      const key = row.metodoPago || 'Sin metodo';
+      byMethod.set(key, (byMethod.get(key) || 0) + Number(row.monto || 0));
+    });
+    return [...byMethod.entries()].map(([label, value]) => ({ label, value }));
+  }, [pagosDetalle]);
+
+  const pagosMetodoColors = [REPORT_PALETTE.blue, REPORT_PALETTE.green, REPORT_PALETTE.amber, REPORT_PALETTE.violet];
+  const pagosMetodoData = {
+    labels: pagosPorMetodo.map((row) => row.label),
+    datasets: [
+      {
+        data: pagosPorMetodo.map((row) => row.value),
+        backgroundColor: pagosPorMetodo.map((_, index) => pagosMetodoColors[index % pagosMetodoColors.length]),
+        borderWidth: 0,
+        hoverOffset: 10,
       },
     ],
   };
 
   const pieTipoData = {
-    labels: ['Esporádico', 'Membresía'],
+    labels: ['Esporadico', 'Membresia'],
     datasets: [
       {
         data: [Number(data?.esporadico?.totalRecaudado || 0), Number(data?.mensual?.totalRecaudado || 0)],
-        backgroundColor: ['#0ea5e9', '#22c55e'],
+        backgroundColor: [REPORT_PALETTE.blue, REPORT_PALETTE.green],
+        borderWidth: 0,
+        hoverOffset: 10,
       },
     ],
   };
 
   const barTotalesData = {
-    labels: (data?.ingresosPorDia || []).map((x) => x.fecha),
+    labels: (data?.ingresosPorDia || []).map((row) => row.fecha),
     datasets: [
       {
-        label: 'Esporádico',
-        data: (data?.ingresosPorDia || []).map((x) => Number(x.ingresoEsporadico || 0)),
-        backgroundColor: '#0ea5e9',
+        label: 'Esporadico',
+        data: (data?.ingresosPorDia || []).map((row) => Number(row.ingresoEsporadico || 0)),
+        borderRadius: 10,
+        borderSkipped: false,
+        maxBarThickness: 28,
+        backgroundColor(context) {
+          return createVerticalGradient(context.chart, '#7dd3fc', REPORT_PALETTE.blue);
+        },
       },
       {
-        label: 'Membresía',
-        data: (data?.ingresosPorDia || []).map((x) => Number(x.ingresoMensual || 0)),
-        backgroundColor: '#22c55e',
+        label: 'Membresia',
+        data: (data?.ingresosPorDia || []).map((row) => Number(row.ingresoMensual || 0)),
+        borderRadius: 10,
+        borderSkipped: false,
+        maxBarThickness: 28,
+        backgroundColor(context) {
+          return createVerticalGradient(context.chart, '#86efac', REPORT_PALETTE.green);
+        },
       },
     ],
   };
+
+  const pagosDetalleFiltrado = pagosDetalle.filter((row) => {
+    const matchPlaca = row.placa?.toLowerCase().includes(filtroPlaca.toLowerCase());
+    const matchMes = filtroMes ? String(row.fechaPago || '').startsWith(filtroMes) : true;
+    const matchMetodo = filtroMetodoPago ? row.metodoPago === filtroMetodoPago : true;
+    return matchPlaca && matchMes && matchMetodo;
+  });
+
+  const cobrosDetalleFiltrado = cobrosDetalle.filter((row) =>
+    row.maquina?.toLowerCase().includes(filtroMaquina.toLowerCase())
+  );
+
+  const ingresosDetalleFiltrado = (data?.detalleTransacciones || []).filter((row) => {
+    const matchRef = row.referencia?.toLowerCase().includes(filtroReferencia.toLowerCase());
+    const matchFecha = filtroFecha ? String(row.fecha || '').startsWith(filtroFecha) : true;
+    return matchRef && matchFecha;
+  });
 
   return (
     <>
       <div className="reporte-tabs" role="tablist" aria-label="Subreportes financieros">
         <button type="button" role="tab" aria-selected={tab === 'cobros_maquina'} className={`reporte-tab-btn${tab === 'cobros_maquina' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('cobros_maquina')}>
-          Cobros por máquina
+          Cobros por maquina
         </button>
         <button type="button" role="tab" aria-selected={tab === 'pagos_membresia'} className={`reporte-tab-btn${tab === 'pagos_membresia' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('pagos_membresia')}>
-          Pagos membresías por mes
+          Pagos membresias por mes
         </button>
         <button type="button" role="tab" aria-selected={tab === 'ingresos_tipo'} className={`reporte-tab-btn${tab === 'ingresos_tipo' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('ingresos_tipo')}>
           Ingresos por tipo cliente
@@ -157,9 +278,9 @@ export default function ReportesFinancierosSection() {
       <section className="reporte-inc-card">
         <h2 className="reporte-inc-card__title">
           {tab === 'cobros_maquina'
-            ? 'Reporte de cobros procesados por máquina'
+            ? 'Reporte de cobros procesados por maquina'
             : tab === 'pagos_membresia'
-              ? 'Reporte de pagos de membresías por mes'
+              ? 'Reporte de pagos de membresias por mes'
               : tab === 'ingresos_tipo'
                 ? 'Reporte de ingresos por tipo de cliente'
                 : 'Reporte de ingresos totales por rango de fechas'}
@@ -196,7 +317,7 @@ export default function ReportesFinancierosSection() {
           )}
           <div className="reporte-inc-form__actions">
             <button type="submit" className="admin-btn-primary" disabled={loading}>
-              {loading ? 'Generando…' : 'Generar reporte'}
+              {loading ? 'Generando...' : 'Generar reporte'}
             </button>
             <button type="button" className="admin-btn-ghost" onClick={exportPdf} disabled={loading}>
               Exportar PDF
@@ -210,23 +331,87 @@ export default function ReportesFinancierosSection() {
         <>
           {tab === 'cobros_maquina' ? (
             <>
-              {!data.detalle?.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
-              {data.detalle?.length ? (
+              {!cobrosDetalle.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
+              {cobrosDetalle.length ? (
                 <>
                   <div className="admin-kpi-grid reporte-mov-kpi-grid" style={{ marginTop: '1rem' }}>
                     <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Transacciones</div><div className="admin-kpi-value">{data.totalTransacciones}</div></article>
-                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Cobrado</div><div className="admin-kpi-value">Q{Number(data.totalCobrado || 0).toFixed(2)}</div></article>
-                    <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Vuelto</div><div className="admin-kpi-value">Q{Number(data.totalVuelto || 0).toFixed(2)}</div></article>
+                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Cobrado</div><div className="admin-kpi-value">{formatCurrency(data.totalCobrado)}</div></article>
+                    <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Vuelto</div><div className="admin-kpi-value">{formatCurrency(data.totalVuelto)}</div></article>
                   </div>
+
+                  <div className="reporte-chart-grid">
+                    <ReportChartCard
+                      title="Cobrado y vuelto por maquina"
+                      description="Haz clic en una barra para resaltar esa maquina en la tabla."
+                    >
+                      <div className="reporte-chart-canvas reporte-chart-canvas--wide">
+                        <Bar
+                          data={cobrosBarData}
+                          options={buildCartesianOptions({
+                            numericFormatter: formatCurrency,
+                            onClick: (_, elements, chart) => {
+                              const label = clickedLabel(elements, chart);
+                              if (label) setFiltroMaquina(label);
+                            },
+                          })}
+                        />
+                      </div>
+                    </ReportChartCard>
+
+                    <ReportChartCard
+                      title="Participacion operativa"
+                      description="Visualiza cuanto del flujo se procesa de forma automatica."
+                    >
+                      <div className="reporte-chart-split">
+                        <div className="reporte-chart-canvas reporte-chart-canvas--donut">
+                          <Doughnut
+                            data={cobrosMixData}
+                            options={buildDoughnutOptions()}
+                            plugins={[
+                              createCenterTextPlugin([
+                                { text: formatNumber(data.totalTransacciones || 0) },
+                                { text: 'transacciones', color: '#64748b' },
+                              ]),
+                            ]}
+                          />
+                        </div>
+                        <ReportLegend
+                          items={buildLegendItems(
+                            cobrosMixData.labels,
+                            cobrosMixData.datasets[0].data,
+                            cobrosMixData.datasets[0].backgroundColor
+                          )}
+                        />
+                      </div>
+                    </ReportChartCard>
+                  </div>
+
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle por máquina</h3>
+                    <div className="reporte-table-toolbar">
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle por maquina</h3>
+                      <div className="reporte-table-toolbar__controls">
+                        <input
+                          type="text"
+                          placeholder="Buscar maquina..."
+                          value={filtroMaquina}
+                          onChange={(e) => setFiltroMaquina(e.target.value)}
+                          className="admin-input reporte-table-input"
+                        />
+                      </div>
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Máquina</th><th>Transacciones</th><th>Monto cobrado</th><th>Vuelto</th><th>Promedio</th><th>Automáticas</th></tr></thead>
+                        <thead><tr><th>Maquina</th><th>Transacciones</th><th>Monto cobrado</th><th>Vuelto</th><th>Promedio</th><th>Automaticas</th></tr></thead>
                         <tbody>
-                          {data.detalle.map((r) => (
-                            <tr key={String(r.maquinaId)}>
-                              <td>{r.maquina}</td><td>{r.totalTransacciones}</td><td>Q{Number(r.montoTotalCobrado || 0).toFixed(2)}</td><td>Q{Number(r.montoTotalVuelto || 0).toFixed(2)}</td><td>Q{Number(r.promedioCobro || 0).toFixed(2)}</td><td>{r.transaccionesAutomaticas}</td>
+                          {cobrosDetalleFiltrado.map((row) => (
+                            <tr key={String(row.maquinaId)}>
+                              <td>{row.maquina}</td>
+                              <td>{row.totalTransacciones}</td>
+                              <td>{formatCurrency(row.montoTotalCobrado)}</td>
+                              <td>{formatCurrency(row.montoTotalVuelto)}</td>
+                              <td>{formatCurrency(row.promedioCobro)}</td>
+                              <td>{row.transaccionesAutomaticas}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -240,34 +425,118 @@ export default function ReportesFinancierosSection() {
 
           {tab === 'pagos_membresia' ? (
             <>
-              {!data.porMes?.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
-              {data.porMes?.length ? (
+              {!pagosPorMes.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
+              {pagosPorMes.length ? (
                 <>
-                  <div className="reporte-inc-chart-wrap">
-                    <h3 className="reporte-inc-subtitle">Tendencia mensual de recaudación</h3>
-                    <div style={{ height: 280 }}><Line data={lineData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+                  <div className="reporte-chart-grid">
+                    <ReportChartCard
+                      title="Tendencia mensual de recaudacion"
+                      description="Haz clic en un punto para filtrar el detalle por mes."
+                    >
+                      <div className="reporte-chart-canvas reporte-chart-canvas--wide">
+                        <Line
+                          data={lineData}
+                          options={buildCartesianOptions({
+                            showLegend: false,
+                            numericFormatter: formatCurrency,
+                            onClick: (_, elements, chart) => {
+                              const label = clickedLabel(elements, chart);
+                              if (label) setFiltroMes(label);
+                            },
+                          })}
+                        />
+                      </div>
+                    </ReportChartCard>
+
+                    <ReportChartCard
+                      title="Distribucion del monto por metodo de pago"
+                      description="Haz clic en un segmento para dejar solo ese metodo en la tabla."
+                    >
+                      <div className="reporte-chart-split">
+                        <div className="reporte-chart-canvas reporte-chart-canvas--donut">
+                          <Doughnut
+                            data={pagosMetodoData}
+                            options={buildDoughnutOptions({
+                              valueFormatter: formatCurrency,
+                              onClick: (_, elements, chart) => {
+                                const label = clickedLabel(elements, chart);
+                                if (label) setFiltroMetodoPago(label);
+                              },
+                            })}
+                            plugins={[
+                              createCenterTextPlugin([
+                                { text: formatCurrency(data.totalRecaudado || pagosDetalle.reduce((sum, row) => sum + Number(row.monto || 0), 0)) },
+                                { text: 'recaudado', color: '#64748b' },
+                              ]),
+                            ]}
+                          />
+                        </div>
+                        <ReportLegend
+                          items={buildLegendItems(
+                            pagosMetodoData.labels,
+                            pagosMetodoData.datasets[0].data,
+                            pagosMetodoData.datasets[0].backgroundColor,
+                            formatCurrency
+                          )}
+                        />
+                      </div>
+                    </ReportChartCard>
                   </div>
+
                   <div className="reporte-inc-table-wrap">
                     <h3 className="reporte-inc-subtitle">Resumen mensual</h3>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Mes</th><th>Membresías pagadas</th><th>Monto recaudado</th><th>Promedio pago</th></tr></thead>
+                        <thead><tr><th>Mes</th><th>Membresias pagadas</th><th>Monto recaudado</th><th>Promedio pago</th></tr></thead>
                         <tbody>
-                          {data.porMes.map((r) => (
-                            <tr key={r.anioMes}><td>{r.anioMes}</td><td>{r.membresiasPagadas}</td><td>Q{Number(r.montoTotalRecaudado || 0).toFixed(2)}</td><td>Q{Number(r.promedioPagoMembresia || 0).toFixed(2)}</td></tr>
+                          {pagosPorMes.map((row) => (
+                            <tr key={row.anioMes}>
+                              <td>{row.anioMes}</td>
+                              <td>{row.membresiasPagadas}</td>
+                              <td>{formatCurrency(row.montoTotalRecaudado)}</td>
+                              <td>{formatCurrency(row.promedioPagoMembresia)}</td>
+                            </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                   </div>
+
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de pagos</h3>
+                    <div className="reporte-table-toolbar">
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de pagos</h3>
+                      <div className="reporte-table-toolbar__controls">
+                        {filtroMes ? (
+                          <button type="button" className="admin-btn-ghost" onClick={() => setFiltroMes('')}>
+                            Mes: {filtroMes} x
+                          </button>
+                        ) : null}
+                        {filtroMetodoPago ? (
+                          <button type="button" className="admin-btn-ghost" onClick={() => setFiltroMetodoPago('')}>
+                            Metodo: {filtroMetodoPago} x
+                          </button>
+                        ) : null}
+                        <input
+                          type="text"
+                          placeholder="Buscar por placa..."
+                          value={filtroPlaca}
+                          onChange={(e) => setFiltroPlaca(e.target.value)}
+                          className="admin-input reporte-table-input"
+                        />
+                      </div>
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Cliente</th><th>Placa</th><th>Fecha pago</th><th>Monto</th><th>Método pago</th></tr></thead>
+                        <thead><tr><th>Cliente</th><th>Placa</th><th>Fecha pago</th><th>Monto</th><th>Metodo pago</th></tr></thead>
                         <tbody>
-                          {(data.detalle || []).map((r) => (
-                            <tr key={String(r.id)}><td>{r.cliente}</td><td>{r.placa}</td><td>{r.fechaPago ? new Date(r.fechaPago).toLocaleString('es-GT') : '—'}</td><td>Q{Number(r.monto || 0).toFixed(2)}</td><td>{r.metodoPago}</td></tr>
+                          {pagosDetalleFiltrado.map((row) => (
+                            <tr key={String(row.id)}>
+                              <td>{row.cliente}</td>
+                              <td>{row.placa}</td>
+                              <td>{row.fechaPago ? new Date(row.fechaPago).toLocaleString('es-GT') : '—'}</td>
+                              <td>{formatCurrency(row.monto)}</td>
+                              <td>{row.metodoPago}</td>
+                            </tr>
                           ))}
                         </tbody>
                       </table>
@@ -284,11 +553,40 @@ export default function ReportesFinancierosSection() {
               {Number(data.totalGeneral || 0) > 0 ? (
                 <>
                   <div className="admin-kpi-grid reporte-mov-kpi-grid" style={{ marginTop: '1rem' }}>
-                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Total general</div><div className="admin-kpi-value">Q{Number(data.totalGeneral || 0).toFixed(2)}</div></article>
-                    <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Esporádicos</div><div className="admin-kpi-value">Q{Number(data.esporadico?.totalRecaudado || 0).toFixed(2)}</div><div className="admin-kpi-hint">{data.esporadico?.porcentajeSobreTotal || 0}%</div></article>
-                    <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Membresía</div><div className="admin-kpi-value">Q{Number(data.mensual?.totalRecaudado || 0).toFixed(2)}</div><div className="admin-kpi-hint">{data.mensual?.porcentajeSobreTotal || 0}%</div></article>
+                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Total general</div><div className="admin-kpi-value">{formatCurrency(data.totalGeneral)}</div></article>
+                    <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Esporadicos</div><div className="admin-kpi-value">{formatCurrency(data.esporadico?.totalRecaudado)}</div><div className="admin-kpi-hint">{data.esporadico?.porcentajeSobreTotal || 0}%</div></article>
+                    <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Membresia</div><div className="admin-kpi-value">{formatCurrency(data.mensual?.totalRecaudado)}</div><div className="admin-kpi-hint">{data.mensual?.porcentajeSobreTotal || 0}%</div></article>
                   </div>
-                  <div className="reporte-inc-chart-wrap"><h3 className="reporte-inc-subtitle">Proporción de ingresos por tipo</h3><div style={{ height: 260, maxWidth: 360 }}><Pie data={pieTipoData} /></div></div>
+
+                  <div className="reporte-chart-grid reporte-chart-grid--single">
+                    <ReportChartCard
+                      title="Participacion del ingreso por tipo de cliente"
+                      description="Interaccion por hover, centro informativo y leyenda ejecutiva."
+                    >
+                      <div className="reporte-chart-split">
+                        <div className="reporte-chart-canvas reporte-chart-canvas--donut">
+                          <Doughnut
+                            data={pieTipoData}
+                            options={buildDoughnutOptions({ valueFormatter: formatCurrency })}
+                            plugins={[
+                              createCenterTextPlugin([
+                                { text: formatCurrency(data.totalGeneral) },
+                                { text: 'total', color: '#64748b' },
+                              ]),
+                            ]}
+                          />
+                        </div>
+                        <ReportLegend
+                          items={buildLegendItems(
+                            pieTipoData.labels,
+                            pieTipoData.datasets[0].data,
+                            pieTipoData.datasets[0].backgroundColor,
+                            formatCurrency
+                          )}
+                        />
+                      </div>
+                    </ReportChartCard>
+                  </div>
                 </>
               ) : null}
             </>
@@ -300,19 +598,61 @@ export default function ReportesFinancierosSection() {
               {data.detalleTransacciones?.length ? (
                 <>
                   <div className="admin-kpi-grid reporte-mov-kpi-grid" style={{ marginTop: '1rem' }}>
-                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Ingreso total</div><div className="admin-kpi-value">Q{Number(data.ingresoTotal || 0).toFixed(2)}</div></article>
-                    <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Esporádicos</div><div className="admin-kpi-value">Q{Number(data.ingresoEsporadico || 0).toFixed(2)}</div></article>
-                    <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Membresía</div><div className="admin-kpi-value">Q{Number(data.ingresoMensual || 0).toFixed(2)}</div></article>
+                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Ingreso total</div><div className="admin-kpi-value">{formatCurrency(data.ingresoTotal)}</div></article>
+                    <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Esporadicos</div><div className="admin-kpi-value">{formatCurrency(data.ingresoEsporadico)}</div></article>
+                    <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Membresia</div><div className="admin-kpi-value">{formatCurrency(data.ingresoMensual)}</div></article>
                   </div>
-                  <div className="reporte-inc-chart-wrap"><h3 className="reporte-inc-subtitle">Ingresos diarios por tipo de cliente</h3><div style={{ height: 280 }}><Bar data={barTotalesData} options={{ responsive: true, maintainAspectRatio: false }} /></div></div>
+
+                  <div className="reporte-chart-grid reporte-chart-grid--single">
+                    <ReportChartCard
+                      title="Ingresos diarios por tipo de cliente"
+                      description="Haz clic en una barra para filtrar el detalle de ese dia."
+                    >
+                      <div className="reporte-chart-canvas reporte-chart-canvas--wide">
+                        <Bar
+                          data={barTotalesData}
+                          options={buildCartesianOptions({
+                            numericFormatter: formatCurrency,
+                            onClick: (_, elements, chart) => {
+                              const label = clickedLabel(elements, chart);
+                              if (label) setFiltroFecha(label);
+                            },
+                          })}
+                        />
+                      </div>
+                    </ReportChartCard>
+                  </div>
+
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de transacciones</h3>
+                    <div className="reporte-table-toolbar">
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de transacciones</h3>
+                      <div className="reporte-table-toolbar__controls">
+                        {filtroFecha ? (
+                          <button type="button" className="admin-btn-ghost" onClick={() => setFiltroFecha('')}>
+                            Fecha: {filtroFecha} x
+                          </button>
+                        ) : null}
+                        <input
+                          type="text"
+                          placeholder="Buscar por referencia..."
+                          value={filtroReferencia}
+                          onChange={(e) => setFiltroReferencia(e.target.value)}
+                          className="admin-input reporte-table-input"
+                        />
+                      </div>
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Fecha</th><th>Tipo cliente</th><th>Monto</th><th>Método pago</th><th>Referencia</th></tr></thead>
+                        <thead><tr><th>Fecha</th><th>Tipo cliente</th><th>Monto</th><th>Metodo pago</th><th>Referencia</th></tr></thead>
                         <tbody>
-                          {(data.detalleTransacciones || []).map((r) => (
-                            <tr key={`${r.referencia}-${r.fecha}`}><td>{r.fecha ? new Date(r.fecha).toLocaleString('es-GT') : '—'}</td><td>{r.tipoCliente}</td><td>Q{Number(r.monto || 0).toFixed(2)}</td><td>{r.metodoPago || '—'}</td><td>{r.referencia}</td></tr>
+                          {ingresosDetalleFiltrado.map((row) => (
+                            <tr key={`${row.referencia}-${row.fecha}`}>
+                              <td>{row.fecha ? new Date(row.fecha).toLocaleString('es-GT') : '—'}</td>
+                              <td>{row.tipoCliente}</td>
+                              <td>{formatCurrency(row.monto)}</td>
+                              <td>{row.metodoPago || '—'}</td>
+                              <td>{row.referencia}</td>
+                            </tr>
                           ))}
                         </tbody>
                       </table>

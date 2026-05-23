@@ -1,3 +1,4 @@
+import { assertValidPlate, normalizePlate } from '../utils/plate.js';
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
 const LIST_SELECT = `SELECT v.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
@@ -5,14 +6,30 @@ const LIST_SELECT = `SELECT v.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
          FROM PAR_VEHICULO v
          LEFT JOIN PAR_TIPO_VEHICULO tv ON v.TVE_ID = tv.TVE_ID`;
 
-/** Tickets / esporádicos: placas creadas en entrada (sin ficha de cliente). Coherente con ticket.js (CLI_ID NULL). */
-const WHERE_TICKETS_ESPORADICOS = `WHERE v.CLI_ID IS NULL`;
+const EXISTS_TICKET_CLIENT = `EXISTS (
+  SELECT 1
+    FROM PAR_VEHICULO vx
+    JOIN PAR_TICKET t ON t.VEH_ID = vx.VEH_ID
+   WHERE vx.CLI_ID = v.CLI_ID
+)`;
+
+const EXISTS_MEMBERSHIP_CLIENT = `EXISTS (
+  SELECT 1
+    FROM PAR_VEHICULO vx
+    JOIN PAR_MEMBRESIA m ON m.VEH_ID = vx.VEH_ID
+   WHERE vx.CLI_ID = v.CLI_ID
+)`;
+
+const IS_VEHICULO_CLIENTE_ESPORADICO = `(${EXISTS_TICKET_CLIENT} AND NOT ${EXISTS_MEMBERSHIP_CLIENT})`;
+
+/** Tickets / esporádicos: placas sin cliente o vinculadas a un cliente esporádico capturado por tickets. */
+const WHERE_TICKETS_ESPORADICOS = `WHERE v.CLI_ID IS NULL OR (v.CLI_ID IS NOT NULL AND ${IS_VEHICULO_CLIENTE_ESPORADICO})`;
 
 /**
- * Clientes mensuales: toda la flota vinculada a un cliente (CLI_ID), aunque aún no tenga membresía.
- * Así un vehículo nuevo aparece aquí y no en el listado esporádico.
+ * Clientes mensuales: flota de clientes no clasificados como esporádicos por tickets.
+ * Incluye vehículos ligados a clientes de alta manual, con o sin membresía activa.
  */
-const WHERE_CLIENTE_CON_MEMBRESIA = `WHERE v.CLI_ID IS NOT NULL`;
+const WHERE_CLIENTE_CON_MEMBRESIA = `WHERE v.CLI_ID IS NOT NULL AND NOT ${IS_VEHICULO_CLIENTE_ESPORADICO}`;
 
 export async function getAll(options = {}) {
   if (options.soloClienteConMembresia) {
@@ -31,12 +48,13 @@ export async function getById(id) {
 
 export async function findByPlaca(placa, excludeId = null) {
   if (!placa) return null;
+  const normalizedPlaca = normalizePlate(placa);
   const rows = await executeSql(
     `SELECT VEH_ID, VEH_PLACA
      FROM PAR_VEHICULO
      WHERE UPPER(VEH_PLACA) = UPPER(:placa)
        AND (:excludeId IS NULL OR VEH_ID <> :excludeId)`,
-    { placa, excludeId }
+    { placa: normalizedPlaca, excludeId }
   );
   return rows[0] || null;
 }
@@ -51,7 +69,8 @@ async function isIdentityAlways() {
 }
 
 export async function create(data) {
-  const existingPlaca = await findByPlaca(data.VEH_PLACA);
+  const placa = assertValidPlate(data.VEH_PLACA);
+  const existingPlaca = await findByPlaca(placa);
   if (existingPlaca) throw new Error('Ya existe un vehículo con la misma placa.');
 
   if ((await isIdentityAlways()) || !data.VEH_ID) {
@@ -59,7 +78,7 @@ export async function create(data) {
       `INSERT INTO PAR_VEHICULO (VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, CLI_ID)
        VALUES (:VEH_PLACA, :VEH_MODELO, :VEH_COLOR, :TVE_ID, :CLI_ID)`,
       {
-        VEH_PLACA: data.VEH_PLACA ?? null,
+        VEH_PLACA: placa,
         VEH_MODELO: data.VEH_MODELO ?? null,
         VEH_COLOR: data.VEH_COLOR ?? null,
         TVE_ID: data.TVE_ID ?? null,
@@ -72,14 +91,14 @@ export async function create(data) {
          FROM PAR_VEHICULO
         WHERE UPPER(VEH_PLACA) = UPPER(:placa)
         ORDER BY VEH_ID DESC`,
-      { placa: data.VEH_PLACA ?? null }
+      { placa }
     );
     return rows[0] ? getById(rows[0].VEH_ID) : null;
   }
 
   await executeProcedure(`BEGIN SP_VEHICULO_CREATE(:VEH_ID, :VEH_PLACA, :VEH_MODELO, :VEH_COLOR, :TVE_ID, :CLI_ID); END;`, {
     VEH_ID: data.VEH_ID ?? null,
-    VEH_PLACA: data.VEH_PLACA ?? null,
+    VEH_PLACA: placa,
     VEH_MODELO: data.VEH_MODELO ?? null,
     VEH_COLOR: data.VEH_COLOR ?? null,
     TVE_ID: data.TVE_ID ?? null,
@@ -89,11 +108,12 @@ export async function create(data) {
 }
 
 export async function update(id, data) {
-  const existingPlaca = await findByPlaca(data.VEH_PLACA, id);
+  const placa = assertValidPlate(data.VEH_PLACA);
+  const existingPlaca = await findByPlaca(placa, id);
   if (existingPlaca) throw new Error('Ya existe otro vehículo con la misma placa.');
   await executeProcedure(`BEGIN SP_VEHICULO_UPDATE(:id, :VEH_PLACA, :VEH_MODELO, :VEH_COLOR, :TVE_ID, :CLI_ID); END;`, {
     id,
-    VEH_PLACA: data.VEH_PLACA ?? null,
+    VEH_PLACA: placa,
     VEH_MODELO: data.VEH_MODELO ?? null,
     VEH_COLOR: data.VEH_COLOR ?? null,
     TVE_ID: data.TVE_ID ?? null,

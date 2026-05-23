@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarElement, CategoryScale, Chart as ChartJS, Legend, LinearScale, Tooltip } from 'chart.js';
-import { Bar } from 'react-chartjs-2';
+import { Bar, Doughnut } from 'react-chartjs-2';
 import { API_BASE } from '../config.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+import {
+  REPORT_PALETTE,
+  buildCartesianOptions,
+  buildDoughnutOptions,
+  buildLegendItems,
+  createCenterTextPlugin,
+  createVerticalGradient,
+  formatNumber,
+} from './reportChartUtils.js';
+import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -22,7 +29,16 @@ function defaultRange() {
 async function parseJsonSafe(res) {
   const text = await res.text();
   if (!text) return {};
-  try { return JSON.parse(text); } catch { return { message: text }; }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}
+
+function clickedLabel(elements, chart) {
+  if (!elements?.length || !chart?.data?.labels?.length) return '';
+  return String(chart.data.labels[elements[0].index] || '');
 }
 
 export default function ReportesAfluenciaSection() {
@@ -36,10 +52,12 @@ export default function ReportesAfluenciaSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [filtroPeriodo, setFiltroPeriodo] = useState('');
 
   useEffect(() => {
     setError('');
     setData(null);
+    setFiltroPeriodo('');
   }, [tab]);
 
   const generate = async () => {
@@ -75,19 +93,42 @@ export default function ReportesAfluenciaSection() {
   };
 
   const chartRows = tab === 'detallado' ? (data?.detalle || []) : (data?.detalleAnual || []);
-  const maxTotal = chartRows.reduce((m, x) => Math.max(m, Number(x.total || 0)), 0);
   const chartData = {
-    labels: chartRows.map((x) => x.periodoLabel || x.anio),
+    labels: chartRows.map((row) => row.periodoLabel || row.anio),
     datasets: [
       {
-        label: 'Esporádico',
-        data: chartRows.map((x) => Number(x.esporadico || 0)),
-        backgroundColor: chartRows.map((x) => (Number(x.total || 0) === maxTotal && maxTotal > 0 ? '#0369a1' : '#0ea5e9')),
+        label: 'Esporadico',
+        data: chartRows.map((row) => Number(row.esporadico || 0)),
+        borderRadius: 10,
+        borderSkipped: false,
+        maxBarThickness: 28,
+        backgroundColor(context) {
+          return createVerticalGradient(context.chart, '#7dd3fc', REPORT_PALETTE.blue);
+        },
       },
       {
-        label: 'Membresía',
-        data: chartRows.map((x) => Number(x.membresia || 0)),
-        backgroundColor: chartRows.map((x) => (Number(x.total || 0) === maxTotal && maxTotal > 0 ? '#166534' : '#22c55e')),
+        label: 'Membresia',
+        data: chartRows.map((row) => Number(row.membresia || 0)),
+        borderRadius: 10,
+        borderSkipped: false,
+        maxBarThickness: 28,
+        backgroundColor(context) {
+          return createVerticalGradient(context.chart, '#86efac', REPORT_PALETTE.green);
+        },
+      },
+    ],
+  };
+
+  const totalEsporadico = chartRows.reduce((sum, row) => sum + Number(row.esporadico || 0), 0);
+  const totalMembresia = chartRows.reduce((sum, row) => sum + Number(row.membresia || 0), 0);
+  const mixData = {
+    labels: ['Esporadico', 'Membresia'],
+    datasets: [
+      {
+        data: [totalEsporadico, totalMembresia],
+        backgroundColor: [REPORT_PALETTE.blue, REPORT_PALETTE.green],
+        borderWidth: 0,
+        hoverOffset: 10,
       },
     ],
   };
@@ -110,10 +151,10 @@ export default function ReportesAfluenciaSection() {
             <>
               <label className="reporte-inc-field"><span>Fecha inicio</span><input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required /></label>
               <label className="reporte-inc-field"><span>Fecha fin</span><input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required /></label>
-              <label className="reporte-inc-field"><span>Agrupación</span>
+              <label className="reporte-inc-field"><span>Agrupacion</span>
                 <select value={agrupacion} onChange={(e) => setAgrupacion(e.target.value)}>
-                  <option value="hora">Por hora del día</option>
-                  <option value="dia_semana">Por día de la semana</option>
+                  <option value="hora">Por hora del dia</option>
+                  <option value="dia_semana">Por dia de la semana</option>
                   <option value="semana">Por semana</option>
                   <option value="mes">Por mes</option>
                 </select>
@@ -121,12 +162,12 @@ export default function ReportesAfluenciaSection() {
             </>
           ) : (
             <>
-              <label className="reporte-inc-field"><span>Año inicio</span><input type="number" min="2000" max="2100" value={anioInicio} onChange={(e) => setAnioInicio(e.target.value)} required /></label>
-              <label className="reporte-inc-field"><span>Año fin</span><input type="number" min="2000" max="2100" value={anioFin} onChange={(e) => setAnioFin(e.target.value)} required /></label>
+              <label className="reporte-inc-field"><span>Anio inicio</span><input type="number" min="2000" max="2100" value={anioInicio} onChange={(e) => setAnioInicio(e.target.value)} required /></label>
+              <label className="reporte-inc-field"><span>Anio fin</span><input type="number" min="2000" max="2100" value={anioFin} onChange={(e) => setAnioFin(e.target.value)} required /></label>
             </>
           )}
           <div className="reporte-inc-form__actions">
-            <button type="submit" className="admin-btn-primary" disabled={loading}>{loading ? 'Generando…' : 'Generar reporte'}</button>
+            <button type="submit" className="admin-btn-primary" disabled={loading}>{loading ? 'Generando...' : 'Generar reporte'}</button>
             <button type="button" className="admin-btn-ghost" onClick={exportPdf} disabled={loading}>Exportar PDF</button>
           </div>
         </form>
@@ -142,17 +183,67 @@ export default function ReportesAfluenciaSection() {
                 <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Total ingresos</div><div className="admin-kpi-value">{tab === 'detallado' ? data.totalIngresos : data.totalIngresos}</div></article>
                 <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Mayor afluencia</div><div className="admin-kpi-value" style={{ fontSize: '1rem' }}>{tab === 'detallado' ? (data.periodoMayorAfluencia?.periodo || '—') : (data.anioMayorAfluencia?.anio || '—')}</div></article>
               </div>
-              <div className="reporte-inc-chart-wrap">
-                <h3 className="reporte-inc-subtitle">Afluencia por período</h3>
-                <div style={{ height: 300 }}><Bar data={chartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+
+              <div className="reporte-chart-grid">
+                <ReportChartCard title="Afluencia por periodo" description="Haz clic en una barra para filtrar la tabla.">
+                  <div className="reporte-chart-canvas reporte-chart-canvas--wide">
+                    <Bar
+                      data={chartData}
+                      options={buildCartesianOptions({
+                        onClick: (_, elements, chart) => {
+                          const label = clickedLabel(elements, chart);
+                          if (label) setFiltroPeriodo(label);
+                        },
+                      })}
+                    />
+                  </div>
+                </ReportChartCard>
+
+                <ReportChartCard title="Mix de afluencia" description="Comparativo global entre esporadicos y membresias.">
+                  <div className="reporte-chart-split">
+                    <div className="reporte-chart-canvas reporte-chart-canvas--donut">
+                      <Doughnut
+                        data={mixData}
+                        options={buildDoughnutOptions()}
+                        plugins={[
+                          createCenterTextPlugin([
+                            { text: formatNumber(totalEsporadico + totalMembresia) },
+                            { text: 'ingresos', color: '#64748b' },
+                          ]),
+                        ]}
+                      />
+                    </div>
+                    <ReportLegend
+                      items={buildLegendItems(
+                        mixData.labels,
+                        mixData.datasets[0].data,
+                        mixData.datasets[0].backgroundColor
+                      )}
+                    />
+                  </div>
+                </ReportChartCard>
               </div>
+
               {tab === 'detallado' ? (
                 <div className="reporte-inc-table-wrap">
-                  <h3 className="reporte-inc-subtitle">Detalle numérico</h3>
+                  <div className="reporte-table-toolbar">
+                    <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle numerico</h3>
+                    <div className="reporte-table-toolbar__controls">
+                      {filtroPeriodo ? (
+                        <button type="button" className="admin-btn-ghost" onClick={() => setFiltroPeriodo('')}>
+                          Quitar filtro: {filtroPeriodo} x
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                   <div className="crudx-table-scroll">
                     <table className="crudx-table reporte-inc-table">
-                      <thead><tr><th>Período</th><th>Esporádico</th><th>Membresía</th><th>Total</th></tr></thead>
-                      <tbody>{(data.detalle || []).map((r) => <tr key={r.periodoClave}><td>{r.periodoLabel}</td><td>{r.esporadico}</td><td>{r.membresia}</td><td>{r.total}</td></tr>)}</tbody>
+                      <thead><tr><th>Periodo</th><th>Esporadico</th><th>Membresia</th><th>Total</th></tr></thead>
+                      <tbody>
+                        {(data.detalle || [])
+                          .filter((row) => !filtroPeriodo || row.periodoLabel === filtroPeriodo)
+                          .map((row) => <tr key={row.periodoClave}><td>{row.periodoLabel}</td><td>{row.esporadico}</td><td>{row.membresia}</td><td>{row.total}</td></tr>)}
+                      </tbody>
                     </table>
                   </div>
                 </div>
@@ -162,24 +253,37 @@ export default function ReportesAfluenciaSection() {
                     <h3 className="reporte-inc-subtitle">Resumen ejecutivo</h3>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Indicador</th><th>Período</th><th>Esporádico</th><th>Membresía</th><th>Total</th></tr></thead>
+                        <thead><tr><th>Indicador</th><th>Periodo</th><th>Esporadico</th><th>Membresia</th><th>Total</th></tr></thead>
                         <tbody>
                           <tr><td>Hora pico</td><td>{data.resumenEjecutivo?.horaPico?.label || '—'}</td><td>{data.resumenEjecutivo?.horaPico?.esporadico || 0}</td><td>{data.resumenEjecutivo?.horaPico?.membresia || 0}</td><td>{data.resumenEjecutivo?.horaPico?.total || 0}</td></tr>
-                          <tr><td>Día más frecuentado</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.label || '—'}</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.esporadico || 0}</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.membresia || 0}</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.total || 0}</td></tr>
+                          <tr><td>Dia mas frecuentado</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.label || '—'}</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.esporadico || 0}</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.membresia || 0}</td><td>{data.resumenEjecutivo?.diaMasFrecuentado?.total || 0}</td></tr>
                           <tr><td>Semana mayor</td><td>{data.resumenEjecutivo?.semanaMayorAfluencia?.label || '—'}</td><td>{data.resumenEjecutivo?.semanaMayorAfluencia?.esporadico || 0}</td><td>{data.resumenEjecutivo?.semanaMayorAfluencia?.membresia || 0}</td><td>{data.resumenEjecutivo?.semanaMayorAfluencia?.total || 0}</td></tr>
                           <tr><td>Mes mayor</td><td>{data.resumenEjecutivo?.mesMayorAfluencia?.label || '—'}</td><td>{data.resumenEjecutivo?.mesMayorAfluencia?.esporadico || 0}</td><td>{data.resumenEjecutivo?.mesMayorAfluencia?.membresia || 0}</td><td>{data.resumenEjecutivo?.mesMayorAfluencia?.total || 0}</td></tr>
-                          <tr><td>Año mayor</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.label || '—'}</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.esporadico || 0}</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.membresia || 0}</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.total || 0}</td></tr>
+                          <tr><td>Anio mayor</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.label || '—'}</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.esporadico || 0}</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.membresia || 0}</td><td>{data.resumenEjecutivo?.anioMayorAfluencia?.total || 0}</td></tr>
                           <tr><td>Promedio diario</td><td>—</td><td>{data.resumenEjecutivo?.promedioDiarioEsporadico || 0}</td><td>{data.resumenEjecutivo?.promedioDiarioMembresia || 0}</td><td>{data.resumenEjecutivo?.promedioDiarioVehiculos || 0}</td></tr>
                         </tbody>
                       </table>
                     </div>
                   </div>
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle anual</h3>
+                    <div className="reporte-table-toolbar">
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle anual</h3>
+                      <div className="reporte-table-toolbar__controls">
+                        {filtroPeriodo ? (
+                          <button type="button" className="admin-btn-ghost" onClick={() => setFiltroPeriodo('')}>
+                            Quitar filtro: {filtroPeriodo} x
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Año</th><th>Esporádico</th><th>Membresía</th><th>Total</th></tr></thead>
-                        <tbody>{(data.detalleAnual || []).map((r) => <tr key={r.anio}><td>{r.anio}</td><td>{r.esporadico}</td><td>{r.membresia}</td><td>{r.total}</td></tr>)}</tbody>
+                        <thead><tr><th>Anio</th><th>Esporadico</th><th>Membresia</th><th>Total</th></tr></thead>
+                        <tbody>
+                          {(data.detalleAnual || [])
+                            .filter((row) => !filtroPeriodo || String(row.anio) === filtroPeriodo)
+                            .map((row) => <tr key={row.anio}><td>{row.anio}</td><td>{row.esporadico}</td><td>{row.membresia}</td><td>{row.total}</td></tr>)}
+                        </tbody>
                       </table>
                     </div>
                   </div>

@@ -44,10 +44,16 @@ export async function create({ EMA_ID, EMA_ESTADO, EMA_DESCRIPCION }) {
   return getById(EMA_ID);
 }
 
-export async function update(id, { EMA_ESTADO, EMA_DESCRIPCION }) {
+export async function update(id, { EMA_DESCRIPCION }) {
+  const current = await getById(id);
+  if (!current) throw new Error('Estado de maquina no encontrado');
   await executeProcedure(
     `BEGIN SP_ESTADO_MAQUINA_UPDATE(:id, :EMA_ESTADO, :EMA_DESCRIPCION); END;`,
-    { id, EMA_ESTADO, EMA_DESCRIPCION: EMA_DESCRIPCION ?? null }
+    {
+      id,
+      EMA_ESTADO: current.EMA_ESTADO ?? null,
+      EMA_DESCRIPCION: EMA_DESCRIPCION ?? current.EMA_DESCRIPCION ?? null,
+    }
   );
   return getById(id);
 }

@@ -32,6 +32,9 @@ Para ejecutar hay que abrir dos terminales. En una:
   cd server
   npm run dev
 
+  Si necesitas sembrar catálogos/espacios demo una sola vez:
+  npm run db:seed-catalogo-funcional
+
 En la otra:
 
   cd client

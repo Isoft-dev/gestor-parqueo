@@ -4,3 +4,4 @@ export const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 export const THEME_KEY = 'parqueo-theme';
 export const DEFAULT_THEME = 'light';
+export const ADMIN_APPEARANCE_KEY = 'parqueo-admin-appearance';

@@ -1,4 +1,5 @@
 import { executeCursor, executeProcedure, executeDelete, executeSql } from '../db/oracle.js';
+import { assertFixedPaymentCatalogLocked } from '../utils/fixedPaymentCatalogs.js';
 
 export async function getAll() {
   return executeCursor(`BEGIN SP_TIPO_PAGO_GET_ALL(:cursor); END;`);
@@ -19,6 +20,7 @@ async function isIdentityAlways() {
 }
 
 export async function create(data) {
+  assertFixedPaymentCatalogLocked();
   if ((await isIdentityAlways()) || !data.TPA_ID) {
     await executeSql(
       `INSERT INTO PAR_TIPO_PAGO (TPA_TIPO, TPA_DESCRIPCION)
@@ -47,6 +49,7 @@ export async function create(data) {
 }
 
 export async function update(id, data) {
+  assertFixedPaymentCatalogLocked();
   await executeProcedure(`BEGIN SP_TIPO_PAGO_UPDATE(:id, :TPA_TIPO, :TPA_DESCRIPCION); END;`, {
     id,
     TPA_TIPO: data.TPA_TIPO ?? null,
@@ -56,5 +59,6 @@ export async function update(id, data) {
 }
 
 export async function deleteItem(id) {
+  assertFixedPaymentCatalogLocked();
   return executeDelete(`BEGIN SP_TIPO_PAGO_DELETE(:id, :deleted); END;`, { id });
 }

@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArcElement, Chart as ChartJS, Legend, Tooltip } from 'chart.js';
-import { Pie } from 'react-chartjs-2';
+import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import { API_BASE } from '../config.js';
-
-ChartJS.register(ArcElement, Tooltip, Legend);
+import {
+  REPORT_PALETTE,
+  buildCartesianOptions,
+  buildDoughnutOptions,
+  buildLegendItems,
+  createCenterTextPlugin,
+  createVerticalGradient,
+  formatCurrency,
+  formatNumber,
+} from './reportChartUtils.js';
+import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -29,6 +37,18 @@ async function parseJsonSafe(res) {
   }
 }
 
+function clickedLabel(elements, chart) {
+  if (!elements?.length || !chart?.data?.labels?.length) return '';
+  return String(chart.data.labels[elements[0].index] || '');
+}
+
+function moraBucket(days) {
+  const value = Number(days || 0);
+  if (value <= 3) return '1-3 dias';
+  if (value <= 7) return '4-7 dias';
+  return '8+ dias';
+}
+
 export default function ReportesMembresiasClientesSection() {
   const initial = useMemo(() => defaultRange(), []);
   const [tab, setTab] = useState('mora');
@@ -41,11 +61,19 @@ export default function ReportesMembresiasClientesSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [filtroBusquedaMora, setFiltroBusquedaMora] = useState('');
+  const [filtroMoraBucket, setFiltroMoraBucket] = useState('');
+  const [filtroMesHistorial, setFiltroMesHistorial] = useState('');
+  const [filtroMetodoHistorial, setFiltroMetodoHistorial] = useState('');
 
   useEffect(() => {
-    // Limpia resultados al cambiar de subreporte para evitar residuos visuales.
     setError('');
     setData(null);
+    setEstadoFiltro('');
+    setFiltroBusquedaMora('');
+    setFiltroMoraBucket('');
+    setFiltroMesHistorial('');
+    setFiltroMetodoHistorial('');
   }, [tab]);
 
   const buscarClientes = async () => {
@@ -108,29 +136,142 @@ export default function ReportesMembresiasClientesSection() {
   const detalleEstadoFiltrado = (() => {
     const detalle = Array.isArray(data?.detalle) ? data.detalle : [];
     if (!estadoFiltro) return detalle;
-    return detalle.filter((r) => String(r.estadoActual || '').toLowerCase() === estadoFiltro.toLowerCase());
+    return detalle.filter((row) => String(row.estadoActual || '').toLowerCase() === estadoFiltro.toLowerCase());
   })();
 
   const pieDataEstado = {
-    labels: (data?.porEstado || []).map((x) => x.estadoTexto),
+    labels: (data?.porEstado || []).map((row) => row.estadoTexto),
     datasets: [
       {
-        data: (data?.porEstado || []).map((x) => Number(x.cantidad || 0)),
-        backgroundColor: (data?.porEstado || []).map((x) => x.color || '#64748b'),
+        data: (data?.porEstado || []).map((row) => Number(row.cantidad || 0)),
+        backgroundColor: (data?.porEstado || []).map((row) => row.color || REPORT_PALETTE.slate),
+        borderWidth: 0,
+        hoverOffset: 10,
       },
     ],
   };
 
-  const estadosOpciones = [...new Set((data?.detalle || []).map((x) => x.estadoActual).filter(Boolean))];
+  const estadosOpciones = [...new Set((data?.detalle || []).map((row) => row.estadoActual).filter(Boolean))];
+
+  const moraDetalle = useMemo(() => (Array.isArray(data?.detalle) ? data.detalle : []), [data]);
+  const moraTopData = {
+    labels: moraDetalle.slice(0, 8).map((row) => row.placa || row.nombreCompleto),
+    datasets: [
+      {
+        label: 'Dias en mora',
+        data: moraDetalle.slice(0, 8).map((row) => Number(row.diasMora || 0)),
+        borderRadius: 12,
+        borderSkipped: false,
+        maxBarThickness: 32,
+        backgroundColor(context) {
+          return createVerticalGradient(context.chart, '#fdba74', REPORT_PALETTE.orange);
+        },
+      },
+    ],
+  };
+
+  const moraBuckets = useMemo(() => {
+    const counts = new Map([
+      ['1-3 dias', 0],
+      ['4-7 dias', 0],
+      ['8+ dias', 0],
+    ]);
+    moraDetalle.forEach((row) => {
+      const bucket = moraBucket(row.diasMora);
+      counts.set(bucket, (counts.get(bucket) || 0) + 1);
+    });
+    return [...counts.entries()].map(([label, value]) => ({ label, value }));
+  }, [moraDetalle]);
+
+  const moraPieData = {
+    labels: moraBuckets.map((row) => row.label),
+    datasets: [
+      {
+        data: moraBuckets.map((row) => row.value),
+        backgroundColor: [REPORT_PALETTE.blue, REPORT_PALETTE.amber, REPORT_PALETTE.rose],
+        borderWidth: 0,
+        hoverOffset: 10,
+      },
+    ],
+  };
+
+  const moraFiltrada = moraDetalle.filter((row) => {
+    const s = filtroBusquedaMora.toLowerCase();
+    const matchText =
+      !s ||
+      row.nombreCompleto?.toLowerCase().includes(s) ||
+      row.placa?.toLowerCase().includes(s);
+    const matchBucket = !filtroMoraBucket || moraBucket(row.diasMora) === filtroMoraBucket;
+    return matchText && matchBucket;
+  });
+
+  const historial = useMemo(() => (Array.isArray(data?.historial) ? data.historial : []), [data]);
+  const historialPorMes = useMemo(() => {
+    const byMonth = new Map();
+    historial.forEach((row) => {
+      const key = row.mesCancelado || String(row.fechaPago || '').slice(0, 7) || 'Sin mes';
+      byMonth.set(key, (byMonth.get(key) || 0) + Number(row.montoPagado || 0));
+    });
+    return [...byMonth.entries()].map(([label, value]) => ({ label, value }));
+  }, [historial]);
+
+  const historialPorMetodo = useMemo(() => {
+    const byMethod = new Map();
+    historial.forEach((row) => {
+      const key = row.metodoPago || 'Sin metodo';
+      byMethod.set(key, (byMethod.get(key) || 0) + Number(row.montoPagado || 0));
+    });
+    return [...byMethod.entries()].map(([label, value]) => ({ label, value }));
+  }, [historial]);
+
+  const historialLineData = {
+    labels: historialPorMes.map((row) => row.label),
+    datasets: [
+      {
+        label: 'Total pagado',
+        data: historialPorMes.map((row) => row.value),
+        borderColor: REPORT_PALETTE.blue,
+        backgroundColor(context) {
+          const { chart } = context;
+          return createVerticalGradient(chart, 'rgba(37, 99, 235, 0.28)', 'rgba(37, 99, 235, 0.02)');
+        },
+        fill: true,
+        tension: 0.35,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#ffffff',
+        pointBorderColor: REPORT_PALETTE.blue,
+        pointBorderWidth: 2,
+      },
+    ],
+  };
+
+  const historialMetodoData = {
+    labels: historialPorMetodo.map((row) => row.label),
+    datasets: [
+      {
+        data: historialPorMetodo.map((row) => row.value),
+        backgroundColor: historialPorMetodo.map((_, index) => [REPORT_PALETTE.blue, REPORT_PALETTE.green, REPORT_PALETTE.amber, REPORT_PALETTE.violet][index % 4]),
+        borderWidth: 0,
+        hoverOffset: 10,
+      },
+    ],
+  };
+
+  const historialFiltrado = historial.filter((row) => {
+    const matchMes = !filtroMesHistorial || (row.mesCancelado || '').includes(filtroMesHistorial);
+    const matchMetodo = !filtroMetodoHistorial || row.metodoPago === filtroMetodoHistorial;
+    return matchMes && matchMetodo;
+  });
 
   return (
     <>
-      <div className="reporte-tabs" role="tablist" aria-label="Subreportes membresías y clientes">
+      <div className="reporte-tabs" role="tablist" aria-label="Subreportes membresias y clientes">
         <button type="button" role="tab" aria-selected={tab === 'mora'} className={`reporte-tab-btn${tab === 'mora' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('mora')}>
           Clientes con mora
         </button>
         <button type="button" role="tab" aria-selected={tab === 'estado'} className={`reporte-tab-btn${tab === 'estado' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('estado')}>
-          Estado de membresías
+          Estado de membresias
         </button>
         <button type="button" role="tab" aria-selected={tab === 'historial'} className={`reporte-tab-btn${tab === 'historial' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('historial')}>
           Historial pagos cliente
@@ -142,7 +283,7 @@ export default function ReportesMembresiasClientesSection() {
           {tab === 'mora'
             ? 'Reporte de clientes con mora'
             : tab === 'estado'
-              ? 'Reporte de membresías activas, suspendidas y vencidas'
+              ? 'Reporte de membresias activas, suspendidas y vencidas'
               : 'Reporte de historial de pagos por cliente'}
         </h2>
         <form
@@ -173,9 +314,9 @@ export default function ReportesMembresiasClientesSection() {
                 <span>Cliente</span>
                 <select value={cliId} onChange={(e) => setCliId(e.target.value)}>
                   <option value="">Seleccione</option>
-                  {candidatos.map((c) => (
-                    <option key={String(c.cliId)} value={String(c.cliId)}>
-                      {c.nombre}
+                  {candidatos.map((row) => (
+                    <option key={String(row.cliId)} value={String(row.cliId)}>
+                      {row.nombre}
                     </option>
                   ))}
                 </select>
@@ -184,7 +325,7 @@ export default function ReportesMembresiasClientesSection() {
           ) : null}
           <div className="reporte-inc-form__actions">
             <button type="submit" className="admin-btn-primary" disabled={loading || (tab === 'historial' && !cliId)}>
-              {loading ? 'Generando…' : 'Generar reporte'}
+              {loading ? 'Generando...' : 'Generar reporte'}
             </button>
             <button type="button" className="admin-btn-ghost" onClick={exportPdf} disabled={loading || (tab === 'historial' && !cliId)}>
               Exportar PDF
@@ -198,27 +339,90 @@ export default function ReportesMembresiasClientesSection() {
         <>
           {tab === 'mora' ? (
             <>
-              {!data.detalle?.length ? <p className="reporte-inc-empty">No hay registros disponibles.</p> : null}
-              {data.detalle?.length ? (
+              {!moraDetalle.length ? <p className="reporte-inc-empty">No hay registros disponibles.</p> : null}
+              {moraDetalle.length ? (
                 <>
                   <div className="admin-kpi-grid reporte-mov-kpi-grid" style={{ marginTop: '1rem' }}>
                     <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Clientes en mora</div><div className="admin-kpi-value">{data.totalClientesDistintos}</div></article>
-                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Monto pendiente</div><div className="admin-kpi-value">Q{Number(data.montoTotalReferencia || 0).toFixed(2)}</div></article>
+                    <article className="admin-kpi admin-kpi--spaces"><div className="admin-kpi-label">Monto pendiente</div><div className="admin-kpi-value">{formatCurrency(data.montoTotalReferencia)}</div></article>
                   </div>
+
+                  <div className="reporte-chart-grid">
+                    <ReportChartCard title="Top de cuentas con mayor mora" description="Haz clic en una barra para filtrar por placa.">
+                      <div className="reporte-chart-canvas reporte-chart-canvas--wide">
+                        <Bar
+                          data={moraTopData}
+                          options={buildCartesianOptions({
+                            showLegend: false,
+                            onClick: (_, elements, chart) => {
+                              const label = clickedLabel(elements, chart);
+                              if (label) setFiltroBusquedaMora(label);
+                            },
+                          })}
+                        />
+                      </div>
+                    </ReportChartCard>
+
+                    <ReportChartCard title="Severidad de la mora" description="Haz clic en un segmento para filtrar por rango de dias.">
+                      <div className="reporte-chart-split">
+                        <div className="reporte-chart-canvas reporte-chart-canvas--donut">
+                          <Doughnut
+                            data={moraPieData}
+                            options={buildDoughnutOptions({
+                              onClick: (_, elements, chart) => {
+                                const label = clickedLabel(elements, chart);
+                                if (label) setFiltroMoraBucket(label);
+                              },
+                            })}
+                            plugins={[
+                              createCenterTextPlugin([
+                                { text: formatNumber(data.totalClientesDistintos || 0) },
+                                { text: 'clientes', color: '#64748b' },
+                              ]),
+                            ]}
+                          />
+                        </div>
+                        <ReportLegend
+                          items={buildLegendItems(
+                            moraPieData.labels,
+                            moraPieData.datasets[0].data,
+                            moraPieData.datasets[0].backgroundColor
+                          )}
+                        />
+                      </div>
+                    </ReportChartCard>
+                  </div>
+
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de mora</h3>
+                    <div className="reporte-table-toolbar">
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Detalle de mora</h3>
+                      <div className="reporte-table-toolbar__controls">
+                        {filtroMoraBucket ? (
+                          <button type="button" className="admin-btn-ghost" onClick={() => setFiltroMoraBucket('')}>
+                            Rango: {filtroMoraBucket} x
+                          </button>
+                        ) : null}
+                        <input
+                          type="text"
+                          placeholder="Buscar cliente o placa..."
+                          value={filtroBusquedaMora}
+                          onChange={(e) => setFiltroBusquedaMora(e.target.value)}
+                          className="admin-input reporte-table-input"
+                        />
+                      </div>
+                    </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Cliente</th><th>Correo</th><th>Teléfono</th><th>Placa</th><th>Vencimiento</th><th>Días mora</th></tr></thead>
+                        <thead><tr><th>Cliente</th><th>Correo</th><th>Telefono</th><th>Placa</th><th>Vencimiento</th><th>Dias mora</th></tr></thead>
                         <tbody>
-                          {data.detalle.map((r) => (
-                            <tr key={String(r.memId)}>
-                              <td>{r.nombreCompleto}</td>
-                              <td>{r.correo}</td>
-                              <td>{r.telefono}</td>
-                              <td>{r.placa}</td>
-                              <td>{r.fechaVencimiento || '—'}</td>
-                              <td>{r.diasMora}</td>
+                          {moraFiltrada.map((row) => (
+                            <tr key={String(row.memId)}>
+                              <td>{row.nombreCompleto}</td>
+                              <td>{row.correo}</td>
+                              <td>{row.telefono}</td>
+                              <td>{row.placa}</td>
+                              <td>{row.fechaVencimiento || '—'}</td>
+                              <td>{row.diasMora}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -240,28 +444,57 @@ export default function ReportesMembresiasClientesSection() {
                     <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Suspendidas</div><div className="admin-kpi-value">{data.resumen?.suspendidas ?? 0}</div></article>
                     <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Vencidas</div><div className="admin-kpi-value">{data.resumen?.vencidas ?? 0}</div></article>
                   </div>
-                  <div className="reporte-inc-chart-wrap">
-                    <h3 className="reporte-inc-subtitle">Proporción por estado</h3>
-                    <div style={{ height: 260, maxWidth: 360 }}><Pie data={pieDataEstado} /></div>
+
+                  <div className="reporte-chart-grid reporte-chart-grid--single">
+                    <ReportChartCard title="Distribucion por estado" description="Haz clic en un segmento para filtrar la tabla.">
+                      <div className="reporte-chart-split">
+                        <div className="reporte-chart-canvas reporte-chart-canvas--donut">
+                          <Doughnut
+                            data={pieDataEstado}
+                            options={buildDoughnutOptions({
+                              onClick: (_, elements, chart) => {
+                                const label = clickedLabel(elements, chart);
+                                if (label) setEstadoFiltro(label);
+                              },
+                            })}
+                            plugins={[
+                              createCenterTextPlugin([
+                                { text: formatNumber(data.totalRegistros || data.detalle.length) },
+                                { text: 'membresias', color: '#64748b' },
+                              ]),
+                            ]}
+                          />
+                        </div>
+                        <ReportLegend
+                          items={buildLegendItems(
+                            pieDataEstado.labels,
+                            pieDataEstado.datasets[0].data,
+                            pieDataEstado.datasets[0].backgroundColor
+                          )}
+                        />
+                      </div>
+                    </ReportChartCard>
                   </div>
+
                   <section className="reporte-inc-card" style={{ marginTop: '0.5rem' }}>
                     <form className="reporte-inc-form" onSubmit={(e) => e.preventDefault()}>
                       <label className="reporte-inc-field"><span>Filtrar por estado</span>
                         <select value={estadoFiltro} onChange={(e) => setEstadoFiltro(e.target.value)}>
                           <option value="">Todos</option>
-                          {estadosOpciones.map((s) => <option key={s} value={s}>{s}</option>)}
+                          {estadosOpciones.map((state) => <option key={state} value={state}>{state}</option>)}
                         </select>
                       </label>
                     </form>
                   </section>
+
                   <div className="reporte-inc-table-wrap">
-                    <h3 className="reporte-inc-subtitle">Detalle de membresías</h3>
+                    <h3 className="reporte-inc-subtitle">Detalle de membresias</h3>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
                         <thead><tr><th>Cliente</th><th>Placa</th><th>Espacio</th><th>Inicio</th><th>Vencimiento</th><th>Estado</th></tr></thead>
                         <tbody>
-                          {detalleEstadoFiltrado.map((r) => (
-                            <tr key={String(r.memId)}><td>{r.clienteNombre}</td><td>{r.placa}</td><td>{r.espacioAsignado}</td><td>{r.fechaInicio || '—'}</td><td>{r.fechaVencimiento || '—'}</td><td>{r.estadoActual}</td></tr>
+                          {detalleEstadoFiltrado.map((row) => (
+                            <tr key={String(row.memId)}><td>{row.clienteNombre}</td><td>{row.placa}</td><td>{row.espacioAsignado}</td><td>{row.fechaInicio || '—'}</td><td>{row.fechaVencimiento || '—'}</td><td>{row.estadoActual}</td></tr>
                           ))}
                         </tbody>
                       </table>
@@ -274,12 +507,12 @@ export default function ReportesMembresiasClientesSection() {
 
           {tab === 'historial' ? (
             <>
-              {!data.historial?.length ? <p className="reporte-inc-empty">Este cliente no tiene historial de pagos.</p> : null}
+              {!historial.length ? <p className="reporte-inc-empty">Este cliente no tiene historial de pagos.</p> : null}
               <div className="admin-kpi-grid reporte-mov-kpi-grid" style={{ marginTop: '1rem' }}>
                 <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Cliente</div><div className="admin-kpi-value" style={{ fontSize: '1rem' }}>{data.cliente?.nombreCompleto || '—'}</div><div className="admin-kpi-hint">DPI: {data.cliente?.dpi || '—'}</div></article>
                 <article className="admin-kpi admin-kpi--spaces">
                   <div className="admin-kpi-label">
-                    {(Number(data.totalMembresiasActivas || 0) > 1) ? 'Membresías activas' : 'Membresía actual'}
+                    {(Number(data.totalMembresiasActivas || 0) > 1) ? 'Membresias activas' : 'Membresia actual'}
                   </div>
                   <div className="admin-kpi-value" style={{ fontSize: '1rem' }}>
                     {(Number(data.totalMembresiasActivas || 0) > 1)
@@ -290,22 +523,76 @@ export default function ReportesMembresiasClientesSection() {
                     <div className="admin-kpi-hint">Vence: {data.membresiaActual?.fechaVencimiento || '—'}</div>
                   )}
                 </article>
-                <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Total histórico</div><div className="admin-kpi-value">Q{Number(data.totalHistoricoPagado || 0).toFixed(2)}</div></article>
+                <article className="admin-kpi admin-kpi--alerts2"><div className="admin-kpi-label">Total historico</div><div className="admin-kpi-value">{formatCurrency(data.totalHistoricoPagado)}</div></article>
               </div>
+
+              {historial.length ? (
+                <>
+                  <div className="reporte-chart-grid">
+                    <ReportChartCard title="Linea historica de pagos" description="Haz clic en un punto para filtrar la tabla por mes cancelado.">
+                      <div className="reporte-chart-canvas reporte-chart-canvas--wide">
+                        <Line
+                          data={historialLineData}
+                          options={buildCartesianOptions({
+                            showLegend: false,
+                            numericFormatter: formatCurrency,
+                            onClick: (_, elements, chart) => {
+                              const label = clickedLabel(elements, chart);
+                              if (label) setFiltroMesHistorial(label);
+                            },
+                          })}
+                        />
+                      </div>
+                    </ReportChartCard>
+
+                    <ReportChartCard title="Monto por metodo de pago" description="Haz clic en un segmento para filtrar el detalle por metodo.">
+                      <div className="reporte-chart-split">
+                        <div className="reporte-chart-canvas reporte-chart-canvas--donut">
+                          <Doughnut
+                            data={historialMetodoData}
+                            options={buildDoughnutOptions({
+                              valueFormatter: formatCurrency,
+                              onClick: (_, elements, chart) => {
+                                const label = clickedLabel(elements, chart);
+                                if (label) setFiltroMetodoHistorial(label);
+                              },
+                            })}
+                            plugins={[
+                              createCenterTextPlugin([
+                                { text: formatCurrency(data.totalHistoricoPagado) },
+                                { text: 'historico', color: '#64748b' },
+                              ]),
+                            ]}
+                          />
+                        </div>
+                        <ReportLegend
+                          items={buildLegendItems(
+                            historialMetodoData.labels,
+                            historialMetodoData.datasets[0].data,
+                            historialMetodoData.datasets[0].backgroundColor,
+                            formatCurrency
+                          )}
+                        />
+                      </div>
+                    </ReportChartCard>
+                  </div>
+                </>
+              ) : null}
+
               {(Number(data.totalMembresiasActivas || 0) > 1) ? (
                 <div className="reporte-inc-table-wrap">
-                  <h3 className="reporte-inc-subtitle">Detalle de membresías activas</h3>
+                  <h3 className="reporte-inc-subtitle">Detalle de membresias activas</h3>
                   <div className="crudx-table-scroll">
                     <table className="crudx-table reporte-inc-table">
-                      <thead><tr><th>ID membresía</th><th>Placa</th><th>Fecha inicio</th><th>Fecha vencimiento</th><th>Estado</th></tr></thead>
+                      <thead><tr><th>ID membresia</th><th>Placa</th><th>Fecha inicio</th><th>Fecha vencimiento</th><th>Estado</th></tr></thead>
                       <tbody>
-                        {(data.membresiasActivas || []).map((m) => (
-                          <tr key={String(m.memId)}>
-                            <td>{m.memId}</td>
-                            <td>{m.placa || '—'}</td>
-                            <td>{m.fechaInicio || '—'}</td>
-                            <td>{m.fechaVencimiento || '—'}</td>
-                            <td>{m.estado || '—'}</td>
+                        {(data.membresiasActivas || []).map((row) => (
+                          <tr key={String(row.memId)}>
+                            <td>{row.memId}</td>
+                            <td>{row.placa || '—'}</td>
+                            <td>{row.fechaInicio || '—'}</td>
+                            <td>{row.fechaVencimiento || '—'}</td>
+                            <td>{row.estado || '—'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -313,15 +600,30 @@ export default function ReportesMembresiasClientesSection() {
                   </div>
                 </div>
               ) : null}
-              {data.historial?.length ? (
+
+              {historial.length ? (
                 <div className="reporte-inc-table-wrap">
-                  <h3 className="reporte-inc-subtitle">Historial de pagos</h3>
+                  <div className="reporte-table-toolbar">
+                    <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Historial de pagos</h3>
+                    <div className="reporte-table-toolbar__controls">
+                      {filtroMesHistorial ? (
+                        <button type="button" className="admin-btn-ghost" onClick={() => setFiltroMesHistorial('')}>
+                          Mes: {filtroMesHistorial} x
+                        </button>
+                      ) : null}
+                      {filtroMetodoHistorial ? (
+                        <button type="button" className="admin-btn-ghost" onClick={() => setFiltroMetodoHistorial('')}>
+                          Metodo: {filtroMetodoHistorial} x
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                   <div className="crudx-table-scroll">
                     <table className="crudx-table reporte-inc-table">
-                      <thead><tr><th>Fecha pago</th><th>Placa</th><th>Monto</th><th>Método pago</th><th>Mes cancelado</th></tr></thead>
+                      <thead><tr><th>Fecha pago</th><th>Placa</th><th>Monto</th><th>Metodo pago</th><th>Mes cancelado</th></tr></thead>
                       <tbody>
-                        {data.historial.map((r) => (
-                          <tr key={String(r.id)}><td>{r.fechaPago ? new Date(r.fechaPago).toLocaleString('es-GT') : '—'}</td><td>{r.placa || '—'}</td><td>Q{Number(r.montoPagado || 0).toFixed(2)}</td><td>{r.metodoPago}</td><td>{r.mesCancelado}</td></tr>
+                        {historialFiltrado.map((row) => (
+                          <tr key={String(row.id)}><td>{row.fechaPago ? new Date(row.fechaPago).toLocaleString('es-GT') : '—'}</td><td>{row.placa || '—'}</td><td>{formatCurrency(row.montoPagado)}</td><td>{row.metodoPago}</td><td>{row.mesCancelado}</td></tr>
                         ))}
                       </tbody>
                     </table>
