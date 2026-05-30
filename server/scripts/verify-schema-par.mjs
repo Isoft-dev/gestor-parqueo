@@ -18,6 +18,9 @@ oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 /** Tablas y PK esperadas según PAR_ENTIDADES.sql (GENERATED ALWAYS AS IDENTITY en la PK). */
 const EXPECTED_IDENTITY_PK = [
   ['PAR_TIPO_VEHICULO', 'TVE_ID'],
+  ['PAR_MARCA_VEHICULO', 'MAR_ID'],
+  ['PAR_COLOR_VEHICULO', 'COL_ID'],
+  ['PAR_MODELO_VEHICULO', 'MOD_ID'],
   ['PAR_CLIENTE', 'CLI_ID'],
   ['PAR_VEHICULO', 'VEH_ID'],
   ['PAR_ESTADO_TICKET', 'ETI_ID'],

@@ -20,6 +20,16 @@ function isOcupadoState(s) {
   return x.includes('ocup') || x.includes('busy') || x.includes('used');
 }
 
+function isPastDateValue(value) {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const today = new Date();
+  const current = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return current.getTime() > target.getTime();
+}
+
 function pick(row, ...names) {
   if (!row) return undefined;
   for (const n of names) {
@@ -60,6 +70,7 @@ export function useAdminDashboard() {
     alertasPendientes: null,
     membresiasActivas: null,
     membresiasSuspendidas: null,
+    membresiasVencidas: null,
     ultimasAlertas: [],
   });
   const [loading, setLoading] = useState(true);
@@ -123,15 +134,21 @@ export function useAdminDashboard() {
 
       let memAct = 0;
       let memSusp = 0;
+      let memVenc = 0;
       let reservadosOcupados = 0;
       let membresiasActivasConEspacio = 0;
       for (const m of membresias) {
         const estadoLabel =
           norm(pick(m, 'EME_ESTADO')) || estadoMembresiaPorId[pick(m, 'EME_ID')] || '';
         const suspendida = estadoLabel.includes('suspend') || estadoLabel.includes('inactiv');
+        const vencida = estadoLabel.includes('venc') || isPastDateValue(pick(m, 'MEM_FECHA_VENCIMIENTO'));
 
         if (suspendida) {
           memSusp += 1;
+          continue;
+        }
+        if (vencida) {
+          memVenc += 1;
           continue;
         }
 
@@ -163,6 +180,7 @@ export function useAdminDashboard() {
         alertasPendientes: pendientesAtencion,
         membresiasActivas: memAct,
         membresiasSuspendidas: memSusp,
+        membresiasVencidas: memVenc,
         ultimasAlertas,
       });
       setUpdatedAt(new Date());

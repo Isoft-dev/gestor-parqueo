@@ -123,20 +123,24 @@ async function tipoNotificacionSuspensionId() {
   return id;
 }
 
+async function estadoMembresiaVencidaId() {
+  const rows = await executeSql(
+    `SELECT EME_ID FROM PAR_ESTADO_MEMBRESIA
+      WHERE LOWER(EME_ESTADO) LIKE '%venc%'
+      ORDER BY EME_ID FETCH FIRST 1 ROW ONLY`,
+  );
+  return rows[0]?.EME_ID ?? rows[0]?.eme_id ?? null;
+}
+
 /**
- * Suspender membresías cuyo periodo ya venció (día calendario siguiente a MEM_FECHA_VENCIMIENTO)
+ * Marcar como vencidas las membresías cuyo periodo ya venció
  * sin un pago registrado que cubra la vigencia (pago con fecha >= vencimiento).
  * El ingreso con tag queda bloqueado hasta renovar en máquina de cobro («Pagar membresía»).
  */
 export async function suspendMembershipsOverdue() {
-  const suspRows = await executeSql(
-    `SELECT EME_ID FROM PAR_ESTADO_MEMBRESIA
-      WHERE LOWER(EME_ESTADO) LIKE '%suspend%'
-      ORDER BY EME_ID FETCH FIRST 1 ROW ONLY`,
-  );
-  const suspId = suspRows[0]?.EME_ID ?? suspRows[0]?.eme_id;
-  if (suspId == null) {
-    return { ok: false, reason: 'Sin estado «suspendido» en PAR_ESTADO_MEMBRESIA' };
+  const vencidaId = await estadoMembresiaVencidaId();
+  if (vencidaId == null) {
+    return { ok: false, reason: 'Sin estado «vencida» en PAR_ESTADO_MEMBRESIA' };
   }
 
   const dispRows = await executeSql(
@@ -147,10 +151,19 @@ export async function suspendMembershipsOverdue() {
   const disponibleEesId = dispRows[0]?.EES_ID ?? dispRows[0]?.ees_id;
 
   const candidatos = await executeSql(
-    `SELECT m.MEM_ID
-       FROM PAR_MEMBRESIA m
-      WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
-        AND m.EME_ID <> :suspId
+      `SELECT m.MEM_ID
+         FROM PAR_MEMBRESIA m
+        WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
+        AND m.EME_ID <> :vencidaId
+        AND NOT EXISTS (
+          SELECT 1
+            FROM PAR_ESTADO_MEMBRESIA em
+           WHERE em.EME_ID = m.EME_ID
+             AND (
+               LOWER(em.EME_ESTADO) LIKE '%suspend%'
+               OR LOWER(em.EME_ESTADO) LIKE '%inactiv%'
+             )
+        )
         AND NOT EXISTS (
           SELECT 1
             FROM PAR_DETALLE_PAGO_MEMBRESIA dpm
@@ -158,15 +171,24 @@ export async function suspendMembershipsOverdue() {
            WHERE dpm.MEM_ID = m.MEM_ID
              AND p.PAG_FECHA_HORA >= m.MEM_FECHA_VENCIMIENTO
         )`,
-    { suspId },
+    { vencidaId },
   );
 
   await executeSql(
     `UPDATE PAR_MEMBRESIA m
-        SET EME_ID = :suspId,
+        SET EME_ID = :vencidaId,
             MEM_FECHA_ULTIMO_CAMBIO_ESTADO = SYSDATE
       WHERE TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
-        AND m.EME_ID <> :suspId
+        AND m.EME_ID <> :vencidaId
+        AND NOT EXISTS (
+          SELECT 1
+            FROM PAR_ESTADO_MEMBRESIA em
+           WHERE em.EME_ID = m.EME_ID
+             AND (
+               LOWER(em.EME_ESTADO) LIKE '%suspend%'
+               OR LOWER(em.EME_ESTADO) LIKE '%inactiv%'
+             )
+        )
         AND NOT EXISTS (
           SELECT 1
             FROM PAR_DETALLE_PAGO_MEMBRESIA dpm
@@ -174,7 +196,7 @@ export async function suspendMembershipsOverdue() {
            WHERE dpm.MEM_ID = m.MEM_ID
              AND p.PAG_FECHA_HORA >= m.MEM_FECHA_VENCIMIENTO
         )`,
-    { suspId },
+    { vencidaId },
     { autoCommit: true },
   );
 
@@ -185,10 +207,10 @@ export async function suspendMembershipsOverdue() {
         WHERE EXISTS (
           SELECT 1 FROM PAR_MEMBRESIA m
            WHERE m.ESP_ID = e.ESP_ID
-             AND m.EME_ID = :suspId
+             AND m.EME_ID = :vencidaId
              AND TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
         )`,
-      { ees: disponibleEesId, suspId },
+      { ees: disponibleEesId, vencidaId },
       { autoCommit: true },
     );
   }
@@ -208,8 +230,8 @@ export async function suspendMembershipsOverdue() {
       );
       const to = rowsCliente[0]?.CLI_CORREO ?? rowsCliente[0]?.cli_correo;
       const nombre = rowsCliente[0]?.CLI_PRIMER_NOMBRE ?? rowsCliente[0]?.cli_primer_nombre ?? '';
-      const asuntoSusp = 'Membresía suspendida por vencimiento';
-      const cuerpoSusp = `Hola ${nombre}, tu membresía (MEM_ID ${memId}) quedó suspendida por vencimiento del periodo pagado. Puedes renovarla en la máquina de cobro (opción Pagar membresía) o en recepción.`;
+      const asuntoSusp = 'Membresía vencida por expiración del periodo';
+      const cuerpoSusp = `Hola ${nombre}, tu membresía (MEM_ID ${memId}) quedó vencida al finalizar el periodo pagado. Puedes renovarla en la máquina de cobro (opción Pagar membresía) o en recepción.`;
       let exito = 0;
       try {
         if (to) {
@@ -223,7 +245,7 @@ export async function suspendMembershipsOverdue() {
       } catch (mailErr) {
         exito = 0;
         await insertSystemAlerta({
-          motivo: 'Fallo correo suspensión membresía',
+          motivo: 'Fallo correo vencimiento membresía',
           descripcion: `MEM_ID ${memId}: ${mailErr?.message || mailErr}`,
         });
       }
@@ -239,13 +261,13 @@ export async function suspendMembershipsOverdue() {
       });
     } catch (e) {
       await insertSystemAlerta({
-        motivo: 'Error notificación suspensión',
+        motivo: 'Error notificación vencimiento',
         descripcion: `MEM_ID ${memId}: ${e?.message || e}`,
       });
     }
   }
 
-  return { ok: true, suspendidas: candidatos.length };
+  return { ok: true, vencidas: candidatos.length, suspendidas: 0 };
 }
 
 /**

@@ -5,7 +5,10 @@ import ReportesOperativosMaquinasSection from './ReportesOperativosMaquinasSecti
 import ReportesFinancierosSection from './ReportesFinancierosSection.jsx';
 import ReportesMembresiasClientesSection from './ReportesMembresiasClientesSection.jsx';
 import ReportesAfluenciaSection from './ReportesAfluenciaSection.jsx';
+import ReportesPerfilFlotaSection from './ReportesPerfilFlotaSection.jsx';
+import ReportesAnalisisFlotaSection from './ReportesAnalisisFlotaSection.jsx';
 import HelpHint from '../components/HelpHint.jsx';
+import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
 import {
   REPORT_PALETTE,
   buildCartesianOptions,
@@ -15,8 +18,14 @@ import {
   createHorizontalGradient,
   createVerticalGradient,
   formatNumber,
+  clickedLabel,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
+import { descargarExcel, hojaResumen } from './reportExcelUtils.js';
+import { ReportFilterProvider, useReportFilter } from './ReportFilterContext.jsx';
+import GlobalSlicerBar from './GlobalSlicerBar.jsx';
+import ReportesDashboard from './ReportesDashboard.jsx';
+import SavedViews from './SavedViews.jsx';
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -42,21 +51,35 @@ async function parseJsonSafe(res) {
   }
 }
 
-function clickedLabel(elements, chart) {
-  if (!elements?.length || !chart?.data?.labels?.length) return '';
-  return String(chart.data.labels[elements[0].index] || '');
-}
 
 function dateOnly(value) {
   return typeof value === 'string' ? value.slice(0, 10) : '';
 }
 
-export default function ReportesPage() {
-  const initial = useMemo(() => defaultRange(), []);
-  const [seccion, setSeccion] = useState('movimiento');
-  const [tabMov, setTabMov] = useState('frecuencia');
-  const [desde, setDesde] = useState(initial.desde);
-  const [hasta, setHasta] = useState(initial.hasta);
+const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const HORAS_DIA = Array.from({ length: 24 }, (_, i) => i);
+const REPORT_SECTION_CARDS = [
+  { id: 'movimiento', badge: 'MOV', eyebrow: 'Flujo vehicular', label: 'Movimiento vehicular', summary: 'Frecuencia de visitas, entradas, salidas y estadia por rangos de fecha.', traits: ['Fechas', 'Placa', 'Horas'], icon: 'car', tone: 'ocean' },
+  { id: 'operativos', badge: 'OPS', eyebrow: 'Maquinas', label: 'Reportes operativos', summary: 'Alertas, mantenimientos, recargas e incidentes por maquina o estado.', traits: ['Maquina', 'Estado', 'Tipo'], icon: 'machine', tone: 'steel' },
+  { id: 'financieros', badge: 'FIN', eyebrow: 'Ingresos', label: 'Reportes financieros', summary: 'Cobros, pagos de membresia e ingresos por tipo de cliente.', traits: ['Rango', 'Metodo', 'PDF'], icon: 'money', tone: 'mint' },
+  { id: 'membresias_clientes', badge: 'MEM', eyebrow: 'Clientes', label: 'Membresias y clientes', summary: 'Mora, estados de membresia e historial de pagos por cliente.', traits: ['Mora', 'Estado', 'Cliente'], icon: 'users', tone: 'sunset' },
+  { id: 'afluencia', badge: 'AFL', eyebrow: 'Demanda', label: 'Afluencia', summary: 'Volumen de visitas por hora, dia, semana, mes o resumen anual.', traits: ['Hora', 'Dia', 'Anual'], icon: 'calendar', tone: 'ocean' },
+  { id: 'perfil_flota', badge: 'PER', eyebrow: 'Perfil', label: 'Perfil de flota', summary: 'Mapa de calor y distribucion geografica para entender patrones de uso.', traits: ['Heatmap', 'Geografia', 'Clientes'], icon: 'map', tone: 'mint' },
+  { id: 'analisis_flota', badge: 'MAR', eyebrow: 'Marcas', label: 'Analisis de marcas', summary: 'Marcas, modelos, colores y horarios con filtros cruzados.', traits: ['Marca', 'Modelo', 'Hora'], icon: 'brand', tone: 'sunset' },
+];
+
+const MOVEMENT_REPORT_CARDS = [
+  { id: 'frecuencia', badge: 'TOP', eyebrow: 'Visitas', label: 'Vehiculos frecuentes', summary: 'Identifica las placas con mas visitas y filtra por tipo, marca, color o fecha.', traits: ['Placa', 'Marca', 'Color'], icon: 'car', tone: 'ocean' },
+  { id: 'entradas_salidas', badge: 'E/S', eyebrow: 'Flujo', label: 'Entradas y salidas', summary: 'Compara volumen de ingresos y egresos por dia u hora dentro del rango.', traits: ['Dia', 'Hora', 'Tipo'], icon: 'clock', tone: 'mint' },
+  { id: 'tiempo_estadia', badge: 'TMP', eyebrow: 'Estadia', label: 'Tiempo promedio', summary: 'Revisa permanencia promedio y detecta vehiculos o tipos con mayor estadia.', traits: ['Promedio', 'Placa', 'Dia'], icon: 'chart', tone: 'sunset' },
+];
+
+function ReportesPageContent() {
+  const [seccion, setSeccion] = useState('');
+  const { filtros, setFiltro, limpiarDimensiones } = useReportFilter();
+  const desde = filtros.desde;
+  const hasta = filtros.hasta;
+  const [tabMov, setTabMov] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dataByTab, setDataByTab] = useState({
@@ -66,9 +89,13 @@ export default function ReportesPage() {
   });
 
   const [filtroPlaca, setFiltroPlaca] = useState('');
-  const [filtroTipoCliente, setFiltroTipoCliente] = useState('Todos');
+  const [filtroMarca, setFiltroMarca] = useState('Todos');
+  const [filtroColor, setFiltroColor] = useState('Todos');
   const [filtroDia, setFiltroDia] = useState('');
   const [filtroFechaFlujo, setFiltroFechaFlujo] = useState('');
+  const [filtroHoraIni, setFiltroHoraIni] = useState('');
+  const [filtroHoraFin, setFiltroHoraFin] = useState('');
+  const [filtroDiaSemana, setFiltroDiaSemana] = useState('Todos');
 
   const data = dataByTab[tabMov];
 
@@ -80,9 +107,14 @@ export default function ReportesPage() {
       tiempo_estadia: null,
     });
     setFiltroPlaca('');
-    setFiltroTipoCliente('Todos');
+    setFiltroMarca('Todos');
+    setFiltroColor('Todos');
     setFiltroDia('');
     setFiltroFechaFlujo('');
+    setFiltroHoraIni('');
+    setFiltroHoraFin('');
+    setFiltroDiaSemana('Todos');
+    limpiarDimensiones();
   }, [tabMov, seccion]);
 
   const generar = async () => {
@@ -90,7 +122,10 @@ export default function ReportesPage() {
     setLoading(true);
     setDataByTab((prev) => ({ ...prev, [tabMov]: null }));
     try {
-      const q = new URLSearchParams({ desde, hasta });
+      const extras = {};
+      if (filtros.tipoVehiculo !== 'Todos') extras.tipoVehiculo = filtros.tipoVehiculo;
+      if (filtros.tipoCliente  !== 'Todos') extras.tipoCliente  = filtros.tipoCliente;
+      const q = new URLSearchParams({ desde, hasta, ...extras });
       const pathByTab = {
         frecuencia: '/reportes/movimiento-vehicular/frecuencia',
         entradas_salidas: '/reportes/movimiento-vehicular/entradas-salidas',
@@ -108,13 +143,112 @@ export default function ReportesPage() {
   };
 
   const exportarPdf = () => {
-    const q = new URLSearchParams({ desde, hasta });
+    const extras = {};
+    if (filtros.tipoVehiculo !== 'Todos') extras.tipoVehiculo = filtros.tipoVehiculo;
+    if (filtros.tipoCliente  !== 'Todos') extras.tipoCliente  = filtros.tipoCliente;
+    const q = new URLSearchParams({ desde, hasta, ...extras });
     const pathByTab = {
       frecuencia: '/reportes/movimiento-vehicular/frecuencia/pdf',
       entradas_salidas: '/reportes/movimiento-vehicular/entradas-salidas/pdf',
       tiempo_estadia: '/reportes/movimiento-vehicular/tiempo-estadia/pdf',
     };
     window.open(`${API_BASE}${pathByTab[tabMov]}?${q}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const exportarExcel = async () => {
+    if (!data) return;
+    setError('');
+    try {
+      const rango = `${desde} a ${hasta}`;
+      if (tabMov === 'frecuencia') {
+        const columnas = [
+          { key: 'placa', header: 'Placa' },
+          { key: 'marca', header: 'Marca' },
+          { key: 'modelo', header: 'Modelo' },
+          { key: 'tipoVehiculo', header: 'Tipo de vehículo' },
+          { key: 'color', header: 'Color' },
+          { key: 'tipoCliente', header: 'Tipo de cliente' },
+          { key: 'visitas', header: 'Visitas' },
+        ];
+        await descargarExcel({
+          nombreArchivo: `reporte-vehiculos-frecuencia-${desde}-${hasta}`,
+          hojas: [
+            hojaResumen('Resumen', [
+              { etiqueta: 'Reporte', valor: 'Vehículos más frecuentes' },
+              { etiqueta: 'Rango de fechas', valor: rango },
+              { etiqueta: 'Vehículos en el rango', valor: data.totalVehiculos ?? 0 },
+            ]),
+            { nombre: 'Top 10', filas: Array.isArray(data.top10) ? data.top10 : [], columnas },
+            { nombre: 'Detalle', filas: Array.isArray(data.detalle) ? data.detalle : [], columnas },
+          ],
+        });
+      } else if (tabMov === 'entradas_salidas') {
+        await descargarExcel({
+          nombreArchivo: `reporte-entradas-salidas-${desde}-${hasta}`,
+          hojas: [
+            hojaResumen('Resumen', [
+              { etiqueta: 'Reporte', valor: 'Entradas y salidas' },
+              { etiqueta: 'Rango de fechas', valor: rango },
+              { etiqueta: 'Total entradas', valor: data.totalEntradas ?? 0 },
+              { etiqueta: 'Total salidas', valor: data.totalSalidas ?? 0 },
+              { etiqueta: 'Total registros', valor: data.totalRegistros ?? 0 },
+            ]),
+            {
+              nombre: 'Detalle',
+              filas: Array.isArray(data.detalle) ? data.detalle : [],
+              columnas: [
+                { key: 'tipoCliente', header: 'Tipo de cliente' },
+                { key: 'referencia', header: 'Referencia' },
+                { key: 'placa', header: 'Placa' },
+                { key: 'tipoVehiculo', header: 'Tipo de vehículo' },
+                { key: 'horaEntrada', header: 'Hora de entrada' },
+                { key: 'horaSalida', header: 'Hora de salida' },
+                { key: 'tiempoEstadia', header: 'Tiempo de estadía' },
+                { key: 'estadoTicket', header: 'Estado' },
+              ],
+            },
+          ],
+        });
+      } else if (tabMov === 'tiempo_estadia') {
+        const hojas = [
+          hojaResumen('Resumen', [
+            { etiqueta: 'Reporte', valor: 'Tiempo promedio de estadía' },
+            { etiqueta: 'Rango de fechas', valor: rango },
+            { etiqueta: 'Promedio general', valor: data.promedioGeneral?.etiqueta ?? '—' },
+            { etiqueta: 'Máximo', valor: data.maximo?.etiqueta ?? '—' },
+            { etiqueta: 'Mínimo', valor: data.minimo?.etiqueta ?? '—' },
+            { etiqueta: 'Total registros', valor: data.totalRegistros ?? 0 },
+          ]),
+          {
+            nombre: 'Por día de la semana',
+            filas: Array.isArray(data.promedioPorDiaSemana) ? data.promedioPorDiaSemana : [],
+            columnas: [
+              { key: 'diaSemana', header: 'Día' },
+              { key: 'promedioEtiqueta', header: 'Promedio' },
+              { key: 'promedioMinutos', header: 'Promedio (min)' },
+              { key: 'cantidadRegistros', header: 'Registros' },
+            ],
+          },
+        ];
+        if (Array.isArray(data.promedioPorTipoVehiculo) && data.promedioPorTipoVehiculo.length) {
+          hojas.push({
+            nombre: 'Por tipo de vehículo',
+            filas: data.promedioPorTipoVehiculo,
+            columnas: [
+              { key: 'tipo', header: 'Tipo de vehículo' },
+              { key: 'promedioEtiqueta', header: 'Promedio' },
+              { key: 'cantidadRegistros', header: 'Registros' },
+            ],
+          });
+        }
+        await descargarExcel({
+          nombreArchivo: `reporte-tiempo-estadia-${desde}-${hasta}`,
+          hojas,
+        });
+      }
+    } catch (e) {
+      setError(e.message || 'No se pudo exportar a Excel.');
+    }
   };
 
   const topFrecuencia = useMemo(() => (Array.isArray(data?.top10) ? data.top10 : []), [data]);
@@ -128,10 +262,25 @@ export default function ReportesPage() {
     return [...byTipo.entries()].map(([label, value]) => ({ label, value }));
   }, [detalleFrecuencia]);
 
-  const filasFrecuencia = topFrecuencia.filter((row) => {
+  const tiposVehiculoFrecuencia = useMemo(() => {
+    const s = new Set(detalleFrecuencia.map((r) => r.tipoVehiculo).filter(Boolean));
+    return [...s].sort();
+  }, [detalleFrecuencia]);
+  const marcasFrecuencia = useMemo(() => {
+    const s = new Set(detalleFrecuencia.map((r) => r.marca).filter(Boolean));
+    return [...s].sort();
+  }, [detalleFrecuencia]);
+  const coloresFrecuencia = useMemo(() => {
+    const s = new Set(detalleFrecuencia.map((r) => r.color).filter((c) => c && c !== '—'));
+    return [...s].sort();
+  }, [detalleFrecuencia]);
+  const filasFrecuencia = detalleFrecuencia.filter((row) => {
     const matchPlaca = row.placa?.toLowerCase().includes(filtroPlaca.toLowerCase());
-    const matchTipo = filtroTipoCliente === 'Todos' || row.tipoCliente === filtroTipoCliente;
-    return matchPlaca && matchTipo;
+    const matchTipo = filtros.tipoCliente === 'Todos' || row.tipoCliente === filtros.tipoCliente;
+    const matchTipoV = filtros.tipoVehiculo === 'Todos' || row.tipoVehiculo === filtros.tipoVehiculo;
+    const matchMarca = filtroMarca === 'Todos' || row.marca === filtroMarca;
+    const matchColor = filtroColor === 'Todos' || row.color === filtroColor;
+    return matchPlaca && matchTipo && matchTipoV && matchMarca && matchColor;
   });
 
   const frecuenciaBarData = {
@@ -243,14 +392,42 @@ export default function ReportesPage() {
     ],
   };
 
+  const tiposVehiculoFlujo = useMemo(() => {
+    const rows = Array.isArray(data?.detalle) ? data.detalle : [];
+    const s = new Set(rows.map((r) => r.tipoVehiculo).filter(Boolean));
+    return [...s].sort();
+  }, [data]);
+  const flujoHoraLo =
+    filtroHoraIni !== '' && filtroHoraFin !== ''
+      ? Math.min(Number(filtroHoraIni), Number(filtroHoraFin))
+      : filtroHoraIni !== ''
+        ? Number(filtroHoraIni)
+        : null;
+  const flujoHoraHi =
+    filtroHoraIni !== '' && filtroHoraFin !== ''
+      ? Math.max(Number(filtroHoraIni), Number(filtroHoraFin))
+      : filtroHoraFin !== ''
+        ? Number(filtroHoraFin)
+        : null;
   const filasFlujo = (Array.isArray(data?.detalle) ? data.detalle : []).filter((row) => {
     const matchPlaca = row.placa?.toLowerCase().includes(filtroPlaca.toLowerCase());
-    const matchTipo = filtroTipoCliente === 'Todos' || row.tipoCliente === filtroTipoCliente;
+    const matchTipo = filtros.tipoCliente === 'Todos' || row.tipoCliente === filtros.tipoCliente;
+    const matchTipoV = filtros.tipoVehiculo === 'Todos' || row.tipoVehiculo === filtros.tipoVehiculo;
     const matchFecha =
       !filtroFechaFlujo ||
       dateOnly(row.horaEntrada) === filtroFechaFlujo ||
       dateOnly(row.horaSalida) === filtroFechaFlujo;
-    return matchPlaca && matchTipo && matchFecha;
+    const entradaDate = row.horaEntrada ? new Date(row.horaEntrada) : null;
+    const entradaValida = Boolean(entradaDate) && !Number.isNaN(entradaDate.getTime());
+    const horaEntrada = entradaValida ? entradaDate.getHours() : null;
+    const matchHora =
+      horaEntrada == null ||
+      ((flujoHoraLo == null || horaEntrada >= flujoHoraLo) &&
+        (flujoHoraHi == null || horaEntrada <= flujoHoraHi));
+    const matchDiaSemana =
+      filtroDiaSemana === 'Todos' ||
+      (entradaValida && DIAS_SEMANA[entradaDate.getDay()] === filtroDiaSemana);
+    return matchPlaca && matchTipo && matchTipoV && matchFecha && matchHora && matchDiaSemana;
   });
 
   const tiempoRows = Array.isArray(data?.promedioPorDiaSemana) ? data.promedioPorDiaSemana : [];
@@ -314,39 +491,41 @@ export default function ReportesPage() {
         </div>
       </header>
 
-      <div className="reporte-tabs" role="tablist" aria-label="Secciones de reportes">
-        <button type="button" role="tab" aria-selected={seccion === 'movimiento'} className={`reporte-tab-btn${seccion === 'movimiento' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('movimiento')}>
-          1) Movimiento vehicular
-        </button>
-        <button type="button" role="tab" aria-selected={seccion === 'operativos'} className={`reporte-tab-btn${seccion === 'operativos' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('operativos')}>
-          2) Reportes operativos de maquinas
-        </button>
-        <button type="button" role="tab" aria-selected={seccion === 'financieros'} className={`reporte-tab-btn${seccion === 'financieros' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('financieros')}>
-          3) Reportes financieros
-        </button>
-        <button type="button" role="tab" aria-selected={seccion === 'membresias_clientes'} className={`reporte-tab-btn${seccion === 'membresias_clientes' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('membresias_clientes')}>
-          4) Membresias y clientes
-        </button>
-        <button type="button" role="tab" aria-selected={seccion === 'afluencia'} className={`reporte-tab-btn${seccion === 'afluencia' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setSeccion('afluencia')}>
-          5) Reporte de afluencia
-        </button>
-      </div>
+      <GlobalSlicerBar onGenerar={seccion === 'movimiento' && tabMov ? generar : undefined} loading={loading} seccion={seccion} />
+
+      <SavedViews />
+
+      <ReportesDashboard />
+
+      {!seccion ? (
+        <ReportCardMenu
+          ariaLabel="Secciones de reportes"
+          items={REPORT_SECTION_CARDS}
+          onSelect={(id) => {
+            setSeccion(id);
+            setTabMov('');
+          }}
+        />
+      ) : null}
 
       {seccion === 'movimiento' ? (
         <>
-          <div className="reporte-tabs" role="tablist" aria-label="Reportes de movimiento vehicular">
-            <button type="button" role="tab" aria-selected={tabMov === 'frecuencia'} className={`reporte-tab-btn${tabMov === 'frecuencia' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTabMov('frecuencia')}>
-              Vehiculos frecuentes
-            </button>
-            <button type="button" role="tab" aria-selected={tabMov === 'entradas_salidas'} className={`reporte-tab-btn${tabMov === 'entradas_salidas' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTabMov('entradas_salidas')}>
-              Entradas y salidas
-            </button>
-            <button type="button" role="tab" aria-selected={tabMov === 'tiempo_estadia'} className={`reporte-tab-btn${tabMov === 'tiempo_estadia' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTabMov('tiempo_estadia')}>
-              Tiempo promedio de estadia
-            </button>
-          </div>
+          <ReportDetailNav
+            eyebrow="Reportes"
+            title="Movimiento vehicular"
+            backLabel="Volver a reportes"
+            onBack={() => {
+              setSeccion('');
+              setTabMov('');
+            }}
+          />
+          <ReportCardMenu
+            ariaLabel="Reportes de movimiento vehicular"
+            items={MOVEMENT_REPORT_CARDS}
+            onSelect={setTabMov}
+          />
 
-          <section className="reporte-inc-card">
+          {tabMov ? <section className="reporte-inc-card">
             <h2 className="reporte-inc-card__title">
               {tabMov === 'frecuencia'
                 ? 'Reporte de vehiculos con mayor frecuencia de visitas'
@@ -361,14 +540,6 @@ export default function ReportesPage() {
                 generar();
               }}
             >
-              <label className="reporte-inc-field">
-                <span>Fecha inicio</span>
-                <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
-              </label>
-              <label className="reporte-inc-field">
-                <span>Fecha fin</span>
-                <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required />
-              </label>
               <div className="reporte-inc-form__actions">
                 <button type="submit" className="admin-btn-primary" disabled={loading}>
                   {loading ? 'Generando...' : 'Generar reporte'}
@@ -376,9 +547,12 @@ export default function ReportesPage() {
                 <button type="button" className="admin-btn-ghost" onClick={exportarPdf} disabled={loading || !desde || !hasta}>
                   Exportar PDF
                 </button>
+                <button type="button" className="admin-btn-ghost" onClick={exportarExcel} disabled={loading || !data}>
+                  Exportar Excel
+                </button>
               </div>
             </form>
-          </section>
+          </section> : null}
 
           {error ? (
             <div className="admin-banner admin-banner--error" role="alert">
@@ -397,8 +571,8 @@ export default function ReportesPage() {
                       <div className="admin-kpi-value">{data.totalVehiculos}</div>
                     </article>
                     <article className="admin-kpi admin-kpi--alerts2">
-                      <div className="admin-kpi-label">Top destacados</div>
-                      <div className="admin-kpi-value">{Math.min(10, topFrecuencia.length)}</div>
+                      <div className="admin-kpi-label">Total vehículos</div>
+                      <div className="admin-kpi-value">{detalleFrecuencia.length}</div>
                     </article>
                   </div>
 
@@ -444,7 +618,7 @@ export default function ReportesPage() {
                             options={buildDoughnutOptions({
                               onClick: (_, elements, chart) => {
                                 const label = clickedLabel(elements, chart);
-                                if (label) setFiltroTipoCliente(label);
+                                if (label) setFiltro('tipoCliente', label);
                               },
                             })}
                             plugins={frecuenciaPiePlugins}
@@ -463,7 +637,7 @@ export default function ReportesPage() {
 
                   <div className="reporte-inc-table-wrap">
                     <div className="reporte-table-toolbar">
-                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Top 10 vehiculos mas frecuentes</h3>
+                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Todos los vehículos del período</h3>
                       <div className="reporte-table-toolbar__controls">
                         <input
                           type="text"
@@ -472,17 +646,23 @@ export default function ReportesPage() {
                           onChange={(e) => setFiltroPlaca(e.target.value)}
                           className="admin-input reporte-table-input"
                         />
-                        <select
-                          value={filtroTipoCliente}
-                          onChange={(e) => setFiltroTipoCliente(e.target.value)}
-                          className="reporte-table-input"
-                        >
+                        <select value={filtros.tipoCliente} onChange={(e) => setFiltro('tipoCliente', e.target.value)} className="reporte-table-input">
                           <option value="Todos">Todos los clientes</option>
                           {distribucionFrecuencia.map((item) => (
-                            <option key={item.label} value={item.label}>
-                              {item.label}
-                            </option>
+                            <option key={item.label} value={item.label}>{item.label}</option>
                           ))}
+                        </select>
+                        <select value={filtros.tipoVehiculo} onChange={(e) => setFiltro('tipoVehiculo', e.target.value)} className="reporte-table-input">
+                          <option value="Todos">Todos los tipos</option>
+                          {tiposVehiculoFrecuencia.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <select value={filtroMarca} onChange={(e) => setFiltroMarca(e.target.value)} className="reporte-table-input">
+                          <option value="Todos">Todas las marcas</option>
+                          {marcasFrecuencia.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        <select value={filtroColor} onChange={(e) => setFiltroColor(e.target.value)} className="reporte-table-input">
+                          <option value="Todos">Todos los colores</option>
+                          {coloresFrecuencia.map((c) => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </div>
                     </div>
@@ -492,7 +672,8 @@ export default function ReportesPage() {
                           <tr>
                             <th>#</th>
                             <th>Placa</th>
-                            <th>Modelo</th>
+                            <th>Marca / Modelo</th>
+                            <th>Tipo</th>
                             <th>Color</th>
                             <th>Tipo de cliente</th>
                             <th>Visitas</th>
@@ -503,7 +684,8 @@ export default function ReportesPage() {
                             <tr key={`${row.placa}-${index}`}>
                               <td>{index + 1}</td>
                               <td>{row.placa}</td>
-                              <td>{row.modelo}</td>
+                              <td>{row.marca !== '—' ? `${row.marca} ${row.modelo}` : row.modelo}</td>
+                              <td>{row.tipoVehiculo}</td>
                               <td>{row.color}</td>
                               <td>{row.tipoCliente}</td>
                               <td>{row.visitas}</td>
@@ -580,7 +762,7 @@ export default function ReportesPage() {
                             options={buildDoughnutOptions({
                               onClick: (_, elements, chart) => {
                                 const label = clickedLabel(elements, chart);
-                                if (label) setFiltroTipoCliente(label);
+                                if (label) setFiltro('tipoCliente', label);
                               },
                             })}
                             plugins={[
@@ -613,17 +795,27 @@ export default function ReportesPage() {
                           onChange={(e) => setFiltroPlaca(e.target.value)}
                           className="admin-input reporte-table-input"
                         />
-                        <select
-                          value={filtroTipoCliente}
-                          onChange={(e) => setFiltroTipoCliente(e.target.value)}
-                          className="reporte-table-input"
-                        >
+                        <select value={filtros.tipoCliente} onChange={(e) => setFiltro('tipoCliente', e.target.value)} className="reporte-table-input">
                           <option value="Todos">Todos los clientes</option>
                           {flujoTipoCliente.map((item) => (
-                            <option key={item.label} value={item.label}>
-                              {item.label}
-                            </option>
+                            <option key={item.label} value={item.label}>{item.label}</option>
                           ))}
+                        </select>
+                        <select value={filtros.tipoVehiculo} onChange={(e) => setFiltro('tipoVehiculo', e.target.value)} className="reporte-table-input">
+                          <option value="Todos">Todos los tipos</option>
+                          {tiposVehiculoFlujo.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <select value={filtroDiaSemana} onChange={(e) => setFiltroDiaSemana(e.target.value)} className="reporte-table-input">
+                          <option value="Todos">Todos los días</option>
+                          {DIAS_SEMANA.map((d) => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                        <select value={filtroHoraIni} onChange={(e) => setFiltroHoraIni(e.target.value)} className="reporte-table-input">
+                          <option value="">Hora desde</option>
+                          {HORAS_DIA.map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                        </select>
+                        <select value={filtroHoraFin} onChange={(e) => setFiltroHoraFin(e.target.value)} className="reporte-table-input">
+                          <option value="">Hora hasta</option>
+                          {HORAS_DIA.map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:59</option>)}
                         </select>
                         {filtroFechaFlujo ? (
                           <button type="button" className="admin-btn-ghost" onClick={() => setFiltroFechaFlujo('')}>
@@ -640,6 +832,7 @@ export default function ReportesPage() {
                             <th>Tipo cliente</th>
                             <th>Referencia</th>
                             <th>Placa</th>
+                            <th>Tipo de vehículo</th>
                             <th>Hora de entrada</th>
                             <th>Hora de salida</th>
                             <th>Tiempo de estadia</th>
@@ -652,6 +845,7 @@ export default function ReportesPage() {
                               <td>{row.tipoCliente}</td>
                               <td>{row.referencia}</td>
                               <td>{row.placa}</td>
+                              <td>{row.tipoVehiculo ?? '—'}</td>
                               <td>{row.horaEntrada ? new Date(row.horaEntrada).toLocaleString('es-GT') : '—'}</td>
                               <td>{row.horaSalida ? new Date(row.horaSalida).toLocaleString('es-GT') : '—'}</td>
                               <td>{row.tiempoEstadia}</td>
@@ -755,37 +949,66 @@ export default function ReportesPage() {
                     </ReportChartCard>
                   </div>
 
-                  <div className="reporte-inc-table-wrap">
-                    <div className="reporte-table-toolbar">
-                      <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Promedio por dia de la semana</h3>
-                      <div className="reporte-table-toolbar__controls">
-                        {filtroDia ? (
-                          <button type="button" className="admin-btn-ghost" onClick={() => setFiltroDia('')}>
-                            Quitar filtro: {filtroDia} x
-                          </button>
-                        ) : null}
+                  <div className="reporte-chart-grid" style={{ marginTop: '1.25rem' }}>
+                    <div className="reporte-inc-table-wrap" style={{ margin: 0 }}>
+                      <div className="reporte-table-toolbar">
+                        <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Promedio por dia de la semana</h3>
+                        <div className="reporte-table-toolbar__controls">
+                          {filtroDia ? (
+                            <button type="button" className="admin-btn-ghost" onClick={() => setFiltroDia('')}>
+                              Quitar filtro: {filtroDia} x
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="crudx-table-scroll">
+                        <table className="crudx-table reporte-inc-table">
+                          <thead>
+                            <tr>
+                              <th>Dia</th>
+                              <th>Promedio</th>
+                              <th>Registros</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filasTiempo.map((row) => (
+                              <tr key={row.diaSemana}>
+                                <td>{row.diaSemana}</td>
+                                <td>{row.promedioEtiqueta}</td>
+                                <td>{row.cantidadRegistros}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
-                    <div className="crudx-table-scroll">
-                      <table className="crudx-table reporte-inc-table">
-                        <thead>
-                          <tr>
-                            <th>Dia</th>
-                            <th>Promedio</th>
-                            <th>Registros</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filasTiempo.map((row) => (
-                            <tr key={row.diaSemana}>
-                              <td>{row.diaSemana}</td>
-                              <td>{row.promedioEtiqueta}</td>
-                              <td>{row.cantidadRegistros}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {(data?.promedioPorTipoVehiculo?.length > 0) && (
+                      <div className="reporte-inc-table-wrap" style={{ margin: 0 }}>
+                        <div className="reporte-table-toolbar">
+                          <h3 className="reporte-inc-subtitle" style={{ margin: 0 }}>Promedio por tipo de vehículo</h3>
+                        </div>
+                        <div className="crudx-table-scroll">
+                          <table className="crudx-table reporte-inc-table">
+                            <thead>
+                              <tr>
+                                <th>Tipo de vehículo</th>
+                                <th>Promedio</th>
+                                <th>Registros</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {data.promedioPorTipoVehiculo.map((row) => (
+                                <tr key={row.tipo}>
+                                  <td>{row.tipo}</td>
+                                  <td>{row.promedioEtiqueta}</td>
+                                  <td>{row.cantidadRegistros}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               ) : null}
@@ -794,10 +1017,25 @@ export default function ReportesPage() {
         </>
       ) : null}
 
-      {seccion === 'operativos' ? <ReportesOperativosMaquinasSection /> : null}
-      {seccion === 'financieros' ? <ReportesFinancierosSection /> : null}
-      {seccion === 'membresias_clientes' ? <ReportesMembresiasClientesSection /> : null}
-      {seccion === 'afluencia' ? <ReportesAfluenciaSection /> : null}
+      {seccion === 'operativos' ? <ReportesOperativosMaquinasSection onBackToReports={() => setSeccion('')} /> : null}
+      {seccion === 'financieros' ? <ReportesFinancierosSection onBackToReports={() => setSeccion('')} /> : null}
+      {seccion === 'membresias_clientes' ? <ReportesMembresiasClientesSection onBackToReports={() => setSeccion('')} /> : null}
+      {seccion === 'afluencia' ? <ReportesAfluenciaSection onBackToReports={() => setSeccion('')} /> : null}
+      {seccion === 'perfil_flota' ? <ReportesPerfilFlotaSection onBackToReports={() => setSeccion('')} /> : null}
+      {seccion === 'analisis_flota' ? <ReportesAnalisisFlotaSection onBackToReports={() => setSeccion('')} /> : null}
     </div>
+  );
+}
+
+
+/**
+ * ReportesPage — wrapper que provee el contexto global de filtros
+ * y renderiza el contenido principal del módulo de reportes.
+ */
+export default function ReportesPage() {
+  return (
+    <ReportFilterProvider>
+      <ReportesPageContent />
+    </ReportFilterProvider>
   );
 }
