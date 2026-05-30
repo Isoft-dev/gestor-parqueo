@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { filterOperativeMachines } from '../utils/machineStatus.js';
 import { getPlateValidationMessage, normalizePlateInput, PLATE_MAX_LENGTH } from '../utils/plate.js';
 import { getFieldPlaceholder, sanitizeFieldValue, sanitizeSearchValue } from '../utils/fieldValidation.js';
+import { BtnContent, IconCard, IconCash, IconTicket } from '../components/UiIcons.jsx';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
@@ -1674,7 +1675,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                       </div>
                     ) : (
                       <div className="ops-cobro-receipt">
-                        <div className="ops-cobro-receipt-title">ðŸŽ« DETALLE DEL TICKET</div>
+                        <div className="ops-cobro-receipt-title">
+                          <BtnContent icon={IconTicket} iconSize={20}>DETALLE DEL TICKET</BtnContent>
+                        </div>
                         <hr />
                         <div className="ops-cobro-receipt-row">
                           <span>Ticket</span>
@@ -1937,10 +1940,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 <div className="ops-cobro-pay-row">
                   <p className="ops-cobro-right-hint">Forma de pago</p>
                   <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroGoEfectivo}>
-                    ðŸ’µ Efectivo
+                    <BtnContent icon={IconCash} iconSize={22}>Efectivo</BtnContent>
                   </button>
                   <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroGoTarjeta}>
-                    ðŸ’³ Tarjeta
+                    <BtnContent icon={IconCard} iconSize={22}>Tarjeta</BtnContent>
                   </button>
                 </div>
               ) : null}

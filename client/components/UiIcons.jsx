@@ -124,10 +124,39 @@ export function IconPlus(props) {
   );
 }
 
-export function BtnContent({ icon: Icon, children }) {
+export function IconCash(props) {
+  return (
+    <Svg {...props}>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M6 9h.01M18 15h.01" />
+    </Svg>
+  );
+}
+
+export function IconCard(props) {
+  return (
+    <Svg {...props}>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
+      <line x1="6" y1="15" x2="10" y2="15" />
+    </Svg>
+  );
+}
+
+export function IconTicket(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V8Z" />
+      <line x1="12" y1="8" x2="12" y2="16" strokeDasharray="2 2" />
+    </Svg>
+  );
+}
+
+export function BtnContent({ icon: Icon, children, iconSize = 15 }) {
   return (
     <span className="ui-btn-content">
-      {Icon ? <Icon size={15} /> : null}
+      {Icon ? <Icon size={iconSize} /> : null}
       <span>{children}</span>
     </span>
   );

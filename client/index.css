@@ -2988,6 +2988,21 @@ body {
   min-width: 0;
 }
 
+.ops-cobro-physical-btn .ui-btn-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.ops-cobro-receipt-title .ui-btn-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .ops-cobro-keypad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
