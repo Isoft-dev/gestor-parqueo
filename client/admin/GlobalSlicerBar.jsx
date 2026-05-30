@@ -52,7 +52,7 @@ export default function GlobalSlicerBar({
             type="date"
             className="admin-input"
             value={filtros.desde}
-            max={TODAY}
+            max={filtros.hasta && filtros.hasta < TODAY ? filtros.hasta : TODAY}
             onChange={(e) => setFiltro('desde', e.target.value)}
           />
         </label>
@@ -62,6 +62,7 @@ export default function GlobalSlicerBar({
             type="date"
             className="admin-input"
             value={filtros.hasta}
+            min={filtros.desde || undefined}
             max={TODAY}
             onChange={(e) => setFiltro('hasta', e.target.value)}
           />

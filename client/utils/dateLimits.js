@@ -28,3 +28,49 @@ export function clampMonthYm(value, max = currentMonthYm()) {
   if (!v) return v;
   return v > max ? max : v;
 }
+
+export function clampDatetimeLocal(value, max = nowLocalDatetime()) {
+  const v = String(value ?? '').trim();
+  if (!v) return v;
+  return v > max ? max : v;
+}
+
+export function isDateRangeInvalid(desde, hasta) {
+  const d = String(desde ?? '').trim();
+  const h = String(hasta ?? '').trim();
+  if (!d || !h) return false;
+  return d > h;
+}
+
+export function getDateRangeError(desde, hasta) {
+  return isDateRangeInvalid(desde, hasta)
+    ? 'La fecha «Desde» no puede ser posterior a «Hasta».'
+    : null;
+}
+
+/** Ajusta el otro extremo del rango al teclear «desde» o «hasta». */
+export function syncDateRangeOnChange(draft, field, rawValue, { max, useDatetime = false } = {}) {
+  const clamp = useDatetime
+    ? (v) => clampDatetimeLocal(v, max)
+    : (v) => clampDateYmd(v, max);
+
+  const nextValue = clamp(rawValue);
+  const prevDesde = String(draft?.desde ?? '').trim();
+  const prevHasta = String(draft?.hasta ?? '').trim();
+
+  if (field === 'desde') {
+    const desde = nextValue;
+    let hasta = prevHasta;
+    if (desde && hasta && desde > hasta) hasta = desde;
+    return { ...draft, desde, hasta };
+  }
+
+  if (field === 'hasta') {
+    const hasta = nextValue;
+    let desde = prevDesde;
+    if (desde && hasta && desde > hasta) desde = hasta;
+    return { ...draft, desde, hasta };
+  }
+
+  return draft;
+}

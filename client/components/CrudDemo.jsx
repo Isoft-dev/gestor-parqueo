@@ -1,24 +1,29 @@
-﻿import { Fragment, useState, useEffect, useMemo } from 'react';
+﻿import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useCallback } from 'react';
 import { API_BASE } from '../config.js';
 import { buildLabelMapFromCrudFields, getDbColumnLabel } from '../utils/dbColumnLabel.js';
-import { sanitizeFieldValue, getInputMode, getMaxLength, getFieldPlaceholder, getSearchPlaceholder, sanitizeSearchValue } from '../utils/fieldValidation.js';
+import { sanitizeFieldValue, getInputMode, getMaxLength, getFieldPlaceholder } from '../utils/fieldValidation.js';
 import HelpHint from './HelpHint.jsx';
+import CrudEditFormModal from './CrudEditFormModal.jsx';
+import CrudRecordDetailModal from './CrudRecordDetailModal.jsx';
+import CrudEntitySearchBar from './CrudEntitySearchBar.jsx';
+import CrudTableLoadingPanel from './CrudTableLoadingPanel.jsx';
+import { getCrudLoadingCopy } from '../utils/crudLoadingCopy.js';
+import { clienteNombreCompleto } from '../utils/clienteDisplay.js';
+import { buildRecordDetailView, shouldOfferRecordDetail } from '../utils/crudRecordDetail.js';
 import {
   BtnContent,
   IconBack,
   IconBalance,
-  IconClear,
   IconEdit,
   IconMaintenance,
   IconPlus,
   IconRecharge,
-  IconSearch,
   IconTrash,
   IconTransaction,
 } from './UiIcons.jsx';
-import { clampDateYmd, nowLocalDatetime, todayYmd } from '../utils/dateLimits.js';
+import { getDateRangeError, nowLocalDatetime, todayYmd } from '../utils/dateLimits.js';
 import { formatUserFacingMessage, isErrorLikeMessage } from '../utils/userMessage.js';
 import {
   filterManualMachineStatuses,
@@ -373,29 +378,6 @@ const MONTHLY_CLIENT_COMPACT_HIDDEN_COLUMNS = new Set([
   'CLI_CODIGO_POSTAL',
 ]);
 
-function clienteDireccionCompacta(row) {
-  const parts = [
-    row?.CLI_ZONA ? `Zona ${row.CLI_ZONA}` : '',
-    row?.CLI_CALLE ? `Calle ${row.CLI_CALLE}` : '',
-    row?.CLI_NUMERO ? `No. ${row.CLI_NUMERO}` : '',
-    row?.CLI_COLONIA ? `Col. ${row.CLI_COLONIA}` : '',
-    row?.CLI_CIUDAD ? String(row.CLI_CIUDAD) : '',
-    row?.CLI_CODIGO_POSTAL ? `CP ${row.CLI_CODIGO_POSTAL}` : '',
-  ]
-    .map((item) => String(item ?? '').trim())
-    .filter(Boolean);
-  return parts.join(', ');
-}
-
-function clienteCompactDetailItems(row) {
-  return [
-    { label: 'Nombre completo', value: clienteNombreCompleto(row) || '—' },
-    { label: 'NIT', value: row?.CLI_NIT || '—' },
-    { label: 'Telefono', value: row?.CLI_TELEFONO || '—' },
-    { label: 'Direccion', value: clienteDireccionCompacta(row) || '—' },
-  ];
-}
-
 function shouldHideTableColumn(
   entityKey,
   columnKey,
@@ -494,18 +476,6 @@ function preparePayload(fields, form) {
     else out[f.k] = v || null;
   });
   return out;
-}
-
-function clienteNombreCompleto(row) {
-  return [
-    row?.CLI_PRIMER_NOMBRE,
-    row?.CLI_SEGUNDO_NOMBRE,
-    row?.CLI_PRIMER_APELLIDO,
-    row?.CLI_SEGUNDO_APELLIDO,
-  ]
-    .map((x) => String(x ?? '').trim())
-    .filter(Boolean)
-    .join(' ');
 }
 
 function normPlacaVehiculo(s) {
@@ -1050,26 +1020,6 @@ function getEntityCardTraits(targetEntity) {
   return traits;
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function formatCellForPopup(v) {
-  if (v == null) return '—';
-  if (typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v)) {
-    try {
-      return new Date(v).toLocaleString('es-GT');
-    } catch {
-      /* keep */
-    }
-  }
-  return String(v);
-}
-
 function labelMaquina(row, catalogOptions) {
   const maqId = row?.MAQ_ID ?? row?.maq_id;
   if (maqId == null || maqId === '') return '—';
@@ -1100,17 +1050,6 @@ function normTipoMaquinaClient(s) {
 function isTipoMaquinaCobroClient(tmaTipo) {
   const x = normTipoMaquinaClient(tmaTipo);
   return x.includes('cobro') || x.includes('caja');
-}
-
-/** Solo máquinas cuyo tipo es de cobro (para filtro en Detalle saldo). */
-function maquinasTipoCobroList(catalogOptions, { onlyOperative = false } = {}) {
-  const maqsBase = catalogOptions?.maquina || [];
-  const maqs = onlyOperative ? filterOperativeMachines(maqsBase) : maqsBase;
-  const tipos = catalogOptions?.['tipo-maquina'] || [];
-  return maqs.filter((m) => {
-    const t = tipos.find((t0) => String(t0.TMA_ID) === String(m.TMA_ID));
-    return t != null && isTipoMaquinaCobroClient(t.TMA_TIPO);
-  });
 }
 
 function maquinasOperativasList(catalogOptions) {
@@ -1341,53 +1280,6 @@ function getVehicleMembershipStatus(row, catalogOptions) {
   return { ...getMembershipStatusBadge(row?.EME_ESTADO ?? labelEstadoMembresia(row?.EME_ID, catalogOptions) ?? 'Con membresía'), hasMembership: true };
 }
 
-/** Abre una ventana de navegador con detalle enriquecido de alerta. */
-function openAlertaDetailPopup(row, formatValue) {
-  const features =
-    'width=540,height=440,left=140,top=90,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no';
-  const name = `alertaDetalle_${row?.ALE_ID ?? Date.now()}`;
-  const w = window.open('about:blank', name, features);
-  if (!w) {
-    window.alert('No se pudo abrir la ventana. Permite ventanas emergentes para este sitio.');
-    return;
-  }
-  try {
-    w.opener = null;
-  } catch {
-    /* ignore */
-  }
-
-  const title = `Alerta ${row?.ALE_ID ?? ''}`.trim() || 'Detalle de alerta';
-  const bodyRows = Object.entries(row)
-    .map(([k, v]) => {
-      const display = formatCellForPopup(formatValue ? formatValue(k, v, row) : v);
-      let label = getDbColumnLabel(k, CRUD_COLUMN_LABELS);
-      if (k === 'MAQ_ID') label = 'Máquina';
-      if (k === 'EAL_ID') label = 'Estado alerta';
-      if (k === 'TAL_ID') label = 'Tipo alerta';
-      if (k === 'ALE_USU_ID_RESOLVIO') label = 'Persona a cargo';
-      return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(display)}</dd>`;
-    })
-    .join('');
-
-  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
-<style>
-  body { font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; padding: 18px 18px; font-size: 14px; line-height: 1.55; color: #0f172a; background: linear-gradient(180deg,#f8fafc,#eef2ff); }
-  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 28px rgba(15,23,42,0.08); }
-  h1 { font-size: 1.08rem; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0; }
-  dl { margin: 0; }
-  dt { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; margin-top: 12px; }
-  dt:first-of-type { margin-top: 0; }
-  dd { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; color: #0f172a; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; }
-</style></head><body>
-<div class="card">
-<h1>${escapeHtml(title)}</h1>
-<dl>${bodyRows}</dl>
-</div>
-</body></html>`);
-  w.document.close();
-}
-
 // ── COMPONENT ─────────────────────────────────────────────────
 /**
  * @param {{ filterEntityKeys?: string[]; entityAccessMap?: Record<string, { ops?: { c?: boolean, u?: boolean, d?: boolean } }>, sessionUserId?: string | number | null, sessionIsFullAdmin?: boolean }} props
@@ -1396,20 +1288,6 @@ function openAlertaDetailPopup(row, formatValue) {
  * `sessionUserId`: USU_ID del admin logueado (bitácora: marca quién resolvió el incidente).
  * `sectionPath`: ruta del módulo en `/admin` (muestra textos de ayuda acordes a cada lista).
  */
-const emptyBivFilter = { placa: '', resuelto: '', desde: '', hasta: '' };
-const emptyAlertaFilter = { eal: '', tal: '', maq: '' };
-const emptyTicketFilter = { eti: '', q: '' };
-const emptyCobroFilter = { q: '' };
-const emptyClienteFilter = { q: '' };
-const emptyMembresiaFilter = { q: '', eme: '' };
-const emptyDetalleMaqTicketFilter = { q: '', desde: '', hasta: '', tx: '' };
-const emptyDetalleSaldoMaqFilter = { maq: '' };
-const emptyRecargoMaqFilter = { maq: '' };
-const emptyRmmPlacaFilter = { placa: '' };
-const emptyDpmPlacaFilter = { placa: '' };
-const emptyMaquinaFilter = { tma: '' };
-const emptyVehiculoFilter = { q: '', tve: '' };
-
 export default function CrudDemo({
   filterEntityKeys = null,
   entityAccessMap = null,
@@ -1453,7 +1331,8 @@ export default function CrudDemo({
   const [entity, setEntity]   = useState(null);
   const [rows, setRows]        = useState([]);
   const [loading, setLoading]  = useState(false);
-  const [form, setForm]        = useState({});
+  /** Snapshot al abrir edición; el tipeo vive en CrudEditFormModal. */
+  const [editInitialForm, setEditInitialForm] = useState({});
   const [editId, setEditId]    = useState(null);
   const [msg, setMsg]          = useState('');
   const [machineCardsRows, setMachineCardsRows] = useState([]);
@@ -1464,20 +1343,7 @@ export default function CrudDemo({
   const [machineStatusSavingId, setMachineStatusSavingId] = useState(null);
   const [machineStatusMenuId, setMachineStatusMenuId] = useState(null);
   const [machineCreateForm, setMachineCreateForm] = useState({ MAQ_CODIGO: '', TMA_ID: '', EMA_ID: '' });
-  const [bivFilter, setBivFilter] = useState(emptyBivFilter);
-  const [alertaFilter, setAlertaFilter] = useState(emptyAlertaFilter);
-  const [ticketFilter, setTicketFilter] = useState(emptyTicketFilter);
-  const [cobroFilter, setCobroFilter] = useState(emptyCobroFilter);
-  const [clienteFilter, setClienteFilter] = useState(emptyClienteFilter);
-  const [membresiaFilter, setMembresiaFilter] = useState(emptyMembresiaFilter);
-  const [detalleMaqTicketFilter, setDetalleMaqTicketFilter] = useState(emptyDetalleMaqTicketFilter);
   const [detalleMaqTicketTxOptions, setDetalleMaqTicketTxOptions] = useState([]);
-  const [detalleSaldoMaqFilter, setDetalleSaldoMaqFilter] = useState(emptyDetalleSaldoMaqFilter);
-  const [recargoMaqFilter, setRecargoMaqFilter] = useState(emptyRecargoMaqFilter);
-  const [rmmPlacaFilter, setRmmPlacaFilter] = useState(emptyRmmPlacaFilter);
-  const [dpmPlacaFilter, setDpmPlacaFilter] = useState(emptyDpmPlacaFilter);
-  const [maquinaFilter, setMaquinaFilter] = useState(emptyMaquinaFilter);
-  const [vehiculoFilter, setVehiculoFilter] = useState(emptyVehiculoFilter);
   /** Modal MEM-2: vehículo sin cliente al crear membresía */
   const [vehClienteModal, setVehClienteModal] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -1486,7 +1352,7 @@ export default function CrudDemo({
   const [monthlyWorkspaceView, setMonthlyWorkspaceView] = useState('cards');
   const [monthlySelectedClient, setMonthlySelectedClient] = useState(null);
   const [monthlySelectedVehicle, setMonthlySelectedVehicle] = useState(null);
-  const [expandedClientRowId, setExpandedClientRowId] = useState(null);
+  const [recordDetail, setRecordDetail] = useState(null);
   const bivQueryKey = searchParams.toString();
   const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []).map(applyEntityAccess);
   const isMonthlyWorkspace = sectionPath === 'clientes-mensuales' && Boolean(filteredEntities?.length);
@@ -1561,7 +1427,9 @@ export default function CrudDemo({
         ? [...new Set([...catsBase, 'tipo-maquina', 'tipo-alerta'])]
         : targetEntity.key === 'ticket'
             ? [...new Set([...catsBase, 'estado-ticket'])]
-            : targetEntity.key === 'detalle-saldo'
+            : targetEntity.key === 'vehiculo'
+              ? [...new Set([...catsBase, 'tipo-vehiculo'])]
+              : targetEntity.key === 'detalle-saldo'
               ? [...new Set([...catsBase, 'maquina', 'tipo-maquina'])]
               : targetEntity.key === 'recargo-maquina'
                 ? [...new Set([...catsBase, 'tipo-maquina'])]
@@ -1598,273 +1466,17 @@ export default function CrudDemo({
   }, [entity?.key]);
 
   useEffect(() => {
-    if (entity?.key !== 'bitacora-incidente-vehiculo') return;
-    const r = searchParams.get('biv_resuelto');
-    setBivFilter({
-      placa: searchParams.get('biv_placa') || '',
-      resuelto: r === '0' || r === '1' ? r : '',
-      desde: (searchParams.get('biv_desde') || '').slice(0, 10),
-      hasta: (searchParams.get('biv_hasta') || '').slice(0, 10),
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'alerta') return;
-    setAlertaFilter({
-      eal: searchParams.get('eal_id') || '',
-      tal: searchParams.get('tal_id') || '',
-      maq: searchParams.get('maq_id') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'ticket') return;
-    setTicketFilter({
-      eti: searchParams.get('eti_id') || '',
-      q: searchParams.get('q') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'cobro') return;
-    setCobroFilter({
-      q: searchParams.get('cob_q') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL -> form solo cuando cambia la query
-
-  useEffect(() => {
     if (editId !== '__new__') return;
     if (entity?.ops?.c !== false) return;
     setEditId(null);
-    setForm(entity ? emptyForm(entity.fields) : {});
+    setEditInitialForm({});
   }, [entity?.key, entity?.ops?.c, editId]);
 
   useEffect(() => {
-    if (entity?.key !== 'cliente') return;
-    setClienteFilter({
-      q: searchParams.get('cli_q') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'membresia') return;
-    setMembresiaFilter({
-      q: searchParams.get('mem_q') || '',
-      eme: searchParams.get('mem_eme') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'detalle-maquina-ticket') return;
-    setDetalleMaqTicketFilter({
-      q: searchParams.get('dmt_q') || '',
-      desde: searchParams.get('dmt_desde') || '',
-      hasta: searchParams.get('dmt_hasta') || '',
-      tx: searchParams.get('dmt_tx') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'detalle-saldo') return;
-    setDetalleSaldoMaqFilter({
-      maq: searchParams.get('ds_maq_id') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'recargo-maquina') return;
-    setRecargoMaqFilter({
-      maq: searchParams.get('rma_maq_id') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'registro-movimiento-membresia') return;
-    setRmmPlacaFilter({
-      placa: searchParams.get('rmm_placa') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'detalle-pago-membresia') return;
-    setDpmPlacaFilter({
-      placa: searchParams.get('dpm_placa') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'maquina') return;
-    setMaquinaFilter({
-      tma: searchParams.get('maq_tma_id') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  useEffect(() => {
-    if (entity?.key !== 'vehiculo') return;
-    setVehiculoFilter({
-      q: searchParams.get('veh_q') || '',
-      tve: searchParams.get('veh_tve_id') || '',
-    });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
-
-  /** Nuevo ticket: estado por defecto «Activo» (solo lectura hasta guardar). */
-  useEffect(() => {
-    if (entity?.key !== 'ticket' || editId !== '__new__') return;
-    const activoId = pickEtiIdActivo(catalogOptions?.['estado-ticket']);
-    if (!activoId) return;
-    setForm((prev) => {
-      if (prev?.ETI_ID != null && String(prev.ETI_ID).trim() !== '') return prev;
-      return { ...prev, ETI_ID: activoId };
-    });
-  }, [entity?.key, editId, catalogOptions?.['estado-ticket']]);
-
-  /** Nueva máquina: inicia como «Inoperativa» y se activa luego desde edición. */
-  useEffect(() => {
-    if (entity?.key !== 'maquina' || editId !== '__new__') return;
-    const inoperativaId = pickInoperativeMachineStatusId(catalogOptions?.['estado-maquina']);
-    if (!inoperativaId) return;
-    setForm((prev) => {
-      if (prev?.EMA_ID != null && String(prev.EMA_ID).trim() !== '') return prev;
-      return { ...prev, EMA_ID: inoperativaId };
-    });
-  }, [entity?.key, editId, catalogOptions?.['estado-maquina']]);
-
-  /** Nuevo mantenimiento: el movimiento se define según el estado actual de la máquina. */
-  useEffect(() => {
-    if (entity?.key !== 'registro-mantenimiento' || editId !== '__new__') return;
-    const machine = findMachineById(catalogOptions, form?.MAQ_ID);
-    const nextMovement = getMaintenanceMovementForMachine(machine);
-    setForm((prev) => {
-      const currentMovement = String(prev?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase();
-      if (currentMovement === nextMovement) return prev;
-      return { ...prev, REM_TIPO_MOVIMIENTO: nextMovement };
-    });
-  }, [entity?.key, editId, form?.MAQ_ID, catalogOptions]);
-
-  useEffect(() => {
-    if (entity?.key !== 'registro-mantenimiento') return;
-    if (String(form?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase() === 'FINALIZACION') return;
-    setForm((prev) => (
-      String(prev?.REM_ESTADO_RESULTANTE_EMA_ID ?? '').trim() === ''
-        ? prev
-        : { ...prev, REM_ESTADO_RESULTANTE_EMA_ID: '' }
-    ));
-  }, [entity?.key, form?.REM_TIPO_MOVIMIENTO]);
-
-  /** Nueva membresía: vencimiento automático según `TME_DURACION`. */
-  useEffect(() => {
-    if (entity?.key !== 'membresia' || editId !== '__new__') return;
-    const tmeId = String(form?.TME_ID ?? '').trim();
-    const inicio = String(form?.MEM_FECHA_INICIO ?? '').trim();
-    if (!tmeId || !inicio) return;
-    const tipos = catalogOptions?.['tipo-membresia'] || [];
-    const tipo = tipos.find((x) => String(x.TME_ID) === tmeId);
-    const nextVenc = calcMembresiaVencimientoInput(inicio, Number(tipo?.TME_DURACION));
-    if (!nextVenc) return;
-    setForm((prev) => (
-      String(prev?.MEM_FECHA_VENCIMIENTO ?? '') === String(nextVenc)
-        ? prev
-        : { ...prev, MEM_FECHA_VENCIMIENTO: nextVenc }
-    ));
-  }, [entity?.key, editId, form?.TME_ID, form?.MEM_FECHA_INICIO, catalogOptions?.['tipo-membresia']]);
-
-  /** Nuevo cobro: fecha/hora automática actual. */
-  useEffect(() => {
-    if (entity?.key !== 'cobro' || editId !== '__new__') return;
-    setForm((prev) => {
-      if (String(prev?.COB_FECHA_HORA || '').trim() !== '') return prev;
-      return {
-        ...prev,
-        COB_FECHA_HORA: toDateTimeLocalInput(new Date()),
-      };
-    });
-  }, [entity?.key, editId]);
-
-  /** Nuevo cobro: con ticket calcula horas, monto y tarifa sugerida. */
-  useEffect(() => {
-    if (entity?.key !== 'cobro' || editId !== '__new__') return;
-    const ticId = String(form?.TIC_ID ?? '').trim();
-    if (!ticId) return;
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      try {
-        const rTicket = await fetch(`${API_BASE}/ticket/${encodeURIComponent(ticId)}`, { cache: 'no-store' });
-        const dTicket = await parseJsonSafe(rTicket);
-        if (!rTicket.ok) throw new Error(dTicket.error || dTicket.message || rTicket.statusText);
-        const ticCodigo = String(dTicket?.TIC_CODIGO ?? '').trim();
-        if (!ticCodigo) return;
-        const rQuote = await fetch(`${API_BASE}/ticket/quote`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ TIC_CODIGO: ticCodigo }),
-        });
-        const dQuote = await parseJsonSafe(rQuote);
-        if (!rQuote.ok) throw new Error(dQuote.error || dQuote.message || rQuote.statusText);
-        if (cancelled) return;
-        const horas = Number(
-          dQuote?.estadia?.horasFacturables
-          ?? dQuote?.estadia?.horasCobradas
-          ?? dQuote?.cobro?.horas
-          ?? 0,
-        );
-        const monto = Number(
-          dQuote?.montoTotal
-          ?? dQuote?.cobro?.montoTotal
-          ?? 0,
-        );
-        const tarifaId = dQuote?.tarifa?.TAR_ID ?? dQuote?.tarifa?.tar_id ?? '';
-        setForm((prev) => ({
-          ...prev,
-          COB_HORAS_TOTALES: Number.isFinite(horas) ? String(horas) : prev.COB_HORAS_TOTALES,
-          COB_MONTO_TOTAL: Number.isFinite(monto) ? String(round2(monto)) : prev.COB_MONTO_TOTAL,
-          TAR_ID: tarifaId != null && String(tarifaId).trim() !== '' ? String(tarifaId) : prev.TAR_ID,
-        }));
-      } catch {
-        // Si falla el cálculo automático, el usuario puede completar manualmente.
-      }
-    }, 350);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [entity?.key, editId, form?.TIC_ID]);
-
-  /** Nuevo cobro: vuelto automático según monto recibido y total. */
-  useEffect(() => {
-    if (entity?.key !== 'cobro' || editId !== '__new__') return;
-    const recibido = Number(form?.COB_MONTO_RECIBIDO ?? 0);
-    const total = Number(form?.COB_MONTO_TOTAL ?? 0);
-    if (!Number.isFinite(recibido) || !Number.isFinite(total)) return;
-    const vuelto = round2(Math.max(0, recibido - total));
-    setForm((prev) => (
-      String(prev?.COB_VUELTO ?? '') === String(vuelto)
-        ? prev
-        : { ...prev, COB_VUELTO: String(vuelto) }
-    ));
-  }, [entity?.key, editId, form?.COB_MONTO_RECIBIDO, form?.COB_MONTO_TOTAL]);
-
-
-  useEffect(() => {
     if (entity?.key !== 'cliente') {
-      setExpandedClientRowId(null);
+      setRecordDetail(null);
     }
   }, [entity?.key]);
-
-  useEffect(() => {
-    if (
-      !isMonthlyVehicleMembershipView
-      || editId !== '__new__'
-      || String(form?.EME_ID ?? '').trim() !== ''
-    ) {
-      return;
-    }
-    const emeIdActiva = pickEmeIdActiva(catalogOptions?.['estado-membresia']);
-    if (!emeIdActiva) return;
-    setForm((prev) => {
-      if (String(prev?.EME_ID ?? '').trim() !== '') return prev;
-      return { ...prev, EME_ID: emeIdActiva };
-    });
-  }, [catalogOptions?.['estado-membresia'], editId, form?.EME_ID, isMonthlyVehicleMembershipView]);
 
   useEffect(() => {
     if (entity) load();
@@ -2115,11 +1727,11 @@ export default function CrudDemo({
     setMonthlyWorkspaceView('cards');
     setMonthlySelectedClient(null);
     setMonthlySelectedVehicle(null);
-    setExpandedClientRowId(null);
+    setRecordDetail(null);
     setEntity(null);
     setRows([]);
     setEditId(null);
-    setForm({});
+    setEditInitialForm({});
     setMsg('');
   }
 
@@ -2128,12 +1740,12 @@ export default function CrudDemo({
     if (!vehiculoEntity) return;
     setMonthlySelectedClient(row);
     setMonthlySelectedVehicle(null);
-    setExpandedClientRowId(null);
+    setRecordDetail(null);
     setMonthlyWorkspaceView('clienteVehiculos');
     setRows([]);
     setEntity(vehiculoEntity);
     setEditId(null);
-    setForm(emptyForm(vehiculoEntity.fields));
+    setEditInitialForm(emptyForm(vehiculoEntity.fields));
     setMsg('');
   }
 
@@ -2146,7 +1758,7 @@ export default function CrudDemo({
       setRows([]);
       setEntity(clienteEntity);
       setEditId(null);
-      setForm(emptyForm(clienteEntity.fields));
+      setEditInitialForm(emptyForm(clienteEntity.fields));
     }
     setMsg('');
   }
@@ -2163,7 +1775,7 @@ export default function CrudDemo({
       setRows([]);
       setEntity(vehiculoEntity);
       setEditId(null);
-      setForm(nextForm);
+      setEditInitialForm(nextForm);
     }
     setMsg('');
   }
@@ -2183,7 +1795,7 @@ export default function CrudDemo({
     setRows([]);
     setEntity(membresiaEntity);
     setEditId(startNew ? '__new__' : null);
-    setForm(nextForm);
+    setEditInitialForm(nextForm);
     setMsg('');
   }
 
@@ -2192,7 +1804,7 @@ export default function CrudDemo({
     const nextForm = emptyForm(entity.fields);
     nextForm.CLI_ID = String(monthlySelectedClient.CLI_ID);
     setEditId('__new__');
-    setForm(nextForm);
+    setEditInitialForm(nextForm);
     setMsg('');
   }
 
@@ -2205,7 +1817,7 @@ export default function CrudDemo({
       nextForm.EME_ID = emeIdActiva;
     }
     setEditId('__new__');
-    setForm(nextForm);
+    setEditInitialForm(nextForm);
     setMsg('');
   }
 
@@ -2217,19 +1829,16 @@ export default function CrudDemo({
       p.delete('dmt_desde');
       p.delete('dmt_hasta');
       p.delete('dmt_tx');
-      setDetalleMaqTicketFilter(emptyDetalleMaqTicketFilter);
       setSearchParams(p, { replace: true });
     }
     if (e.key === 'detalle-saldo') {
       const p = new URLSearchParams(searchParams);
       p.delete('ds_maq_id');
-      setDetalleSaldoMaqFilter(emptyDetalleSaldoMaqFilter);
       setSearchParams(p, { replace: true });
     }
     if (e.key === 'recargo-maquina') {
       const p = new URLSearchParams(searchParams);
       p.delete('rma_maq_id');
-      setRecargoMaqFilter(emptyRecargoMaqFilter);
       setSearchParams(p, { replace: true });
     }
     if (e.key === 'registro-mantenimiento') {
@@ -2242,7 +1851,7 @@ export default function CrudDemo({
         setMonthlyWorkspaceView('entity');
         setMonthlySelectedClient(null);
         setMonthlySelectedVehicle(null);
-        setExpandedClientRowId(null);
+        setRecordDetail(null);
       }
       return;
     }
@@ -2250,12 +1859,12 @@ export default function CrudDemo({
       setMonthlyWorkspaceView('entity');
       setMonthlySelectedClient(null);
       setMonthlySelectedVehicle(null);
-      setExpandedClientRowId(null);
+      setRecordDetail(null);
     }
     setRows([]);
     setEntity(e);
     setEditId(null);
-    setForm(emptyForm(e.fields));
+    setEditInitialForm(emptyForm(e.fields));
     setMsg('');
   }
 
@@ -2287,19 +1896,27 @@ export default function CrudDemo({
         f.USU_ID = String(sessionUserId);
       }
     }
-    setForm(f); setEditId(row[entity.id]);
+    setEditInitialForm(f);
+    setEditId(row[entity.id]);
   }
 
-  function cancelEdit() { setEditId(null); setForm(emptyForm(entity.fields)); }
+  function cancelEdit() {
+    setEditId(null);
+    setEditInitialForm({});
+  }
 
-  function applyBivFilters(e) {
-    e.preventDefault();
+  function applyBivFilters(_e, draft) {
+    const rangeError = getDateRangeError(draft?.desde, draft?.hasta);
+    if (rangeError) {
+      setMsg(rangeError);
+      return;
+    }
     const p = new URLSearchParams(searchParams);
     ['biv_placa', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
-    if (bivFilter.placa.trim()) p.set('biv_placa', bivFilter.placa.trim());
-    if (bivFilter.resuelto === '0' || bivFilter.resuelto === '1') p.set('biv_resuelto', bivFilter.resuelto);
-    if (bivFilter.desde.trim()) p.set('biv_desde', bivFilter.desde.trim());
-    if (bivFilter.hasta.trim()) p.set('biv_hasta', bivFilter.hasta.trim());
+    if (String(draft?.placa ?? '').trim()) p.set('biv_placa', String(draft.placa).trim());
+    if (draft?.resuelto === '0' || draft?.resuelto === '1') p.set('biv_resuelto', draft.resuelto);
+    if (String(draft?.desde ?? '').trim()) p.set('biv_desde', String(draft.desde).trim());
+    if (String(draft?.hasta ?? '').trim()) p.set('biv_hasta', String(draft.hasta).trim());
     setSearchParams(p, { replace: true });
   }
 
@@ -2307,16 +1924,14 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     ['biv_placa', 'biv_resuelto', 'biv_desde', 'biv_hasta'].forEach((k) => p.delete(k));
     setSearchParams(p, { replace: true });
-    setBivFilter(emptyBivFilter);
   }
 
-  function applyAlertaFilters(e) {
-    e.preventDefault();
+  function applyAlertaFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     ['eal_id', 'tal_id', 'maq_id'].forEach((k) => p.delete(k));
-    if (alertaFilter.eal) p.set('eal_id', alertaFilter.eal);
-    if (alertaFilter.tal) p.set('tal_id', alertaFilter.tal);
-    if (alertaFilter.maq) p.set('maq_id', alertaFilter.maq);
+    if (draft?.eal) p.set('eal_id', draft.eal);
+    if (draft?.tal) p.set('tal_id', draft.tal);
+    if (draft?.maq) p.set('maq_id', draft.maq);
     setSearchParams(p, { replace: true });
   }
 
@@ -2324,15 +1939,13 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     ['eal_id', 'tal_id', 'maq_id'].forEach((k) => p.delete(k));
     setSearchParams(p, { replace: true });
-    setAlertaFilter(emptyAlertaFilter);
   }
 
-  function applyTicketFilters(e) {
-    e.preventDefault();
+  function applyTicketFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     ['eti_id', 'q'].forEach((k) => p.delete(k));
-    if (ticketFilter.eti) p.set('eti_id', ticketFilter.eti);
-    const qTrim = ticketFilter.q.trim();
+    if (draft?.eti) p.set('eti_id', draft.eti);
+    const qTrim = String(draft?.q ?? '').trim();
     if (qTrim) p.set('q', qTrim);
     setSearchParams(p, { replace: true });
   }
@@ -2341,14 +1954,12 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     ['eti_id', 'q'].forEach((k) => p.delete(k));
     setSearchParams(p, { replace: true });
-    setTicketFilter(emptyTicketFilter);
   }
 
-  function applyCobroFilters(e) {
-    e.preventDefault();
+  function applyCobroFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     p.delete('cob_q');
-    const qTrim = cobroFilter.q.trim();
+    const qTrim = String(draft?.q ?? '').trim();
     if (qTrim) p.set('cob_q', qTrim);
     setSearchParams(p, { replace: true });
   }
@@ -2357,14 +1968,12 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     p.delete('cob_q');
     setSearchParams(p, { replace: true });
-    setCobroFilter(emptyCobroFilter);
   }
 
-  function applyClienteFilters(e) {
-    e.preventDefault();
+  function applyClienteFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     p.delete('cli_q');
-    const qTrim = clienteFilter.q.trim();
+    const qTrim = String(draft?.q ?? '').trim();
     if (qTrim) p.set('cli_q', qTrim);
     setSearchParams(p, { replace: true });
   }
@@ -2373,17 +1982,15 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     p.delete('cli_q');
     setSearchParams(p, { replace: true });
-    setClienteFilter(emptyClienteFilter);
   }
 
-  function applyMembresiaFilters(e) {
-    e.preventDefault();
+  function applyMembresiaFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     p.delete('mem_q');
     p.delete('mem_eme');
-    const qTrim = membresiaFilter.q.trim();
+    const qTrim = String(draft?.q ?? '').trim();
     if (qTrim) p.set('mem_q', qTrim);
-    if (membresiaFilter.eme) p.set('mem_eme', membresiaFilter.eme);
+    if (draft?.eme) p.set('mem_eme', draft.eme);
     setSearchParams(p, { replace: true });
   }
 
@@ -2392,24 +1999,27 @@ export default function CrudDemo({
     p.delete('mem_q');
     p.delete('mem_eme');
     setSearchParams(p, { replace: true });
-    setMembresiaFilter(emptyMembresiaFilter);
   }
 
-  function applyDetalleMaqTicketFilters(e) {
-    e.preventDefault();
+  function applyDetalleMaqTicketFilters(_e, draft) {
+    const rangeError = getDateRangeError(draft?.desde, draft?.hasta);
+    if (rangeError) {
+      setMsg(rangeError);
+      return;
+    }
     const p = new URLSearchParams(searchParams);
     p.delete('dmt_q');
     p.delete('dmt_desde');
     p.delete('dmt_hasta');
     p.delete('dmt_tx');
-    const qTrim = detalleMaqTicketFilter.q.trim();
-    const desdeTrim = detalleMaqTicketFilter.desde.trim();
-    const hastaTrim = detalleMaqTicketFilter.hasta.trim();
+    const qTrim = String(draft?.q ?? '').trim();
+    const desdeTrim = String(draft?.desde ?? '').trim();
+    const hastaTrim = String(draft?.hasta ?? '').trim();
     const isMachineScoped = Boolean((p.get('dmt_maq_id') || '').trim());
     if (qTrim) p.set('dmt_q', qTrim);
     if (desdeTrim) p.set('dmt_desde', desdeTrim);
     if (hastaTrim) p.set('dmt_hasta', hastaTrim);
-    if (!isMachineScoped && detalleMaqTicketFilter.tx) p.set('dmt_tx', detalleMaqTicketFilter.tx);
+    if (!isMachineScoped && draft?.tx) p.set('dmt_tx', draft.tx);
     setSearchParams(p, { replace: true });
   }
 
@@ -2420,12 +2030,10 @@ export default function CrudDemo({
     p.delete('dmt_hasta');
     p.delete('dmt_tx');
     setSearchParams(p, { replace: true });
-    setDetalleMaqTicketFilter(emptyDetalleMaqTicketFilter);
   }
 
-  function applyDetalleSaldoMaqFilter(e) {
-    e.preventDefault();
-    const id = String(detalleSaldoMaqFilter.maq ?? '').trim();
+  function applyDetalleSaldoMaqFilter(_e, draft) {
+    const id = String(draft?.maq ?? '').trim();
     if (!id) {
       setMsg('Selecciona una máquina de cobro.');
       return;
@@ -2441,12 +2049,10 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     p.delete('ds_maq_id');
     setSearchParams(p, { replace: true });
-    setDetalleSaldoMaqFilter(emptyDetalleSaldoMaqFilter);
   }
 
-  function applyRecargoMaqFilter(e) {
-    e.preventDefault();
-    const id = String(recargoMaqFilter.maq ?? '').trim();
+  function applyRecargoMaqFilter(_e, draft) {
+    const id = String(draft?.maq ?? '').trim();
     if (!id) {
       setMsg('Selecciona una máquina de cobro.');
       return;
@@ -2462,14 +2068,12 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     p.delete('rma_maq_id');
     setSearchParams(p, { replace: true });
-    setRecargoMaqFilter(emptyRecargoMaqFilter);
   }
 
-  function applyRmmPlacaFilters(e) {
-    e.preventDefault();
+  function applyRmmPlacaFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     p.delete('rmm_placa');
-    const placaTrim = rmmPlacaFilter.placa.trim();
+    const placaTrim = String(draft?.placa ?? '').trim();
     if (placaTrim) p.set('rmm_placa', placaTrim);
     setSearchParams(p, { replace: true });
   }
@@ -2478,14 +2082,12 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     p.delete('rmm_placa');
     setSearchParams(p, { replace: true });
-    setRmmPlacaFilter(emptyRmmPlacaFilter);
   }
 
-  function applyDpmPlacaFilters(e) {
-    e.preventDefault();
+  function applyDpmPlacaFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     p.delete('dpm_placa');
-    const placaTrim = dpmPlacaFilter.placa.trim();
+    const placaTrim = String(draft?.placa ?? '').trim();
     if (placaTrim) p.set('dpm_placa', placaTrim);
     setSearchParams(p, { replace: true });
   }
@@ -2494,14 +2096,12 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     p.delete('dpm_placa');
     setSearchParams(p, { replace: true });
-    setDpmPlacaFilter(emptyDpmPlacaFilter);
   }
 
-  function applyMaquinaFilters(e) {
-    e.preventDefault();
+  function applyMaquinaFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     p.delete('maq_tma_id');
-    if (maquinaFilter.tma) p.set('maq_tma_id', maquinaFilter.tma);
+    if (draft?.tma) p.set('maq_tma_id', draft.tma);
     setSearchParams(p, { replace: true });
   }
 
@@ -2509,17 +2109,15 @@ export default function CrudDemo({
     const p = new URLSearchParams(searchParams);
     p.delete('maq_tma_id');
     setSearchParams(p, { replace: true });
-    setMaquinaFilter(emptyMaquinaFilter);
   }
 
-  function applyVehiculoFilters(e) {
-    e.preventDefault();
+  function applyVehiculoFilters(_e, draft) {
     const p = new URLSearchParams(searchParams);
     p.delete('veh_q');
     p.delete('veh_tve_id');
-    const qTrim = vehiculoFilter.q.trim();
+    const qTrim = String(draft?.q ?? '').trim();
     if (qTrim) p.set('veh_q', qTrim);
-    if (vehiculoFilter.tve) p.set('veh_tve_id', vehiculoFilter.tve);
+    if (draft?.tve) p.set('veh_tve_id', draft.tve);
     setSearchParams(p, { replace: true });
   }
 
@@ -2528,7 +2126,6 @@ export default function CrudDemo({
     p.delete('veh_q');
     p.delete('veh_tve_id');
     setSearchParams(p, { replace: true });
-    setVehiculoFilter(emptyVehiculoFilter);
   }
 
   function getMachineCardInfo(row) {
@@ -2654,13 +2251,12 @@ export default function CrudDemo({
     setMonthlyWorkspaceView('entity');
     setMonthlySelectedClient(null);
     setMonthlySelectedVehicle(null);
-    setExpandedClientRowId(null);
+    setRecordDetail(null);
     setRows([]);
     setEntity(detalleEntity);
     setEditId(null);
-    setForm(emptyForm(detalleEntity.fields));
+    setEditInitialForm(emptyForm(detalleEntity.fields));
     setMsg('');
-    setDetalleMaqTicketFilter(emptyDetalleMaqTicketFilter);
     const p = new URLSearchParams(searchParams);
     p.delete('dmt_q');
     p.delete('dmt_desde');
@@ -2680,13 +2276,12 @@ export default function CrudDemo({
     setMonthlyWorkspaceView('entity');
     setMonthlySelectedClient(null);
     setMonthlySelectedVehicle(null);
-    setExpandedClientRowId(null);
+    setRecordDetail(null);
     setRows([]);
     setEntity(saldoEntity);
     setEditId(null);
-    setForm(emptyForm(saldoEntity.fields));
+    setEditInitialForm(emptyForm(saldoEntity.fields));
     setMsg('');
-    setDetalleSaldoMaqFilter({ maq: String(maqId).trim() });
     const p = new URLSearchParams(searchParams);
     p.delete('dmt_maq_id');
     p.delete('dmt_q');
@@ -2706,13 +2301,12 @@ export default function CrudDemo({
     setMonthlyWorkspaceView('entity');
     setMonthlySelectedClient(null);
     setMonthlySelectedVehicle(null);
-    setExpandedClientRowId(null);
+    setRecordDetail(null);
     setRows([]);
     setEntity(recargaEntity);
     setEditId(null);
-    setForm(emptyForm(recargaEntity.fields));
+    setEditInitialForm(emptyForm(recargaEntity.fields));
     setMsg('');
-    setRecargoMaqFilter({ maq: String(maqId).trim() });
     const p = new URLSearchParams(searchParams);
     p.delete('dmt_maq_id');
     p.delete('dmt_q');
@@ -2729,19 +2323,14 @@ export default function CrudDemo({
     const mantenimientoEntity = findMonthlyEntity('registro-mantenimiento');
     const maqId = row?.MAQ_ID ?? row?.maq_id;
     if (!mantenimientoEntity || maqId == null || String(maqId).trim() === '') return;
-    const nextForm = {
-      ...emptyForm(mantenimientoEntity.fields),
-      MAQ_ID: String(maqId).trim(),
-      REM_MANTENIMIENTO_FECHA: toDateTimeLocalInput(new Date()),
-    };
     setMonthlyWorkspaceView('entity');
     setMonthlySelectedClient(null);
     setMonthlySelectedVehicle(null);
-    setExpandedClientRowId(null);
+    setRecordDetail(null);
     setRows([]);
     setEntity(mantenimientoEntity);
-    setEditId('__new__');
-    setForm(nextForm);
+    setEditId(null);
+    setEditInitialForm({});
     setMsg('');
     const p = new URLSearchParams(searchParams);
     p.delete('dmt_maq_id');
@@ -2800,8 +2389,11 @@ export default function CrudDemo({
     }
   }
 
-  async function save(e) {
-    e.preventDefault(); setMsg('');
+  async function save(e, formOverride) {
+    if (e?.preventDefault) e.preventDefault();
+    setMsg('');
+    const activeForm = formOverride;
+    if (!activeForm) return;
     const isEdit = editId != null && editId !== '__new__';
     if (!isEdit && entity?.ops?.c === false) {
       setMsg(`No se permite crear registros en ${entity?.label || 'esta entidad'}.`);
@@ -2819,14 +2411,14 @@ export default function CrudDemo({
         : entity.fields.filter((f) =>
           !(isEdit && f.createOnly)
           && !(editId === '__new__' && shouldHideFieldOnCreate(entity?.key, f.k))
-          && !shouldHideFieldForCurrentForm(entity?.key, f.k, form, editId === '__new__')
+          && !shouldHideFieldForCurrentForm(entity?.key, f.k, activeForm, editId === '__new__')
         );
-    const payload = preparePayload(fieldsToUse, form);
+    const payload = preparePayload(fieldsToUse, activeForm);
     if (entity.key === 'registro-mantenimiento') {
       if (isEdit) {
-        payload.REM_DESCRIPCION = String(form.REM_DESCRIPCION ?? '').trim() || null;
+        payload.REM_DESCRIPCION = String(activeForm.REM_DESCRIPCION ?? '').trim() || null;
       } else {
-        const machine = findMachineById(catalogOptions, form?.MAQ_ID);
+        const machine = findMachineById(catalogOptions, activeForm?.MAQ_ID);
         if (!machine) {
           setMsg('Selecciona una máquina válida para registrar el mantenimiento.');
           return;
@@ -2837,7 +2429,7 @@ export default function CrudDemo({
           setMsg(`La máquina seleccionada está ${estado} y no admite movimientos de mantenimiento.`);
           return;
         }
-        const mov = String(form.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase();
+        const mov = String(activeForm.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase();
         if (!mov) {
           setMsg('Selecciona una máquina para definir automáticamente el movimiento.');
           return;
@@ -2853,7 +2445,7 @@ export default function CrudDemo({
         }
         payload.REM_TIPO_MOVIMIENTO = mov;
         if (mov === 'FINALIZACION') {
-          const estadoFinal = String(form.REM_ESTADO_RESULTANTE_EMA_ID ?? '').trim();
+          const estadoFinal = String(activeForm.REM_ESTADO_RESULTANTE_EMA_ID ?? '').trim();
           if (!estadoFinal) {
             setMsg('Selecciona el estado final de la máquina para cerrar el mantenimiento.');
             return;
@@ -2865,26 +2457,26 @@ export default function CrudDemo({
       }
     }
     if (entity.key === 'maquina') {
-      if (isMachineStatusMaintenanceById(catalogOptions, form?.EMA_ID)) {
+      if (isMachineStatusMaintenanceById(catalogOptions, activeForm?.EMA_ID)) {
         setMsg('El estado Mantenimiento solo debe asignarse desde Reg. Mantenimiento.');
         return;
       }
     }
     if (entity.key === 'membresia') {
       if (isEdit) {
-        const espId = String(form.ESP_ID ?? '').trim();
+        const espId = String(activeForm.ESP_ID ?? '').trim();
         if (!espId) {
           setMsg('Selecciona el espacio asignado.');
           return;
         }
         payload.ESP_ID = Number(espId) || espId;
-        payload.ESP_UBICACION = String(form.ESP_UBICACION ?? '').trim() || null;
+        payload.ESP_UBICACION = String(activeForm.ESP_UBICACION ?? '').trim() || null;
         delete payload.MEM_ID;
       } else {
         const placa = String(
           isMonthlyVehicleMembershipView
-            ? (monthlySelectedVehicle?.VEH_PLACA ?? form.MEM_VEH_PLACA ?? '')
-            : (form.MEM_VEH_PLACA ?? ''),
+            ? (monthlySelectedVehicle?.VEH_PLACA ?? activeForm.MEM_VEH_PLACA ?? '')
+            : (activeForm.MEM_VEH_PLACA ?? ''),
         ).trim();
         if (!placa) {
           setMsg('Indica la placa del vehículo.');
@@ -2920,8 +2512,8 @@ export default function CrudDemo({
           return;
         }
         payload.VEH_ID = Number(vehId) || vehId;
-        const tmeId = String(form.TME_ID ?? '').trim();
-        const inicio = String(form.MEM_FECHA_INICIO ?? '').trim();
+        const tmeId = String(activeForm.TME_ID ?? '').trim();
+        const inicio = String(activeForm.MEM_FECHA_INICIO ?? '').trim();
         const tipos = catalogOptions?.['tipo-membresia'] || [];
         const tipo = tipos.find((x) => String(x.TME_ID) === tmeId);
         const vencEsperado = calcMembresiaVencimientoInput(inicio, Number(tipo?.TME_DURACION));
@@ -2933,7 +2525,7 @@ export default function CrudDemo({
       }
     }
     if (entity.key === 'bitacora-incidente-vehiculo' && !isEdit) {
-      const placa = String(form.VEH_ID ?? '').trim();
+      const placa = String(activeForm.VEH_ID ?? '').trim();
       if (!placa) {
         setMsg('Indica la placa del vehículo.');
         return;
@@ -2966,7 +2558,7 @@ export default function CrudDemo({
     }
     if (!isEdit && entity?.key === 'alerta') delete payload.ALE_ID;
     if (!isEdit && entity?.key === 'ticket') {
-      const placa = String(form.VEH_ID ?? '').trim();
+      const placa = String(activeForm.VEH_ID ?? '').trim();
       if (!placa) {
         setMsg('Indica la placa del vehículo.');
         return;
@@ -3036,7 +2628,7 @@ export default function CrudDemo({
       entity.key === 'usuario' &&
       isEdit &&
       isCurrentSessionUser(editId, sessionUserId) &&
-      Number(payload.USU_ACTIVO ?? form?.USU_ACTIVO ?? 1) !== 1
+      Number(payload.USU_ACTIVO ?? activeForm?.USU_ACTIVO ?? 1) !== 1
     ) {
       setMsg('No puedes desactivar la cuenta con la que tienes la sesión actual.');
       return;
@@ -3165,13 +2757,13 @@ export default function CrudDemo({
     }
   }
 
-  async function deactivateUsuario(row) {
+  async function setUsuarioActivo(row, shouldActivate) {
     try {
-      if (isCurrentSessionUser(row?.USU_ID, sessionUserId)) {
+      if (!shouldActivate && isCurrentSessionUser(row?.USU_ID, sessionUserId)) {
         setMsg('No puedes desactivar la cuenta con la que tienes la sesión actual.');
         return;
       }
-      const payload = { ...row, USU_ACTIVO: 0 };
+      const payload = { ...row, USU_ACTIVO: shouldActivate ? 1 : 0 };
       const res = await fetch(`${API_BASE}/usuario/${row.USU_ID}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -3179,11 +2771,19 @@ export default function CrudDemo({
       });
       const json = await parseJsonSafe(res);
       if (!res.ok) throw new Error(json.error || json.message || res.statusText);
-      setMsg('Usuario desactivado.');
+      setMsg(shouldActivate ? 'Usuario activado.' : 'Usuario desactivado.');
       load();
     } catch (err) {
       setMsg(userMsg(err.message));
     }
+  }
+
+  async function deactivateUsuario(row) {
+    return setUsuarioActivo(row, false);
+  }
+
+  async function activateUsuario(row) {
+    return setUsuarioActivo(row, true);
   }
 
   function downloadTag(row) {
@@ -3205,47 +2805,6 @@ export default function CrudDemo({
   }
 
   const isNewRecord = editId === '__new__';
-  const formFields = entity
-    ? !isNewRecord && editId && (entity.updateFields || entity.readOnlyOnUpdate)
-        ? (() => {
-            const updateKeys = Array.from(
-              new Set([...(entity.updateFields || []), ...(entity.readOnlyOnUpdate || [])]),
-            );
-            return entity.fields.filter(f => f.k === entity.id || updateKeys.includes(f.k));
-          })()
-        : entity.fields.filter((f) => !(editId && !isNewRecord && f.createOnly))
-    : [];
-
-  const visibleFormFields =
-    isNewRecord
-      ? formFields.filter((f) => {
-          if (entity?.key === 'ticket' && ['TIC_ID', 'TIC_CODIGO', 'TIC_FECHA_HORA_SALIDA'].includes(f.k)) {
-            return false;
-          }
-          if (isMonthlyClientVehicleView && entity?.key === 'vehiculo' && f.k === 'CLI_ID') {
-            return false;
-          }
-          if (isMonthlyVehicleMembershipView && entity?.key === 'membresia' && f.k === 'MEM_VEH_PLACA') {
-            return false;
-          }
-          if (shouldHideFieldOnCreate(entity?.key, f.k)) {
-            return false;
-          }
-          if (shouldHideFieldForCurrentForm(entity?.key, f.k, form, isNewRecord)) {
-            return false;
-          }
-          return true;
-        })
-      : formFields.filter((f) => {
-          if (isMonthlyClientVehicleView && entity?.key === 'vehiculo' && f.k === 'CLI_ID') {
-            return false;
-          }
-          if (isMonthlyVehicleMembershipView && entity?.key === 'membresia' && f.k === 'MEM_VEH_PLACA') {
-            return false;
-          }
-          return !shouldHideFieldForCurrentForm(entity?.key, f.k, form, isNewRecord);
-        });
-
   const listContextHint = useMemo(() => {
     if (!sectionPath || !entity?.key) return null;
     return getAdminListContextHelpModel(sectionPath, entity.key);
@@ -3299,6 +2858,11 @@ export default function CrudDemo({
     isMonthlyVehicleMembershipView,
     scopedRemMaqId,
   ]);
+  const loadingCopy = useMemo(
+    () => getCrudLoadingCopy(entity?.key, searchParams, { isRefresh: loading && displayRows.length > 0 }),
+    [entity?.key, searchParams, loading, displayRows.length],
+  );
+  const skeletonColumnCount = Math.min(Math.max(displayColumns.length || 6, 4), 8);
   const showTableActions =
     !!entity
     && (entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket' || entity.key === 'detalle-saldo');
@@ -3320,6 +2884,9 @@ export default function CrudDemo({
     ? String(scopedMachineAction?.MAQ_CODIGO ?? scopedMachineAction?.maq_codigo ?? '').trim()
       || labelMaquina({ MAQ_ID: scopedMachineActionMaqId }, catalogOptions)
     : '';
+  const needsMachineSearchApply =
+    (entity?.key === 'detalle-saldo' && !scopedMachineActionMaqId)
+    || (entity?.key === 'recargo-maquina' && !scopedMachineActionMaqId);
 
   return (
     <div className="crudx-shell">
@@ -3774,8 +3341,8 @@ export default function CrudDemo({
                                 nextForm.MAQ_ID = remMaqId;
                                 nextForm.REM_MANTENIMIENTO_FECHA = toDateTimeLocalInput(new Date());
                               }
+                              setEditInitialForm(nextForm);
                               setEditId('__new__');
-                              setForm(nextForm);
                             }
                     }
                     className="crudx-btn-secondary">
@@ -3793,7 +3360,10 @@ export default function CrudDemo({
                 )}
               </div>
 
-              {entity?.key === 'registro-mantenimiento' && scopedMachineActionMaqId ? (
+              {(entity?.key === 'registro-mantenimiento'
+                || entity?.key === 'detalle-saldo'
+                || entity?.key === 'recargo-maquina')
+              && scopedMachineActionMaqId ? (
                 <div className="crudx-scoped-filter-note">
                   <span>Máquina</span>
                   <strong>{scopedMachineActionLabel || `MAQ_ID ${scopedMachineActionMaqId}`} · ID {scopedMachineActionMaqId}</strong>
@@ -3828,924 +3398,70 @@ export default function CrudDemo({
                 </section>
               ) : null}
 
-              {entity.key === 'bitacora-incidente-vehiculo' ? (
-                <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyBivFilters}>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Placa</span>
-                    <input
-                      className="admin-search-input crudx-admin-filter-input-compact"
-                      type="search"
-                      value={bivFilter.placa}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, placa: sanitizeSearchValue('placa', e.target.value) }))}
-                      placeholder={getSearchPlaceholder('placa')}
-                      aria-label="Filtrar por placa"
-                    />
-                  </label>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Estado</span>
-                    <select
-                      className="admin-search-select"
-                      value={bivFilter.resuelto}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, resuelto: e.target.value }))}
-                      aria-label="Estado del incidente"
-                    >
-                      <option value="">Todos</option>
-                      <option value="0">Pendientes</option>
-                      <option value="1">Resueltos</option>
-                    </select>
-                  </label>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Desde</span>
-                    <input
-                      className="admin-search-input"
-                      type="date"
-                      value={bivFilter.desde}
-                      max={TODAY}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, desde: clampDateYmd(e.target.value) }))}
-                      aria-label="Fecha desde"
-                    />
-                  </label>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Hasta</span>
-                    <input
-                      className="admin-search-input"
-                      type="date"
-                      value={bivFilter.hasta}
-                      max={TODAY}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, hasta: clampDateYmd(e.target.value) }))}
-                      aria-label="Fecha hasta"
-                    />
-                  </label>
-                  <div className="admin-search-actions">
-                    <button type="submit" className="admin-btn-search" disabled={loading}>
-                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                    </button>
-                    <button
-                      type="button"
-                      className="admin-btn-search-clear"
-                      onClick={clearBivFilters}
-                      disabled={loading}
-                    >
-                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                    </button>
-                  </div>
-                </form>
-              ) : entity.key === 'alerta' ? (
-                <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyAlertaFilters}>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Estado</span>
-                    <select
-                      className="admin-search-select"
-                      value={alertaFilter.eal}
-                      onChange={(e) => setAlertaFilter((f) => ({ ...f, eal: e.target.value }))}
-                      aria-label="Estado de la alerta"
-                    >
-                      <option value="">Todos</option>
-                      {(catalogOptions?.['estado-alerta'] || []).map((x) => (
-                        <option key={x.EAL_ID} value={String(x.EAL_ID)}>
-                          {x.EAL_ESTADO}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Tipo de alerta</span>
-                    <select
-                      className="admin-search-select"
-                      value={alertaFilter.tal}
-                      onChange={(e) => setAlertaFilter((f) => ({ ...f, tal: e.target.value }))}
-                      aria-label="Tipo de alerta"
-                    >
-                      <option value="">Todos</option>
-                      {(catalogOptions?.['tipo-alerta'] || []).map((x) => (
-                        <option key={x.TAL_ID} value={String(x.TAL_ID)}>
-                          {x.TAL_TIPO}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Máquina</span>
-                    <select
-                      className="admin-search-select"
-                      value={alertaFilter.maq}
-                      onChange={(e) => setAlertaFilter((f) => ({ ...f, maq: e.target.value }))}
-                      aria-label="Máquina"
-                    >
-                      <option value="">Todas</option>
-                      {(catalogOptions?.maquina || []).map((x) => (
-                        <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
-                          {labelMaquina(x, catalogOptions)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="admin-search-actions">
-                    <button type="submit" className="admin-btn-search" disabled={loading}>
-                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                    </button>
-                    <button
-                      type="button"
-                      className="admin-btn-search-clear"
-                      onClick={clearAlertaFilters}
-                      disabled={loading}
-                    >
-                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                    </button>
-                  </div>
-                </form>
-              ) : entity.key === 'detalle-saldo' ? (
-                <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyDetalleSaldoMaqFilter}>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Máquina de cobro</span>
-                    <select
-                      className="admin-search-select"
-                      value={detalleSaldoMaqFilter.maq}
-                      onChange={(e) => setDetalleSaldoMaqFilter((f) => ({ ...f, maq: e.target.value }))}
-                      required
-                      aria-required="true"
-                      aria-label="Máquina de cobro"
-                    >
-                      <option value="" disabled>
-                        Seleccione una máquina...
-                      </option>
-                      {maquinasTipoCobroList(catalogOptions, { onlyOperative: true }).map((x) => (
-                        <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
-                          {labelMaquina(x, catalogOptions)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="admin-search-actions">
-                    <button type="submit" className="admin-btn-search" disabled={loading}>
-                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                    </button>
-                    <button
-                      type="button"
-                      className="admin-btn-search-clear"
-                      onClick={clearDetalleSaldoMaqFilter}
-                      disabled={loading}
-                    >
-                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                    </button>
-                  </div>
-                </form>
-              ) : entity.key === 'maquina' ? (
-                <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyMaquinaFilters}>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Tipo de máquina</span>
-                    <select
-                      className="admin-search-select"
-                      value={maquinaFilter.tma}
-                      onChange={(e) => setMaquinaFilter((f) => ({ ...f, tma: e.target.value }))}
-                      aria-label="Filtrar máquinas por tipo"
-                    >
-                      <option value="">Todos</option>
-                      {(catalogOptions?.['tipo-maquina'] || [])
-                        .filter((x) => !/cabina/i.test(String(x?.TMA_TIPO || '')))
-                        .map((x) => (
-                        <option key={x.TMA_ID} value={String(x.TMA_ID)}>
-                          {x.TMA_TIPO}
-                        </option>
-                        ))}
-                    </select>
-                  </label>
-                  <div className="admin-search-actions">
-                    <button type="submit" className="admin-btn-search" disabled={loading}>
-                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                    </button>
-                    <button
-                      type="button"
-                      className="admin-btn-search-clear"
-                      onClick={clearMaquinaFilters}
-                      disabled={loading}
-                    >
-                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                    </button>
-                  </div>
-                </form>
-              ) : entity.key === 'recargo-maquina' ? (
-                <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyRecargoMaqFilter}>
-                  <label className="crudx-ticket-search-estado">
-                    <span className="crudx-ticket-search-estado-label">Máquina de cobro</span>
-                    <select
-                      className="admin-search-select"
-                      value={recargoMaqFilter.maq}
-                      onChange={(e) => setRecargoMaqFilter((f) => ({ ...f, maq: e.target.value }))}
-                      required
-                      aria-required="true"
-                      aria-label="Filtrar recargos por máquina de cobro"
-                    >
-                      <option value="" disabled>
-                        Seleccione una máquina...
-                      </option>
-                      {maquinasTipoCobroList(catalogOptions, { onlyOperative: true }).map((x) => (
-                        <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
-                          {labelMaquina(x, catalogOptions)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="admin-search-actions">
-                    <button type="submit" className="admin-btn-search" disabled={loading}>
-                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                    </button>
-                    <button
-                      type="button"
-                      className="admin-btn-search-clear"
-                      onClick={clearRecargoMaqFilter}
-                      disabled={loading}
-                    >
-                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                    </button>
-                  </div>
-                </form>
-              ) : entity.key === 'vehiculo' ? (
-                <div className="crudx-ticket-search-block">
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyVehiculoFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={vehiculoFilter.q}
-                        onChange={(e) => setVehiculoFilter((f) => ({ ...f, q: sanitizeSearchValue('placa', e.target.value) }))}
-                        placeholder={getSearchPlaceholder('placa')}
-                        autoComplete="off"
-                        aria-label="Filtrar vehículos por placa"
-                      />
-                    </div>
-                    <label className="crudx-ticket-search-estado">
-                      <span className="crudx-ticket-search-estado-label">Tipo de vehículo</span>
-                      <select
-                        className="admin-search-select"
-                        value={vehiculoFilter.tve}
-                        onChange={(e) => setVehiculoFilter((f) => ({ ...f, tve: e.target.value }))}
-                        aria-label="Filtrar vehículos por tipo"
-                      >
-                        <option value="">Todos</option>
-                        {(catalogOptions?.['tipo-vehiculo'] || []).map((x) => (
-                          <option key={x.TVE_ID} value={String(x.TVE_ID)}>
-                            {x.TVE_TIPO}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearVehiculoFilters}
-                        disabled={loading}
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              ) : entity.key === 'ticket' ? (
-                <div className="crudx-ticket-search-block">
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyTicketFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={ticketFilter.q}
-                        onChange={(e) => setTicketFilter((f) => ({ ...f, q: sanitizeSearchValue('ticket', e.target.value) }))}
-                        placeholder={getSearchPlaceholder('ticket')}
-                        autoComplete="off"
-                        aria-label="Buscar por código de ticket o placa"
-                      />
-                    </div>
-                    <label className="crudx-ticket-search-estado" htmlFor="crud-ticket-filter-estado">
-                      <span className="crudx-ticket-search-estado-label">Estado</span>
-                      <select
-                        id="crud-ticket-filter-estado"
-                        className="admin-search-select"
-                        value={ticketFilter.eti}
-                        onChange={(e) => setTicketFilter((f) => ({ ...f, eti: e.target.value }))}
-                        aria-label="Estado del ticket"
-                      >
-                        <option value="">Todos</option>
-                        {(catalogOptions?.['estado-ticket'] || []).map((x) => (
-                          <option key={x.ETI_ID} value={String(x.ETI_ID)}>
-                            {x.ETI_ESTADO != null && String(x.ETI_ESTADO).trim() !== ''
-                              ? String(x.ETI_ESTADO)
-                              : labelEstadoTicket(x.ETI_ID, catalogOptions)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearTicketFilters}
-                        disabled={loading}
-                        title="Quitar búsqueda y filtros de la lista"
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              ) : entity.key === 'cobro' ? (
-                <div className="crudx-ticket-search-block">
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyCobroFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={cobroFilter.q}
-                        onChange={(e) => setCobroFilter((f) => ({ ...f, q: sanitizeSearchValue('cobro', e.target.value) }))}
-                        placeholder={getSearchPlaceholder('cobro')}
-                        autoComplete="off"
-                        aria-label="Buscar cobro por ticket ID o NIT / CF"
-                      />
-                    </div>
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearCobroFilters}
-                        disabled={loading}
-                        title="Quitar búsqueda de cobros"
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              ) : entity.key === 'cliente' ? (
-                <div className="crudx-ticket-search-block">
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyClienteFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={clienteFilter.q}
-                        onChange={(e) => setClienteFilter((f) => ({ ...f, q: sanitizeSearchValue('cliente', e.target.value) }))}
-                        placeholder={getSearchPlaceholder('cliente')}
-                        autoComplete="off"
-                        aria-label="Buscar cliente por nombre, apellido, nombre completo o DPI"
-                      />
-                    </div>
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearClienteFilters}
-                        disabled={loading}
-                        title="Quitar búsqueda de clientes"
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              ) : entity.key === 'membresia' && !isMonthlyVehicleMembershipView ? (
-                <div className="crudx-ticket-search-block">
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyMembresiaFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={membresiaFilter.q}
-                        onChange={(e) => setMembresiaFilter((f) => ({ ...f, q: sanitizeSearchValue('general', e.target.value) }))}
-                        placeholder={getSearchPlaceholder('membresia')}
-                        autoComplete="off"
-                        aria-label="Filtrar membresía por cliente o placa"
-                      />
-                    </div>
-                    <label className="crudx-ticket-search-estado">
-                      <span className="crudx-ticket-search-estado-label">Estado membresía</span>
-                      <select
-                        className="admin-search-select"
-                        value={membresiaFilter.eme}
-                        onChange={(e) => setMembresiaFilter((f) => ({ ...f, eme: e.target.value }))}
-                        aria-label="Filtrar membresía por estado"
-                      >
-                        <option value="">Todos</option>
-                        {(catalogOptions?.['estado-membresia'] || []).map((x) => (
-                          <option key={x.EME_ID} value={String(x.EME_ID)}>
-                            {x.EME_ESTADO}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearMembresiaFilters}
-                        disabled={loading}
-                        title="Quitar filtros de membresías"
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              ) : entity.key === 'detalle-pago-membresia' ? (
-                <div className="crudx-ticket-search-block">
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyDpmPlacaFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={dpmPlacaFilter.placa}
-                        onChange={(e) => setDpmPlacaFilter((f) => ({ ...f, placa: sanitizeSearchValue('placa', e.target.value) }))}
-                        placeholder={getSearchPlaceholder('placa')}
-                        autoComplete="off"
-                        aria-label="Filtrar detalle de pago membresía por placa; deja vacío para ver todos"
-                      />
-                    </div>
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearDpmPlacaFilters}
-                        disabled={loading}
-                        title="Quitar filtro de placa"
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              ) : entity.key === 'detalle-maquina-ticket' ? (
-                <div className="crudx-ticket-search-block">
-                  {scopedDmtMaqId ? (
-                    <div className="crudx-scoped-filter-note">
-                      <span>Máquina</span>
-                      <strong>{scopedMachineActionLabel || `MAQ_ID ${scopedDmtMaqId}`}</strong>
-                    </div>
-                  ) : null}
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyDetalleMaqTicketFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={detalleMaqTicketFilter.q}
-                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, q: sanitizeSearchValue('ticket', e.target.value) }))}
-                        placeholder={getSearchPlaceholder('detalleMaq')}
-                        autoComplete="off"
-                        aria-label="Filtrar detalle máquina-ticket por placa o ticket"
-                      />
-                    </div>
-                    <label className="crudx-ticket-search-estado">
-                      <span className="crudx-ticket-search-estado-label">Desde</span>
-                      <input
-                        className="admin-search-input"
-                        type="datetime-local"
-                        value={detalleMaqTicketFilter.desde}
-                        max={NOW_LOCAL}
-                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, desde: e.target.value > NOW_LOCAL ? NOW_LOCAL : e.target.value }))}
-                        autoComplete="off"
-                        aria-label="Fecha y hora inicial"
-                      />
-                    </label>
-                    <label className="crudx-ticket-search-estado">
-                      <span className="crudx-ticket-search-estado-label">Hasta</span>
-                      <input
-                        className="admin-search-input"
-                        type="datetime-local"
-                        value={detalleMaqTicketFilter.hasta}
-                        max={NOW_LOCAL}
-                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, hasta: e.target.value > NOW_LOCAL ? NOW_LOCAL : e.target.value }))}
-                        autoComplete="off"
-                        aria-label="Fecha y hora final"
-                      />
-                    </label>
-                    {!scopedDmtMaqId ? (
-                      <label className="crudx-ticket-search-estado">
-                        <span className="crudx-ticket-search-estado-label">Transacción</span>
-                        <select
-                          className="admin-search-select"
-                          value={detalleMaqTicketFilter.tx}
-                          onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, tx: e.target.value }))}
-                          aria-label="Filtrar detalle máquina-ticket por transacción"
-                        >
-                          <option value="">Todas</option>
-                          {detalleMaqTicketTxOptions.map((tx) => (
-                            <option key={tx} value={tx}>{tx}</option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearDetalleMaqTicketFilters}
-                        disabled={loading}
-                        title="Quitar filtros de Det. Máq/Ticket"
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              ) : entity.key === 'registro-movimiento-membresia' ? (
-                <div className="crudx-ticket-search-block">
-                  <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyRmmPlacaFilters}>
-                    <div className="admin-search-input-wrap">
-                      <input
-                        className="admin-search-input"
-                        type="search"
-                        value={rmmPlacaFilter.placa}
-                        onChange={(e) => setRmmPlacaFilter((f) => ({ ...f, placa: sanitizeSearchValue('placa', e.target.value) }))}
-                        placeholder="Ej. P123ABC (opcional)"
-                        autoComplete="off"
-                        aria-label="Filtrar movimientos de membresía por placa; deja vacío para ver todos"
-                      />
-                    </div>
-                    <div className="admin-search-actions">
-                      <button type="submit" className="admin-btn-search" disabled={loading}>
-                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn-search-clear"
-                        onClick={clearRmmPlacaFilters}
-                        disabled={loading}
-                        title="Quitar filtro de placa"
-                      >
-                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
-                      </button>
-                    </div>
-                  </form>
+              {loading ? (
+                <div className="crudx-search-pending-banner" role="status" aria-live="polite">
+                  <span className="ops-loader" aria-hidden="true" />
+                  <span>{loadingCopy.title}</span>
                 </div>
               ) : null}
 
-              {/* Form */}
-              {editId && (!isNewRecord || entity?.ops?.c !== false) && (
-                <form onSubmit={save} className="crudx-form-panel">
-                  <div className="crudx-form-head crudx-form-head--with-close">
-                    <div>
-                      <strong>
-                        {isNewRecord ? `Nuevo: ${entity.label}` : `Editar: ${entity.label}`}
-                      </strong>
-                      {!isNewRecord ? (
-                        <div className="crudx-form-note" style={{ marginTop: 6, marginBottom: 0 }}>
-                          {getDbColumnLabel(entity.id, CRUD_COLUMN_LABELS)}:{' '}
-                          <span style={{ fontWeight: 600, color: 'var(--color-text, #0f172a)' }}>{editId}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      className="crudx-form-close"
-                      onClick={cancelEdit}
-                      aria-label="Cerrar panel de edición"
-                      title="Cerrar"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="crudx-form-grid">
-                    {entity.key === 'membresia' && isNewRecord ? (
-                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
-                        El vencimiento se calcula automáticamente según el tipo de membresía (duración en días) y la fecha de inicio.
-                      </p>
-                    ) : null}
-                    {entity.key === 'membresia' && isNewRecord && isMonthlyVehicleMembershipView ? (
-                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
-                        La membresía se activará para la placa <strong>{monthlySelectedVehiclePlate}</strong>. Solo completa el plan, la fecha de inicio y ajusta el estado si hace falta.
-                      </p>
-                    ) : null}
-                    {entity.key === 'membresia' && !isNewRecord ? (
-                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
-                        Esta vista es consultiva. La edición solo permite ajustar el espacio asignado y su ubicación; el plan, estado, placa y vigencia se gestionan por el flujo de pago/renovación.
-                      </p>
-                    ) : null}
-                    {entity.key === 'ticket' && isNewRecord ? (
-                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
-                        El código del ticket se genera solo. La salida se registra al editar el ticket. Al crear,
-                        el estado queda en Activo y no es editable.
-                      </p>
-                    ) : null}
-                    {entity.key === 'vehiculo' && isNewRecord && isMonthlyClientVehicleView ? (
-                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
-                        Este vehículo quedará vinculado automáticamente a <strong>{monthlySelectedClientName}</strong>.
-                      </p>
-                    ) : null}
-                    {entity.key === 'registro-mantenimiento' && isNewRecord ? (
-                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
-                        El flujo se define por el estado actual de la máquina: si está <strong>Operativa</strong> se registrará <strong>Inicio</strong>; si ya está en <strong>Mantenimiento</strong> se registrará <strong>Finalización</strong>.
-                      </p>
-                    ) : null}
-                    {entity.key === 'tarifa' && isNewRecord ? (
-                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
-                        Define el precio por hora de estacionamiento. Los <strong>minutos de gracia</strong> son el tiempo inicial sin cobro (ej. 15 min = si sales antes de 15 min no se cobra). El ID se genera automáticamente.
-                      </p>
-                    ) : null}
-                    {visibleFormFields.map((f) => {
-                      const fieldId = `crud-${entity.key}-${String(f.k).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-                      const ticketVehIdAsPlacaLabel =
-                        entity?.key === 'ticket' && isNewRecord && f.k === 'VEH_ID';
-                      const lblBase = ticketVehIdAsPlacaLabel
-                        ? 'Placa'
-                        : getDbColumnLabel(f.k, CRUD_COLUMN_LABELS);
-                      const lbl = lblBase;
-                      const readOnlyOnUpdate = !isNewRecord && !!entity?.readOnlyOnUpdate?.includes(f.k);
-                      const readOnlyOnCreate = isNewRecord && !!(entity?.readOnlyOnCreate || []).includes(f.k);
-                      const lockByAlertBusinessRule =
-                        entity?.key === 'alerta' &&
-                        !isNewRecord &&
-                        (f.k === 'ALE_USU_ID_RESOLVIO' || f.k === 'ALE_DESCRIPCION_SOLUCION') &&
-                        !form?.ALE_FECHA_ATENCION;
-                      const lockResolverUserByRole =
-                        !sessionIsFullAdmin &&
-                        !isNewRecord &&
-                        (
-                          (entity?.key === 'alerta' && f.k === 'ALE_USU_ID_RESOLVIO') ||
-                          (entity?.key === 'bitacora-incidente-vehiculo' && f.k === 'USU_ID')
-                        );
-                      const lockOwnSessionActivationToggle =
-                        entity?.key === 'usuario' &&
-                        f.k === 'USU_ACTIVO' &&
-                        !isNewRecord &&
-                        isCurrentSessionUser(editId, sessionUserId);
-                      const lockMachineStatusByMaintenanceFlow =
-                        entity?.key === 'maquina' &&
-                        f.k === 'EMA_ID' &&
-                        isMachineStatusMaintenanceById(catalogOptions, form?.EMA_ID);
-                      const lockScopedMaintenanceMachine =
-                        entity?.key === 'registro-mantenimiento' &&
-                        f.k === 'MAQ_ID' &&
-                        Boolean((searchParams.get('rem_maq_id') || '').trim());
-                      const fieldDisabled =
-                        (f.k === entity.id && editId !== '__new__') ||
-                        (isNewRecord && f.k === entity?.id) ||
-                        readOnlyOnUpdate ||
-                        readOnlyOnCreate ||
-                        (entity?.key === 'cobro' && isNewRecord && ['COB_HORAS_TOTALES', 'COB_MONTO_TOTAL', 'COB_VUELTO', 'COB_FECHA_HORA', 'TAR_ID'].includes(f.k)) ||
-                        lockByAlertBusinessRule ||
-                        lockResolverUserByRole ||
-                        lockOwnSessionActivationToggle ||
-                        lockMachineStatusByMaintenanceFlow ||
-                        lockScopedMaintenanceMachine;
-                      const maintenanceMachine =
-                        entity?.key === 'registro-mantenimiento'
-                          ? findMachineById(catalogOptions, form?.MAQ_ID)
-                          : null;
-                      const selectOptions = f.t === 'select'
-                        ? (() => {
-                            if (Array.isArray(f.options)) {
-                              if (entity?.key === 'registro-mantenimiento' && f.k === 'REM_TIPO_MOVIMIENTO') {
-                                return maintenanceMovementOptionsForMachine(maintenanceMachine);
-                              }
-                              return f.options;
-                            }
-                            if (f.catalog === 'estado-maquina' && f.estadoMaquinaResultadoMantenimiento) {
-                              return filterMaintenanceResultMachineStatuses(catalogOptions[f.catalog] || []);
-                            }
-                            if (entity?.key === 'maquina' && f.catalog === 'estado-maquina') {
-                              return machineManualStatusOptions(catalogOptions, form?.EMA_ID);
-                            }
-                            if (f.catalog !== 'maquina') return catalogOptions[f.catalog] || [];
-                            if (entity?.key === 'registro-mantenimiento') {
-                              const eligible = maquinasMantenimientoElegiblesList(catalogOptions);
-                              const scopedMaqId = String(searchParams.get('rem_maq_id') || '').trim();
-                              const scopedMaq = scopedMaqId ? findMachineById(catalogOptions, scopedMaqId) : null;
-                              if (scopedMaq && !eligible.some((item) => String(item.MAQ_ID) === scopedMaqId)) {
-                                return [scopedMaq, ...eligible];
-                              }
-                              return eligible;
-                            }
-                            if (f.maquinaSoloCobro) {
-                              return maquinasTipoCobroList(catalogOptions, {
-                                onlyOperative: !!f.maquinaSoloOperativa,
-                              });
-                            }
-                            if (f.maquinaSoloOperativa) {
-                              return maquinasOperativasList(catalogOptions);
-                            }
-                            return catalogOptions[f.catalog] || [];
-                          })()
-                        : null;
-                      const lockMaintenanceMovement =
-                        entity?.key === 'registro-mantenimiento' &&
-                        f.k === 'REM_TIPO_MOVIMIENTO' &&
-                        (
-                          String(form?.MAQ_ID ?? '').trim() === '' ||
-                          (Array.isArray(selectOptions) && selectOptions.length <= 1)
-                        );
-                      const effectiveFieldDisabled = fieldDisabled || lockMaintenanceMovement;
-                      return (
-                        <div
-                          key={f.k}
-                          className={`crudx-field${
-                            f.req ? ' crudx-field--required' : ''
-                          }${
-                            f.t === 'checkbox'
-                              ? ' crudx-field--checkbox'
-                              : f.t === 'select'
-                                ? ' crudx-field--select'
-                                : ''
-                          }${
-                            entity?.key === 'registro-mantenimiento' && f.k === 'REM_DESCRIPCION'
-                              ? ' crudx-field--maintenance-desc'
-                              : ''
-                          }`}
-                        >
-                          {f.t === 'checkbox' ? (
-                            <label htmlFor={fieldId} className="crudx-checkbox-inline">
-                              <input
-                                id={fieldId}
-                                type="checkbox"
-                                checked={!!form[f.k]}
-                                disabled={fieldDisabled}
-                                onChange={(ev) =>
-                                  setForm((p) => ({ ...p, [f.k]: ev.target.checked ? 1 : 0 }))
-                                }
-                                aria-label={lbl}
-                              />
-                              <span>{lbl}</span>
-                            </label>
-                          ) : f.t === 'select' ? (
-                            <>
-                              <label htmlFor={fieldId}>{lbl}</label>
-                              <select
-                                id={fieldId}
-                                className="crudx-select"
-                                value={form[f.k] ?? ''}
-                                required={!!f.req && !(isNewRecord && f.k === entity?.id)}
-                                disabled={effectiveFieldDisabled}
-                                style={effectiveFieldDisabled ? readOnlyFieldStyle : undefined}
-                                onChange={(ev) => {
-                                  const nextValue = ev.target.value;
-                                  setForm((p) => {
-                                    if (entity?.key === 'membresia' && f.k === 'ESP_ID') {
-                                      const selectedEspacio = (catalogOptions?.espacio || [])
-                                        .find((row) => String(row?.ESP_ID) === String(nextValue));
-                                      return {
-                                        ...p,
-                                        [f.k]: nextValue,
-                                        ESP_UBICACION: selectedEspacio?.ESP_UBICACION ?? p.ESP_UBICACION ?? '',
-                                      };
-                                    }
-                                    return { ...p, [f.k]: nextValue };
-                                  });
-                                }}
-                                aria-label={lbl}
-                                title={lbl}
-                              >
-                                {f.req ? (
-                                  <option value="" disabled>
-                                    Seleccione…
-                                  </option>
-                                ) : (
-                                  <option value="">—</option>
-                                )}
-                                {(selectOptions || []).map((row) => {
-                                  const val =
-                                    Array.isArray(f.options)
-                                      ? String(row.value ?? '')
-                                      : row[f.valueKey] != null ? String(row[f.valueKey]) : '';
-                                  if (val === '') return null;
-                                  const lab = Array.isArray(f.options)
-                                    ? String(row.label ?? val)
-                                    : f.catalog === 'usuario'
-                                    ? [row.USU_PRIMER_NOMBRE, row.USU_PRIMER_APELLIDO].filter(Boolean).join(' ') || val
-                                    : f.catalog === 'maquina'
-                                      ? entity?.key === 'registro-mantenimiento'
-                                        ? `${labelMaquina(row, catalogOptions)} (${String(row.EMA_ESTADO ?? 'Sin estado').trim() || 'Sin estado'})`
-                                        : labelMaquina(row, catalogOptions)
-                                      : f.catalog === 'incidente'
-                                        ? labelIncidente(row)
-                                        : row[f.labelKey] != null
-                                          ? String(row[f.labelKey])
-                                          : val;
-                                  return (
-                                    <option key={`${f.k}-${val}`} value={val}>
-                                      {lab}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                              {f.help || (entity?.key === 'registro-mantenimiento' && f.k === 'REM_TIPO_MOVIMIENTO') ? (
-                                <p
-                                  className="crudx-form-note"
-                                  style={{ margin: '4px 0 0', fontSize: 11, lineHeight: 1.4 }}
-                                >
-                                  {entity?.key === 'registro-mantenimiento' && f.k === 'REM_TIPO_MOVIMIENTO'
-                                    ? maintenanceMovementHelp(maintenanceMachine)
-                                    : f.help}
-                                </p>
-                              ) : null}
-                            </>
-                          ) : entity?.key === 'registro-mantenimiento' && f.k === 'REM_DESCRIPCION' ? (
-                            <>
-                              <label htmlFor={fieldId}>{lbl}</label>
-                              <textarea
-                                id={fieldId}
-                                className="crudx-textarea"
-                                value={form[f.k] ?? ''}
-                                placeholder={getFieldPlaceholder(f.k, {
-                                  explicit: entity?.key === 'registro-mantenimiento' && f.k === 'REM_DESCRIPCION'
-                                    ? 'Detalle breve del trabajo realizado o hallazgo encontrado'
-                                    : undefined,
-                                  label: lblBase,
-                                  fieldType: 'textarea',
-                                })}
-                                disabled={fieldDisabled}
-                                style={fieldDisabled ? readOnlyFieldStyle : undefined}
-                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: sanitizeFieldValue(f.k, ev.target.value, { fieldType: 'textarea' }) }))}
-                                aria-label={lbl}
-                                title={lbl}
-                                rows={2}
-                              />
-                            </>
-                          ) : (
-                            <>
-                              <label htmlFor={fieldId}>{lbl}</label>
-                              <input
-                                id={fieldId}
-                                type={f.t === 'password' && editId !== '__new__' ? 'text' : (f.t || 'text')}
-                                value={form[f.k] ?? ''}
-                                placeholder={getFieldPlaceholder(f.k, {
-                                  explicit: f.placeholder,
-                                  label: lblBase,
-                                  fieldType: f.t,
-                                  isAutoId: isNewRecord && f.k === entity?.id,
-                                })}
-                                required={!!f.req && !(isNewRecord && f.k === entity?.id)}
-                                disabled={fieldDisabled}
-                                style={fieldDisabled ? readOnlyFieldStyle : undefined}
-                                inputMode={getInputMode(f.k)}
-                                maxLength={getMaxLength(f.k)}
-                                max={f.t === 'date' ? TODAY : f.t === 'datetime-local' ? NOW_LOCAL : undefined}
-                                onChange={(ev) => {
-                                  let next = ev.target.value;
-                                  if (f.t === 'date') next = clampDateYmd(next);
-                                  if (f.t === 'datetime-local' && next > NOW_LOCAL) next = NOW_LOCAL;
-                                  setForm((p) => ({
-                                    ...p,
-                                    [f.k]: sanitizeFieldValue(f.k, next, {
-                                      fieldType: f.t,
-                                      asPlate: f.k === 'VEH_ID',
-                                    }),
-                                  }));
-                                }}
-                                aria-label={lbl}
-                                title={lbl}
-                              />
-                              {f.help ? (
-                                <p
-                                  className="crudx-form-note"
-                                  style={{ margin: '4px 0 0', fontSize: 11, lineHeight: 1.4 }}
-                                >
-                                  {f.help}
-                                </p>
-                              ) : null}
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="crudx-form-actions">
-                    <button type="submit" className="crudx-btn-primary">Guardar</button>
-                    <button type="button" onClick={cancelEdit} className="crudx-btn-secondary">Cancelar</button>
-                  </div>
-                </form>
-              )}
+              <CrudEntitySearchBar
+                entityKey={entity.key}
+                syncKey={bivQueryKey}
+                searchParams={searchParams}
+                loading={loading}
+                catalogOptions={catalogOptions}
+                isMonthlyVehicleMembershipView={isMonthlyVehicleMembershipView}
+                todayYmd={TODAY}
+                nowLocal={NOW_LOCAL}
+                scopedDmtMaqId={scopedDmtMaqId}
+                scopedMachineActionMaqId={scopedMachineActionMaqId}
+                scopedMachineActionLabel={scopedMachineActionLabel}
+                detalleMaqTicketTxOptions={detalleMaqTicketTxOptions}
+                labelMaquina={labelMaquina}
+                labelEstadoTicket={labelEstadoTicket}
+                handlers={{
+                  applyBivFilters,
+                  clearBivFilters,
+                  applyAlertaFilters,
+                  clearAlertaFilters,
+                  applyTicketFilters,
+                  clearTicketFilters,
+                  applyCobroFilters,
+                  clearCobroFilters,
+                  applyClienteFilters,
+                  clearClienteFilters,
+                  applyMembresiaFilters,
+                  clearMembresiaFilters,
+                  applyDpmPlacaFilters,
+                  clearDpmPlacaFilters,
+                  applyDetalleMaqTicketFilters,
+                  clearDetalleMaqTicketFilters,
+                  applyRmmPlacaFilters,
+                  clearRmmPlacaFilters,
+                  applyDetalleSaldoMaqFilter,
+                  clearDetalleSaldoMaqFilter,
+                  applyRecargoMaqFilter,
+                  clearRecargoMaqFilter,
+                  applyMaquinaFilters,
+                  clearMaquinaFilters,
+                  applyVehiculoFilters,
+                  clearVehiculoFilters,
+                }}
+              />
 
               {/* Table */}
-              {loading ? (
-                <div className="ops-loader-wrap">
-                  <span className="ops-loader" aria-hidden="true" />
-                  <span>Cargando registros...</span>
-                </div>
-              ) : entity?.key === 'detalle-saldo' && !(searchParams.get('ds_maq_id') || '').trim() ? (
+              {loading && displayRows.length === 0 && !needsMachineSearchApply ? (
+                <CrudTableLoadingPanel
+                  title={loadingCopy.title}
+                  hint={loadingCopy.hint}
+                  columnCount={skeletonColumnCount}
+                />
+              ) : needsMachineSearchApply ? (
                 <p className="crudx-empty" role="status">
-                  Elige una máquina de cobro arriba y pulsa "Aplicar filtros" para cargar el detalle de saldo.
-                </p>
-              ) : entity?.key === 'recargo-maquina' && !(searchParams.get('rma_maq_id') || '').trim() ? (
-                <p className="crudx-empty" role="status">
-                  Elige una maquina de cobro arriba y pulsa "Buscar" para consultar el historial.
+                  {entity?.key === 'detalle-saldo'
+                    ? 'Elige una máquina de cobro arriba y pulsa "Buscar" para cargar el detalle de saldo.'
+                    : 'Elige una máquina de cobro arriba y pulsa "Buscar" para consultar el historial.'}
                 </p>
               ) : displayRows.length === 0 ? (
                 <p className="crudx-empty" role="status">
@@ -4767,9 +3483,19 @@ export default function CrudDemo({
                 </p>
               ) : (
                 <div
-                  className="crudx-table-scroll"
+                  className={`crudx-table-scroll${loading ? ' crudx-table-scroll--busy' : ''}`}
                   title="Si hay muchas filas, usa el scroll dentro de este cuadro para verlas todas."
+                  aria-busy={loading || undefined}
                 >
+                  {loading ? (
+                    <div className="crudx-table-busy-overlay" role="status" aria-live="polite">
+                      <div className="crudx-table-busy-overlay__card">
+                        <span className="ops-loader" aria-hidden="true" />
+                        <strong>{loadingCopy.overlayLabel}</strong>
+                        <p>{loadingCopy.hint}</p>
+                      </div>
+                    </div>
+                  ) : null}
                   <table className="crudx-table">
                     <thead>
                       <tr>
@@ -4890,9 +3616,6 @@ export default function CrudDemo({
                     <tbody>
                       {displayRows.map((row, i) => {
                         const rowKey = row?.[entity.id] ?? i;
-                        const isExpandedClientDetail =
-                          isMonthlyCompactClientTable
-                          && String(expandedClientRowId ?? '') === String(row?.CLI_ID ?? '');
                         const vehicleMembershipStatus =
                           isMonthlyClientVehicleView && entity.key === 'vehiculo'
                             ? getVehicleMembershipStatus(row, catalogOptions)
@@ -4973,9 +3696,9 @@ export default function CrudDemo({
                                     <button
                                       type="button"
                                       className="crudx-btn-secondary crudx-btn-xs"
-                                      onClick={() => openAlertaDetailPopup(row, formatAlertaDetailValue)}
-                                      aria-label="Abrir detalle completo de la alerta en una ventana pequeña"
-                                      title="Ver todos los campos (sin truncar) en ventana pequeña"
+                                      onClick={() => setRecordDetail({ row })}
+                                      aria-label="Ver detalle completo de la alerta"
+                                      title="Ver todos los campos en un modal"
                                     >
                                       Detalle
                                     </button>
@@ -5200,15 +3923,15 @@ export default function CrudDemo({
                                   Vehículos
                                 </button>
                               )}
-                              {isMonthlyCompactClientTable && (
+                              {shouldOfferRecordDetail(entity?.key) && (
                                 <button
                                   type="button"
-                                  onClick={() => setExpandedClientRowId((current) => (
-                                    String(current ?? '') === String(row?.CLI_ID ?? '') ? null : row?.CLI_ID
-                                  ))}
+                                  onClick={() => setRecordDetail({ row })}
                                   className="crudx-btn-secondary crudx-btn-xs"
                                 >
-                                  {isExpandedClientDetail ? 'Ocultar ficha' : 'Ver ficha'}
+                                  {isMonthlyCompactClientTable || (isMonthlyClientVehicleView && entity.key === 'vehiculo')
+                                    ? 'Ver ficha'
+                                    : 'Ver detalle'}
                                 </button>
                               )}
                               {entity.key === 'ticket' && (
@@ -5263,14 +3986,26 @@ export default function CrudDemo({
                                   </button>
                                 )
                               )}
-                              {entity.key === 'usuario' && Number(row.USU_ACTIVO ?? 1) === 1 && !isCurrentSessionUser(row.USU_ID, sessionUserId) && (
-                                <button
-                                  type="button"
-                                  onClick={() => deactivateUsuario(row)}
-                                  className="crudx-btn-danger crudx-btn-xs"
-                                >
-                                  Desactivar
-                                </button>
+                              {entity.key === 'usuario' && (
+                                Number(row.USU_ACTIVO ?? 1) === 1 ? (
+                                  !isCurrentSessionUser(row.USU_ID, sessionUserId) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => deactivateUsuario(row)}
+                                      className="crudx-btn-danger crudx-btn-xs"
+                                    >
+                                      Desactivar
+                                    </button>
+                                  ) : null
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => activateUsuario(row)}
+                                    className="crudx-btn-success crudx-btn-xs"
+                                  >
+                                    Activar
+                                  </button>
+                                )
                               )}
                               {entity.key === 'membresia' && (
                                 <button
@@ -5324,22 +4059,6 @@ export default function CrudDemo({
                             </td>
                           )}
                           </tr>
-                          {isExpandedClientDetail ? (
-                            <tr className="crudx-client-detail-row">
-                              <td colSpan={displayColumns.length + (showTableActions ? 1 : 0)}>
-                                <div className="crudx-client-detail-card">
-                                  <div className="crudx-client-detail-card__grid">
-                                    {clienteCompactDetailItems(row).map((item) => (
-                                      <div key={item.label} className="crudx-client-detail-card__item">
-                                        <span>{item.label}</span>
-                                        <strong>{item.value}</strong>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          ) : null}
                         </Fragment>
                         );
                       })}
@@ -5350,6 +4069,46 @@ export default function CrudDemo({
             </>
           )}
       </div>
+
+      {recordDetail && entity ? (
+        <CrudRecordDetailModal
+          {...buildRecordDetailView(entity, recordDetail.row, {
+            columnLabels: CRUD_COLUMN_LABELS,
+            catalogOptions,
+            formatValue: formatAlertaDetailValue,
+          })}
+          onClose={() => setRecordDetail(null)}
+          onEdit={
+            entity?.ops?.u
+              ? () => {
+                  const row = recordDetail.row;
+                  setRecordDetail(null);
+                  startEdit(row);
+                }
+              : null
+          }
+        />
+      ) : null}
+
+      {editId && entity && (!isNewRecord || entity?.ops?.c !== false) ? (
+        <CrudEditFormModal
+          key={`${entity.key}-${editId}`}
+          entity={entity}
+          editId={editId}
+          initialForm={editInitialForm}
+          columnLabels={CRUD_COLUMN_LABELS}
+          catalogOptions={catalogOptions}
+          searchParams={searchParams}
+          sessionUserId={sessionUserId}
+          sessionIsFullAdmin={sessionIsFullAdmin}
+          isMonthlyVehicleMembershipView={isMonthlyVehicleMembershipView}
+          isMonthlyClientVehicleView={isMonthlyClientVehicleView}
+          monthlySelectedClientName={monthlySelectedClientName}
+          monthlySelectedVehiclePlate={monthlySelectedVehiclePlate}
+          onSave={(formData) => save(undefined, formData)}
+          onCancel={cancelEdit}
+        />
+      ) : null}
 
       {confirmDialog ? (
         <div

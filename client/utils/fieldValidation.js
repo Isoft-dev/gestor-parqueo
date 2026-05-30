@@ -114,12 +114,20 @@ export function sanitizeFieldValue(key, value, opts = {}) {
     return v.replace(DIGITS_ONLY, '').slice(0, 13);
   }
 
-  if (k === 'CLI_NIT' || k === 'COB_NIT') {
+  if (k === 'CLI_NIT') {
+    return v.toUpperCase().replace(NIT_CHARS, '').slice(0, 8);
+  }
+
+  if (k === 'COB_NIT') {
     const upper = v.toUpperCase();
     if (upper === 'C' || upper === 'CF' || upper.startsWith('CF')) {
       return upper.replace(/[^CF]/g, '').slice(0, 2);
     }
     return upper.replace(NIT_CHARS, '').slice(0, 12);
+  }
+
+  if (k === 'CLI_TELEFONO') {
+    return v.replace(DIGITS_ONLY, '').slice(0, 8);
   }
 
   if (k.endsWith('_TELEFONO')) {
@@ -214,7 +222,9 @@ export function getInputMode(key) {
 export function getMaxLength(key) {
   const k = String(key);
   if (k === 'CLI_DPI') return 13;
-  if (k === 'CLI_NIT' || k === 'COB_NIT') return 12;
+  if (k === 'CLI_NIT') return 8;
+  if (k === 'COB_NIT') return 12;
+  if (k === 'CLI_TELEFONO') return 8;
   if (k.endsWith('_TELEFONO')) return 15;
   if (k === 'CLI_ZONA') return 5;
   if (k === 'CLI_CODIGO_POSTAL') return 10;
@@ -233,9 +243,9 @@ const PLACEHOLDER_BY_KEY = {
   CLI_PRIMER_APELLIDO: 'Ej. López',
   CLI_SEGUNDO_APELLIDO: 'Ej. García (opcional)',
   CLI_DPI: 'Ej. 1234567890123 (13 dígitos)',
-  CLI_NIT: 'Ej. 1234567-K o dejar vacío',
+  CLI_NIT: 'Ej. 1234567K (8 caracteres, sin guiones)',
   CLI_CORREO: 'Ej. cliente@correo.com',
-  CLI_TELEFONO: 'Ej. 50212345678',
+  CLI_TELEFONO: 'Ej. 55551234 (8 dígitos)',
   CLI_ZONA: 'Ej. 10',
   CLI_CALLE: 'Ej. 5a Avenida',
   CLI_NUMERO: 'Ej. 12-34 o 15B',

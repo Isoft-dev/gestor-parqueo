@@ -68,12 +68,22 @@ export function ReportFilterProvider({ children }) {
   /** Actualiza un único filtro */
   const setFiltro = useCallback((key, value) => {
     const today = ymd(new Date());
-    let nextValue = value;
-    if (key === 'desde' || key === 'hasta') {
+    setFiltros((prev) => {
+      if (key !== 'desde' && key !== 'hasta') {
+        return { ...prev, [key]: value };
+      }
+
       const v = String(value ?? '').slice(0, 10);
-      nextValue = v && v > today ? today : v;
-    }
-    setFiltros((prev) => ({ ...prev, [key]: nextValue }));
+      const clamped = v && v > today ? today : v;
+      const next = { ...prev, [key]: clamped };
+
+      if (next.desde && next.hasta && next.desde > next.hasta) {
+        if (key === 'desde') next.hasta = next.desde;
+        else next.desde = next.hasta;
+      }
+
+      return next;
+    });
   }, []);
 
   /** Restablece todos los filtros a los valores por defecto */
