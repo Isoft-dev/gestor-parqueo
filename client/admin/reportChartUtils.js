@@ -251,3 +251,12 @@ export function buildLegendItems(labels, values, colors, formatter = formatNumbe
     color: colors?.[index] || REPORT_PALETTE.slate,
   }));
 }
+
+/**
+ * Extrae el label del punto clicado en una gráfica Chart.js.
+ * Uso en onClick: (_, elements, chart) => { const label = clickedLabel(elements, chart); }
+ */
+export function clickedLabel(elements, chart) {
+  if (!elements?.length || !chart?.data?.labels?.length) return '';
+  return String(chart.data.labels[elements[0].index] || '');
+}

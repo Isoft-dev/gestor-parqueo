@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -92,14 +92,23 @@ function generateRandomPlate() {
   );
 }
 
-function generateVehicleData() {
-  const models = ['Corolla', 'Civic', 'Hilux', 'Sportage', 'Elantra', 'Accent', 'RAV4'];
-  const colors = ['Negro', 'Blanco', 'Plata', 'Rojo', 'Azul', 'Gris'];
+function generateVehicleData(modelos = [], colores = []) {
+  const modelo = randomFrom(modelos);
+  const color = randomFrom(colores);
   return {
     VEH_PLACA: generateRandomPlate(),
-    VEH_MODELO: randomFrom(models),
-    VEH_COLOR: randomFrom(colors),
+    MOD_ID: modelo?.MOD_ID != null ? String(modelo.MOD_ID) : '',
+    COL_ID: color?.COL_ID != null ? String(color.COL_ID) : '',
   };
+}
+
+function modeloVehiculoOptionLabel(modelo) {
+  const marca = String(modelo?.MAR_NOMBRE || '').trim();
+  const nombre = String(modelo?.MOD_NOMBRE || '').trim();
+  const tipo = String(modelo?.TVE_TIPO || '').trim();
+  const parts = [marca, nombre].filter(Boolean);
+  const base = parts.join(' ');
+  return tipo ? `${base} - ${tipo}` : base || `Modelo ${modelo?.MOD_ID ?? ''}`;
 }
 
 function getTagWelcomeName(data) {
@@ -178,12 +187,14 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const { user, logout } = useAuth();
   const fileRef = useRef(null);
   const tagFileRef = useRef(null);
+  const memPayTagFileRef = useRef(null);
   const salidaFileRef = useRef(null);
   const tagSalidaFileRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [quote, setQuote] = useState(null);
-  const [tipoVehiculo, setTipoVehiculo] = useState([]);
+  const [modelosVehiculo, setModelosVehiculo] = useState([]);
+  const [coloresVehiculo, setColoresVehiculo] = useState([]);
   const [tiposCobro, setTiposCobro] = useState([]);
   const [tiposPago, setTiposPago] = useState([]);
   const [tiposMaquina, setTiposMaquina] = useState([]);
@@ -199,9 +210,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const [showEntryVehicleModal, setShowEntryVehicleModal] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
     VEH_PLACA: '',
-    VEH_MODELO: '',
-    VEH_COLOR: '',
-    TVE_ID: '',
+    MOD_ID: '',
+    COL_ID: '',
     MAQ_ID: '',
   });
   const [tcoId, setTcoId] = useState('');
@@ -231,7 +241,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const onlyKiosk = cobroOnly || entradaOnly || salidaOnly;
   const [denominacionesDisponibles, setDenominacionesDisponibles] = useState([5, 10, 20, 50]);
   const [quoteNowMs, setQuoteNowMs] = useState(() => Date.now());
-  const [memPayQ, setMemPayQ] = useState('');
   const [memPayList, setMemPayList] = useState([]);
   const [memPaySelected, setMemPaySelected] = useState(null);
   const [memPayTpaId, setMemPayTpaId] = useState('');
@@ -290,18 +299,24 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
   const isMemPayCardSelected = /tarjeta|card|credito|cr[eé]dito|debito|d[eé]bito/i.test(
     String(tipoPagoMemSeleccionado?.TPA_TIPO || ''),
   );
-  const isMemPayCashSelected = /efectivo|cash/i.test(
+  const _isMemPayCashSelected = /efectivo|cash/i.test(
     String(tipoPagoMemSeleccionado?.TPA_TIPO || ''),
   );
+  const memMoraReactivacion = Number(memPaySelected?.MEM_MORA_REACTIVACION ?? 0);
+  const memTotalPagar = Number(memPaySelected?.MEM_TOTAL_A_PAGAR ?? (memMontoPlan + memMoraReactivacion));
+  const memRequiereReactivacion = Number(memPaySelected?.MEM_REQUIERE_REACTIVACION ?? 0) === 1 || memMoraReactivacion > 0;
   const memPayRecibidoNum = Number(String(memPayRecibido || '').replace(',', '.'));
-  const sumaMemPayBilletes = denominacionesDisponibles.reduce(
+  const _sumaMemPayBilletes = denominacionesDisponibles.reduce(
     (acc, d) => acc + Number(memPayBilletes[d] || 0) * Number(d),
     0,
   );
-  const memPayVueltoCalculado =
-    Number.isFinite(memPayRecibidoNum) && memPayRecibidoNum >= memMontoPlan
-      ? Number((memPayRecibidoNum - memMontoPlan).toFixed(2))
+  const _memPayVueltoCalculado =
+    Number.isFinite(memPayRecibidoNum) && memPayRecibidoNum >= memTotalPagar
+      ? Number((memPayRecibidoNum - memTotalPagar).toFixed(2))
       : 0;
+  const selectedModeloVehiculo = modelosVehiculo.find(
+    (modelo) => String(modelo?.MOD_ID) === String(vehicleForm.MOD_ID || ''),
+  ) || null;
 
   function cobroShortTicketCode(code) {
     const s = String(code || '');
@@ -563,29 +578,33 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     (async () => {
       setCatalogLoading(true);
       try {
-        const [rTve, rCobro, rMaq, rSdi, rTma, rTpa] = await Promise.all([
-          fetch(`${API_BASE}/tipo-vehiculo`),
+        const [rModelo, rColor, rCobro, rMaq, rSdi, rTma, rTpa] = await Promise.all([
+          fetch(`${API_BASE}/modelo-vehiculo`),
+          fetch(`${API_BASE}/color-vehiculo`),
           fetch(`${API_BASE}/tipo-cobro`),
           fetch(`${API_BASE}/maquina`),
           fetch(`${API_BASE}/saldo-disponible`),
           fetch(`${API_BASE}/tipo-maquina`),
           fetch(`${API_BASE}/tipo-pago`),
         ]);
-        const [dTve, dCobro, dMaq, dSdi, dTma, dTpa] = await Promise.all([
-          rTve.json(),
+        const [dModelo, dColor, dCobro, dMaq, dSdi, dTma, dTpa] = await Promise.all([
+          rModelo.json(),
+          rColor.json(),
           rCobro.json(),
           rMaq.json(),
           rSdi.json(),
           rTma.json(),
           rTpa.json(),
         ]);
-        if (!rTve.ok) throw new Error(dTve.error || rTve.statusText);
+        if (!rModelo.ok) throw new Error(dModelo.error || rModelo.statusText);
+        if (!rColor.ok) throw new Error(dColor.error || rColor.statusText);
         if (!rCobro.ok) throw new Error(dCobro.error || rCobro.statusText);
         if (!rMaq.ok) throw new Error(dMaq.error || rMaq.statusText);
         if (!rSdi.ok) throw new Error(dSdi.error || rSdi.statusText);
         if (!rTma.ok) throw new Error(dTma.error || rTma.statusText);
         setTiposPago(rTpa.ok && Array.isArray(dTpa) ? dTpa : []);
-        setTipoVehiculo(Array.isArray(dTve) ? dTve : []);
+        setModelosVehiculo(Array.isArray(dModelo) ? dModelo : []);
+        setColoresVehiculo(Array.isArray(dColor) ? dColor : []);
         setTiposCobro(Array.isArray(dCobro) ? dCobro : []);
         setTiposMaquina(Array.isArray(dTma) ? dTma : []);
         const maqList = Array.isArray(dMaq) ? dMaq : [];
@@ -655,7 +674,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
           }
         }
       } catch {
-        setTipoVehiculo([]);
+        setModelosVehiculo([]);
+        setColoresVehiculo([]);
         setTiposCobro([]);
         setTiposPago([]);
         setTiposMaquina([]);
@@ -728,15 +748,13 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setVehicleForm((p) => ({
       ...p,
       VEH_PLACA: '',
-      VEH_MODELO: '',
-      VEH_COLOR: '',
-      TVE_ID: '',
+      MOD_ID: '',
+      COL_ID: '',
     }));
   }
 
   function applyAutocompletado() {
-    const generated = generateVehicleData();
-    const defaultTve = String(tipoVehiculo?.[0]?.TVE_ID ?? '');
+    const generated = generateVehicleData(modelosVehiculo, coloresVehiculo);
     const poolEntrada = maquinasEntrada.length > 0 ? maquinasEntrada : maquinas;
     const currentMaq = String(vehicleForm.MAQ_ID || '').trim();
     const selectedMaqId =
@@ -744,18 +762,17 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       String(defaultEntradaMaqId || pickDefaultEntradaMaqId(maquinasEntrada, maquinas));
     setVehicleForm({
       VEH_PLACA: generated.VEH_PLACA,
-      VEH_MODELO: generated.VEH_MODELO,
-      VEH_COLOR: generated.VEH_COLOR,
-      TVE_ID: defaultTve,
+      MOD_ID: generated.MOD_ID,
+      COL_ID: generated.COL_ID,
       MAQ_ID: selectedMaqId || String(poolEntrada?.[0]?.MAQ_ID ?? ''),
     });
   }
 
   async function submitGenerateTicket() {
-    if (!vehicleForm.VEH_PLACA || !vehicleForm.TVE_ID || !vehicleForm.MAQ_ID) {
-      setMsg('Para generar ticket debes ingresar placa, tipo de vehículo y máquina.');
+    if (!vehicleForm.VEH_PLACA || !vehicleForm.MOD_ID || !vehicleForm.COL_ID || !vehicleForm.MAQ_ID) {
+      setMsg('Para generar ticket debes ingresar placa, modelo, color y máquina.');
       if (entradaOnly) {
-        setEntryNotice({ text: 'Completa placa, tipo de vehículo y máquina de entrada.', severity: 'warn' });
+        setEntryNotice({ text: 'Completa placa, modelo, color y máquina de entrada.', severity: 'warn' });
         setEntryKioskState('notice');
       }
       return;
@@ -779,9 +796,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           VEH_PLACA: placaNormalizada,
-          VEH_MODELO: vehicleForm.VEH_MODELO,
-          VEH_COLOR: vehicleForm.VEH_COLOR,
-          TVE_ID: vehicleForm.TVE_ID,
+          MOD_ID: vehicleForm.MOD_ID,
+          COL_ID: vehicleForm.COL_ID,
           MAQ_ID: vehicleForm.MAQ_ID,
         }),
       });
@@ -792,9 +808,8 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       setShowEntryVehicleModal(false);
       setVehicleForm({
         VEH_PLACA: '',
-        VEH_MODELO: '',
-        VEH_COLOR: '',
-        TVE_ID: '',
+        MOD_ID: '',
+        COL_ID: '',
         MAQ_ID: pickDefaultEntradaMaqId(maquinasEntrada, maquinas),
       });
       setMsg('Ticket de entrada generado correctamente.');
@@ -1170,32 +1185,48 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     }
   }
 
-  async function buscarMembresiasParaPago() {
-    const q = String(memPayQ || '').trim();
-    if (q.length < 2) {
-      setMsg('Escribe al menos 2 caracteres de la placa.');
-      return;
-    }
+  function selectMembresiaParaPago(membresia) {
+    setMemPaySelected(membresia);
+    setMemPayRecibido('');
+    setMemPayTpaId(String(memCardTipoPago?.TPA_ID || ''));
+    setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
+    resetMemPayCardSimulator();
+    setCobroCardScreenError(null);
+    setCobroUiStep('mem_tarjeta');
+  }
+
+  async function onLoadMemPayTagPdf(file) {
     setLoading(true);
     setMsg('');
     setCobroCardScreenError(null);
+    setMemPayList([]);
+    setMemPaySelected(null);
+    setMemPayDone(null);
     try {
+      const buffer = await file.arrayBuffer();
+      const pdfText = await decodePdfText(buffer);
+      const memCodigo = extractMemCodeFromPdfText(pdfText);
+      if (!memCodigo) {
+        setMsg('Tag no reconocido: no se pudo extraer MEM_CODIGO del PDF.');
+        return;
+      }
+
       const res = await fetch(
-        `${API_BASE}/membresia/payment-candidates/search?${new URLSearchParams({ q })}`,
+        `${API_BASE}/membresia/payment-candidates/tag/${encodeURIComponent(memCodigo)}`,
         { cache: 'no-store' },
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
-      const list = Array.isArray(data) ? data : [];
-      setMemPayList(list);
-      setMemPaySelected(null);
-      setMemPayDone(null);
-      if (!list.length) setMsg('No se encontraron membresías con esa placa.');
+      selectMembresiaParaPago(data);
+      setMsg('');
     } catch (e) {
-      setMsg(`Error: ${String(e?.message || e)}`);
-      setMemPayList([]);
+      const txt = String(e?.message || e);
+      if (/tag no reconocido/i.test(txt)) setMsg('Tag no reconocido.');
+      else setMsg(`Error: ${txt}`);
+      setMemPaySelected(null);
     } finally {
       setLoading(false);
+      if (memPayTagFileRef.current) memPayTagFileRef.current.value = '';
     }
   }
 
@@ -1208,7 +1239,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       setMsg('No hay tipo de pago con tarjeta disponible para membresías.');
       return;
     }
-    const monto = Number(memPaySelected.TME_PRECIO ?? 0);
+    const monto = Number(memPaySelected.MEM_TOTAL_A_PAGAR ?? memPaySelected.TME_PRECIO ?? 0);
     if (!(monto > 0)) {
       setMsg('No se pudo leer el monto del plan.');
       return;
@@ -1280,7 +1311,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
       setMemPayRecibido('');
       setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
       resetMemPayCardSimulator();
-      setMemPayQ('');
       setMsg('');
       if (cobroOnly) {
         setCobroUiStep('success');
@@ -1323,7 +1353,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setSalidaKioskNotice({ text: '', severity: 'error' });
     setBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
     resetCardSimulator();
-    setMemPayQ('');
     setMemPayList([]);
     setMemPaySelected(null);
     setMemPayTpaId('');
@@ -1598,9 +1627,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
 
                   {cobroUiStep === 'error' ? (
                     <div className="ops-cobro-state">
-                      <div className="ops-cobro-icon ops-cobro-icon--warn" aria-hidden="true">
-                        ⚠
-                      </div>
+                      <div className="ops-cobro-icon ops-cobro-icon--warn" aria-hidden="true">!</div>
                       <h2>No se pudo completar</h2>
                       <p className="ops-cobro-subtext ops-cobro-subtext--error">
                         {cobroErrorText || msg || 'Intente de nuevo.'}
@@ -1640,7 +1667,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                       </div>
                     ) : (
                       <div className="ops-cobro-receipt">
-                        <div className="ops-cobro-receipt-title">🎫 DETALLE DEL TICKET</div>
+                        <div className="ops-cobro-receipt-title">ðŸŽ« DETALLE DEL TICKET</div>
                         <hr />
                         <div className="ops-cobro-receipt-row">
                           <span>Ticket</span>
@@ -1733,7 +1760,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                         M
                       </div>
                       <h2>Pagar membresía</h2>
-                      <p className="ops-cobro-subtext">Busque por placa en el panel derecho</p>
+                      <p className="ops-cobro-subtext">Cargue el tag de membresía en el panel derecho</p>
                     </div>
                   ) : null}
 
@@ -1761,7 +1788,17 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                         <span>Estado</span>
                         <span>{memPaySelected.EME_ESTADO || '—'}</span>
                       </div>
-                      <div className="ops-cobro-receipt-total">TOTAL: Q{memMontoPlan.toFixed(2)}</div>
+                      <div className="ops-cobro-receipt-row">
+                        <span>Membresía</span>
+                        <span>Q{memMontoPlan.toFixed(2)}</span>
+                      </div>
+                      {memRequiereReactivacion ? (
+                        <div className="ops-cobro-receipt-row" style={{ color: '#fbbf24' }}>
+                          <span>Mora de reactivación</span>
+                          <span>Q{memMoraReactivacion.toFixed(2)}</span>
+                        </div>
+                      ) : null}
+                      <div className="ops-cobro-receipt-total">TOTAL: Q{memTotalPagar.toFixed(2)}</div>
                     </div>
                   ) : null}
                 </div>
@@ -1810,7 +1847,6 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                     setMemPaySelected(null);
                     setMemPayDone(null);
                     setCheckoutDone(null);
-                    setMemPayQ('');
                     setMemPayTpaId('');
                     setMemPayRecibido('');
                     setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
@@ -1894,10 +1930,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 <div className="ops-cobro-pay-row">
                   <p className="ops-cobro-right-hint">Forma de pago</p>
                   <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroGoEfectivo}>
-                    💵 Efectivo
+                    ðŸ’µ Efectivo
                   </button>
                   <button type="button" className="ops-cobro-physical-btn ops-cobro-physical-btn--wide" onClick={cobroGoTarjeta}>
-                    💳 Tarjeta
+                    ðŸ’³ Tarjeta
                   </button>
                 </div>
               ) : null}
@@ -2007,18 +2043,26 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
 
               {cobroUiStep === 'mem_buscar' ? (
                 <>
-                  <p className="ops-cobro-right-hint">Cargue la membresía / tag del cliente</p>
-                  <div className="ops-cobro-mem-search-row">
-                    <input
-                      type="text"
-                      className="ops-cobro-mem-search-input"
-                      placeholder="Placa (mín. 2 caracteres)"
-                      value={memPayQ}
-                      onChange={(e) => setMemPayQ(e.target.value.toUpperCase())}
-                      autoComplete="off"
-                    />
-                    <button type="button" className="ops-cobro-physical-btn ops-cobro-mem-search-btn" onClick={buscarMembresiasParaPago} disabled={loading}>
-                      Buscar
+                  <p className="ops-cobro-right-hint">Escanee o cargue el tag del cliente</p>
+                  <input
+                    ref={memPayTagFileRef}
+                    type="file"
+                    accept="application/pdf"
+                    className="ops-cobro-sr-file"
+                    aria-label="Seleccionar PDF del tag de membresía"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onLoadMemPayTagPdf(f);
+                    }}
+                  />
+                  <div className="ops-cobro-card-actions">
+                    <button
+                      type="button"
+                      className="ops-cobro-physical-btn ops-cobro-physical-btn--wide"
+                      onClick={() => memPayTagFileRef.current?.click()}
+                      disabled={loading}
+                    >
+                      Cargar Tag
                     </button>
                   </div>
                   {memPayList.length > 0 ? (
@@ -2034,17 +2078,12 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                             key={id}
                             type="button"
                             onClick={() => {
-                              setMemPaySelected(m);
-                              setMemPayRecibido('');
-                              setMemPayTpaId(String(memCardTipoPago?.TPA_ID || ''));
-                              setMemPayBilletes({ 5: 0, 10: 0, 20: 0, 50: 0 });
-                              resetMemPayCardSimulator();
-                              setCobroCardScreenError(null);
-                              setCobroUiStep('mem_tarjeta');
+                              selectMembresiaParaPago(m);
                             }}
                           >
                             <strong>#{id}</strong> — {m.VEH_PLACA || '—'} — {nom || 'Cliente'} — {m.TME_TIPO || 'Plan'} — Q
-                            {Number(m.TME_PRECIO ?? 0).toFixed(2)} — Vence {venc} — {m.EME_ESTADO || '—'}
+                            {Number(m.MEM_TOTAL_A_PAGAR ?? m.TME_PRECIO ?? 0).toFixed(2)}
+                            {Number(m.MEM_MORA_REACTIVACION ?? 0) > 0 ? ' con mora' : ''} — Vence {venc} — {m.EME_ESTADO || '—'}
                           </button>
                         );
                       })}
@@ -2204,7 +2243,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
 
               {entryKioskState === 'notice' ? (
                 <div className="ops-entry-kiosk-state">
-                  <div className="ops-entry-kiosk-icon" aria-hidden="true">⚠</div>
+                  <div className="ops-entry-kiosk-icon" aria-hidden="true">!</div>
                   <h2>Aviso</h2>
                   <p
                     className={`ops-entry-kiosk-subtext ${
@@ -2530,30 +2569,34 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 maxLength={PLATE_MAX_LENGTH}
                 onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: normalizePlateInput(e.target.value) }))}
               />
-              <input
-                type="text"
-                placeholder="Modelo"
-                value={vehicleForm.VEH_MODELO}
-                onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_MODELO: e.target.value }))}
-              />
-              <input
-                type="text"
-                placeholder="Color"
-                value={vehicleForm.VEH_COLOR}
-                onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_COLOR: e.target.value }))}
-              />
               <select
-                value={vehicleForm.TVE_ID}
-                onChange={(e) => setVehicleForm((p) => ({ ...p, TVE_ID: e.target.value }))}
+                value={vehicleForm.MOD_ID}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, MOD_ID: e.target.value }))}
               >
-                <option value="">Selecciona tipo de vehículo</option>
-                {tipoVehiculo.map((t) => (
-                  <option key={t.TVE_ID} value={t.TVE_ID}>
-                    {t.TVE_TIPO || `Tipo ${t.TVE_ID}`}
+                <option value="">Selecciona modelo</option>
+                {modelosVehiculo.map((modelo) => (
+                  <option key={modelo.MOD_ID} value={modelo.MOD_ID}>
+                    {modeloVehiculoOptionLabel(modelo)}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={vehicleForm.COL_ID}
+                onChange={(e) => setVehicleForm((p) => ({ ...p, COL_ID: e.target.value }))}
+              >
+                <option value="">Selecciona color</option>
+                {coloresVehiculo.map((color) => (
+                  <option key={color.COL_ID} value={color.COL_ID}>
+                    {color.COL_NOMBRE || `Color ${color.COL_ID}`}
                   </option>
                 ))}
               </select>
             </div>
+            {selectedModeloVehiculo ? (
+              <p className="ops-entry-modal-helper">
+                Marca: {selectedModeloVehiculo.MAR_NOMBRE || 'N/D'} | Tipo: {selectedModeloVehiculo.TVE_TIPO || 'N/D'}
+              </p>
+            ) : null}
             <div className="ops-entry-modal-actions">
               <button type="button" className="ops-entry-modal-btn ops-entry-modal-btn--soft" onClick={applyAutocompletado} disabled={loading}>Autocompletar</button>
               <button
@@ -2587,29 +2630,27 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
               onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: normalizePlateInput(e.target.value) }))}
               style={{ padding: '8px 10px', minWidth: 160 }}
             />
-            <input
-              type="text"
-              placeholder="Modelo"
-              value={vehicleForm.VEH_MODELO}
-              onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_MODELO: e.target.value }))}
-              style={{ padding: '8px 10px', minWidth: 160 }}
-            />
-            <input
-              type="text"
-              placeholder="Color"
-              value={vehicleForm.VEH_COLOR}
-              onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_COLOR: e.target.value }))}
-              style={{ padding: '8px 10px', minWidth: 140 }}
-            />
             <select
-              value={vehicleForm.TVE_ID}
-              onChange={(e) => setVehicleForm((p) => ({ ...p, TVE_ID: e.target.value }))}
+              value={vehicleForm.MOD_ID}
+              onChange={(e) => setVehicleForm((p) => ({ ...p, MOD_ID: e.target.value }))}
               style={{ padding: '8px 10px', minWidth: 220 }}
             >
-              <option value="">Selecciona tipo de vehículo</option>
-              {tipoVehiculo.map((t) => (
-                <option key={t.TVE_ID} value={t.TVE_ID}>
-                  {t.TVE_TIPO || `Tipo ${t.TVE_ID}`} ({t.TVE_ID})
+              <option value="">Selecciona modelo</option>
+              {modelosVehiculo.map((modelo) => (
+                <option key={modelo.MOD_ID} value={modelo.MOD_ID}>
+                  {modeloVehiculoOptionLabel(modelo)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={vehicleForm.COL_ID}
+              onChange={(e) => setVehicleForm((p) => ({ ...p, COL_ID: e.target.value }))}
+              style={{ padding: '8px 10px', minWidth: 180 }}
+            >
+              <option value="">Selecciona color</option>
+              {coloresVehiculo.map((color) => (
+                <option key={color.COL_ID} value={color.COL_ID}>
+                  {color.COL_NOMBRE || `Color ${color.COL_ID}`}
                 </option>
               ))}
             </select>
@@ -2638,6 +2679,11 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 ))}
               </select>
             )}
+            {selectedModeloVehiculo ? (
+              <div style={{ width: '100%', color: '#475569', fontSize: 13 }}>
+                Marca: {selectedModeloVehiculo.MAR_NOMBRE || 'N/D'} | Tipo: {selectedModeloVehiculo.TVE_TIPO || 'N/D'}
+              </div>
+            ) : null}
             <button type="button" onClick={applyAutocompletado} disabled={loading}>Autocompletado</button>
             <button type="button" onClick={submitGenerateTicket} disabled={loading}>Confirmar</button>
           </div>
@@ -2988,3 +3034,5 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     </div>
   );
 }
+
+

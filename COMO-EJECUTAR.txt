@@ -1,16 +1,32 @@
 Cómo correr el proyecto
 
-Necesitas Node.js instalado.
+Necesitas Node.js instalado (versión 18 o superior).
+
+Este proyecto usa pnpm como gestor de paquetes (ya no npm).
+
+Habilitar pnpm (una sola vez por computadora)
+
+  corepack enable
+  corepack prepare pnpm@latest --activate
 
 Primera vez: instalar dependencias
 
   cd server
-  npm install
+  pnpm install
   cd ..
 
   cd client
-  npm install
+  pnpm install
   cd ..
+
+  Nota: la primera vez, pnpm puede avisar que algunas dependencias tienen
+  scripts de instalación que quedaron bloqueados (es una medida de seguridad).
+  Si ocurre, ejecuta dentro de esa carpeta:
+
+     pnpm approve-builds
+
+  y aprueba al menos "esbuild" (lo necesita Vite para compilar) y "oracledb"
+  si aparece en la lista.
 
 Conexión a Oracle (base gestorParqueo)
 
@@ -30,15 +46,15 @@ Conexión a Oracle (base gestorParqueo)
 Para ejecutar hay que abrir dos terminales. En una:
 
   cd server
-  npm run dev
+  pnpm dev
 
   Si necesitas sembrar catálogos/espacios demo una sola vez:
-  npm run db:seed-catalogo-funcional
+  pnpm db:seed-catalogo-funcional
 
 En la otra:
 
   cd client
-  npm run dev
+  pnpm dev
 
 Cuando arranquen los dos, abrir en el navegador http://localhost:5173
 

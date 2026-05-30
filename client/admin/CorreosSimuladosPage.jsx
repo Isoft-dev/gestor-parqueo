@@ -17,6 +17,7 @@ const ETAPA_TONO = {
   '1 día antes': { bg: '#fefce8', border: '#fde68a', text: '#92400e' },
   'día del vencimiento': { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c' },
   'día siguiente al vencimiento': { bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' },
+  'aviso de vencimiento': { bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' },
   'aviso de suspensión': { bg: '#f5f3ff', border: '#ddd6fe', text: '#6d28d9' },
 };
 
@@ -87,9 +88,10 @@ export default function CorreosSimuladosPage() {
       const json = await parseJsonSafe(res);
       if (!res.ok) throw new Error(json.error || json.message || res.statusText);
       const recordatorios = json?.result?.reminders?.sent ?? 0;
+      const vencidas = json?.result?.suspension?.vencidas ?? 0;
       const suspendidas = json?.result?.suspension?.suspendidas ?? 0;
       setInfo(
-        `Proceso ejecutado. Recordatorios procesados: ${recordatorios}. Membresías suspendidas: ${suspendidas}.`,
+        `Proceso ejecutado. Recordatorios procesados: ${recordatorios}. Membresías vencidas: ${vencidas}. Membresías suspendidas: ${suspendidas}.`,
       );
       await cargar();
     } catch (e) {

@@ -11,6 +11,7 @@ import {
 import { insertSystemAlerta } from '../utils/systemAlert.js';
 import { isTipoMaquinaEntrada } from '../utils/tipoMaquinaRules.js';
 import { assertMachineIsOperative, getMachineWithStatusTx } from '../utils/machineStatus.js';
+import { vehiculoCatalogJoin } from '../utils/vehiculoCatalogSql.js';
 
 function norm(s) {
   return String(s ?? '')
@@ -29,17 +30,31 @@ SELECT m.MEM_ID,
        m.TME_ID, tm.TME_TIPO, tm.TME_PRECIO, tm.TME_DURACION,
        m.MEM_FECHA_INICIO, m.MEM_FECHA_VENCIMIENTO,
        m.MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
-       m.EME_ID, em.EME_ESTADO,
-       m.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.CLI_ID,
+       m.EME_ID,
+       -- Solo se reescribe a 'Vencida' cuando el estado guardado es 'Activa':
+       -- una membresia 'Suspendida' (administrativa) o 'Cancelada' (formal)
+       -- conserva su estado aunque la fecha de vigencia ya haya pasado.
+       CASE
+         WHEN m.MEM_FECHA_VENCIMIENTO IS NOT NULL
+              AND TRUNC(m.MEM_FECHA_VENCIMIENTO) < TRUNC(SYSDATE)
+              AND LOWER(em.EME_ESTADO) LIKE '%activ%'
+              AND LOWER(em.EME_ESTADO) NOT LIKE '%inactiv%'
+         THEN 'Vencida'
+         ELSE em.EME_ESTADO
+       END AS EME_ESTADO,
+       m.VEH_ID, v.VEH_PLACA, mod.MOD_NOMBRE AS VEH_MODELO, v.CLI_ID,
        c.CLI_PRIMER_NOMBRE, c.CLI_SEGUNDO_NOMBRE, c.CLI_PRIMER_APELLIDO, c.CLI_SEGUNDO_APELLIDO,
        m.ESP_ID, e.ESP_CODIGO, e.ESP_UBICACION
 FROM PAR_MEMBRESIA m
 JOIN PAR_TIPO_MEMBRESIA tm ON m.TME_ID = tm.TME_ID
 JOIN PAR_VEHICULO v ON m.VEH_ID = v.VEH_ID
+${vehiculoCatalogJoin('v')}
 LEFT JOIN PAR_CLIENTE c ON v.CLI_ID = c.CLI_ID
 JOIN PAR_ESPACIO e ON m.ESP_ID = e.ESP_ID
 LEFT JOIN PAR_ESTADO_MEMBRESIA em ON m.EME_ID = em.EME_ID
 `;
+
+const MEMBERSHIP_REACTIVATION_FEE_Q = 50;
 
 export async function getAll() {
   return executeSql(`${MEM_SELECT_SQL} ORDER BY m.MEM_ID`);
@@ -250,6 +265,7 @@ export async function update(id, data) {
 
   const willChangeStatus =
     data.EME_ID != null && String(data.EME_ID) !== String(current.EME_ID ?? '');
+  const nextEspId = data.ESP_ID ?? current.ESP_ID ?? null;
 
   const nextTmeId = data.TME_ID != null ? data.TME_ID : current.TME_ID;
   let memFechaVencimiento;
@@ -277,9 +293,21 @@ export async function update(id, data) {
           ? new Date(data.MEM_FECHA_ULTIMO_CAMBIO_ESTADO)
           : (willChangeStatus ? new Date() : (current.MEM_FECHA_ULTIMO_CAMBIO_ESTADO ? new Date(current.MEM_FECHA_ULTIMO_CAMBIO_ESTADO) : null)),
       VEH_ID: data.VEH_ID ?? current.VEH_ID ?? null,
-      ESP_ID: data.ESP_ID ?? current.ESP_ID ?? null,
+      ESP_ID: nextEspId,
     }
   );
+  if (Object.prototype.hasOwnProperty.call(data, 'ESP_UBICACION') && nextEspId != null) {
+    await executeSql(
+      `UPDATE PAR_ESPACIO
+          SET ESP_UBICACION = :ubicacion
+        WHERE ESP_ID = :espId`,
+      {
+        ubicacion: String(data.ESP_UBICACION ?? '').trim() || null,
+        espId: nextEspId,
+      },
+      { autoCommit: true },
+    );
+  }
   return getById(id);
 }
 
@@ -351,12 +379,40 @@ export async function sendMembershipTag(memId) {
 export async function searchPaymentCandidates(query) {
   const raw = String(query || '').trim().toUpperCase().replace(/\s+/g, '');
   const q = `%${raw}%`;
-  return executeSql(
+  const rows = await executeSql(
     `${MEM_SELECT_SQL}
      WHERE UPPER(REPLACE(TRIM(NVL(v.VEH_PLACA, '')), ' ', '')) LIKE :q
      ORDER BY m.MEM_FECHA_VENCIMIENTO`,
     { q }
   );
+  return rows.map(withMembershipPaymentPreview);
+}
+
+export async function getPaymentCandidateByMemCodigo(memCodigoRaw) {
+  const memCodigo = String(memCodigoRaw || '').trim().toUpperCase();
+  if (!memCodigo) throw new Error('MEM_CODIGO es requerido');
+
+  const withColumn = await hasMemCodigoColumn();
+  const rows = withColumn
+    ? await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(m.MEM_CODIGO)) = UPPER(TRIM(:memCodigo))`,
+      { memCodigo }
+    )
+    : await executeSql(
+      `${MEM_SELECT_SQL}
+       WHERE UPPER(TRIM(:memCodigo)) = UPPER(TRIM(
+         LPAD(EXTRACT(DAY FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         LPAD(EXTRACT(MONTH FROM m.MEM_FECHA_INICIO), 2, '0') ||
+         SUBSTR(TO_CHAR(EXTRACT(YEAR FROM m.MEM_FECHA_INICIO)), -2) ||
+         TO_CHAR(m.MEM_ID)
+       ))`,
+      { memCodigo }
+    );
+
+  const membership = rows[0];
+  if (!membership) throw new Error('Tag no reconocido');
+  return withMembershipPaymentPreview(membership);
 }
 
 async function findEstadoActivaId(fallbackId) {
@@ -365,6 +421,16 @@ async function findEstadoActivaId(fallbackId) {
      FROM PAR_ESTADO_MEMBRESIA
      WHERE LOWER(EME_ESTADO) LIKE '%activ%'
      ORDER BY EME_ID`
+  );
+  return rows[0]?.EME_ID ?? fallbackId ?? null;
+}
+
+async function findEstadoVencidaId(fallbackId = null) {
+  const rows = await executeSql(
+    `SELECT EME_ID
+       FROM PAR_ESTADO_MEMBRESIA
+      WHERE LOWER(EME_ESTADO) LIKE '%venc%'
+      ORDER BY EME_ID`,
   );
   return rows[0]?.EME_ID ?? fallbackId ?? null;
 }
@@ -393,8 +459,11 @@ export async function registerMonthlyPayment(memId, payload) {
 
   if (!payload?.TPA_ID) throw new Error('TPA_ID es requerido para registrar pago');
 
-  const montoTotal = Number(membership.TME_PRECIO || 0);
-  if (!(montoTotal > 0)) throw new Error('No se pudo determinar el monto vigente de membresia');
+  const wantReactivate =
+    payload.REACTIVATE_IF_SUSPENDED !== false && payload.REACTIVATE_IF_SUSPENDED !== 0;
+  const breakdown = getMembershipPaymentBreakdown(membership, wantReactivate);
+  const montoTotal = breakdown.montoTotal;
+  if (!(breakdown.montoMembresia > 0)) throw new Error('No se pudo determinar el monto vigente de membresia');
 
   const pagRecibido = Number(payload.PAG_MONTO_RECIBIDO ?? montoTotal);
   const pagVuelto = Number(payload.PAG_VUELTO ?? Math.max(0, pagRecibido - montoTotal));
@@ -408,10 +477,10 @@ export async function registerMonthlyPayment(memId, payload) {
 
   const estado = norm(membership.EME_ESTADO);
   const suspended = estado.includes('suspend') || estado.includes('inactiv');
-  const wantReactivate =
-    payload.REACTIVATE_IF_SUSPENDED !== false && payload.REACTIVATE_IF_SUSPENDED !== 0;
+  const cancelled = estado.includes('cancel');
+  const expired = estado.includes('venc');
   let emeId = membership.EME_ID;
-  if (suspended && wantReactivate) {
+  if ((suspended || cancelled || expired) && wantReactivate) {
     emeId = await findEstadoActivaId(emeId);
   }
   let conn;
@@ -511,7 +580,10 @@ export async function registerMonthlyPayment(memId, payload) {
     PAG_ID: pagId,
     DPM_ID: dpmId,
     MEM_FECHA_VENCIMIENTO: baseDate.toISOString(),
-    REACTIVATED: suspended && wantReactivate,
+    REACTIVATED: (suspended || cancelled || expired) && wantReactivate,
+    MONTO_MEMBRESIA: breakdown.montoMembresia,
+    MORA_REACTIVACION: breakdown.moraReactivacion,
+    MONTO_TOTAL: breakdown.montoTotal,
   };
 }
 
@@ -558,6 +630,16 @@ function isMembershipActive(row) {
   return s.includes('activ') && !s.includes('inactiv');
 }
 
+function isMembershipCancelled(row) {
+  const s = membershipStatusText(row);
+  return s.includes('cancel');
+}
+
+function isMembershipExpiredStatus(row) {
+  const s = membershipStatusText(row);
+  return s.includes('venc');
+}
+
 function isMembershipSuspended(row) {
   const s = membershipStatusText(row);
   return s.includes('suspend') || s.includes('inactiv');
@@ -573,22 +655,55 @@ function isMembershipExpired(row) {
   return T.getTime() > V.getTime();
 }
 
+function requiresMembershipReactivation(row) {
+  return isMembershipSuspended(row) || isMembershipCancelled(row) || isMembershipExpiredStatus(row) || isMembershipExpired(row);
+}
+
+function getMembershipPaymentBreakdown(row, wantReactivate = true) {
+  const montoMembresia = Number(row?.TME_PRECIO || 0);
+  const aplicaMoraReactivacion = Boolean(wantReactivate && requiresMembershipReactivation(row));
+  const moraReactivacion = aplicaMoraReactivacion ? MEMBERSHIP_REACTIVATION_FEE_Q : 0;
+  const montoTotal = Number((montoMembresia + moraReactivacion).toFixed(2));
+  return {
+    montoMembresia,
+    moraReactivacion,
+    montoTotal,
+    aplicaMoraReactivacion,
+  };
+}
+
+function withMembershipPaymentPreview(row) {
+  if (!row) return row;
+  const breakdown = getMembershipPaymentBreakdown(row, true);
+  return {
+    ...row,
+    MEM_MONTO_MEMBRESIA: breakdown.montoMembresia,
+    MEM_MORA_REACTIVACION: breakdown.moraReactivacion,
+    MEM_TOTAL_A_PAGAR: breakdown.montoTotal,
+    MEM_REQUIERE_REACTIVACION: breakdown.aplicaMoraReactivacion ? 1 : 0,
+  };
+}
+
 /** Alineado al job diario: vence por calendario y sin pago posterior → estado suspendido. */
 async function suspendMembershipIfPastVencimientoForEntry(memId) {
-  const suspRows = await executeSql(
-    `SELECT EME_ID FROM PAR_ESTADO_MEMBRESIA
-      WHERE LOWER(EME_ESTADO) LIKE '%suspend%'
-      ORDER BY EME_ID FETCH FIRST 1 ROW ONLY`,
-  );
-  const suspId = suspRows[0]?.EME_ID ?? suspRows[0]?.eme_id;
-  if (suspId == null || memId == null) return;
+  const vencidaId = await findEstadoVencidaId();
+  if (vencidaId == null || memId == null) return;
   await executeSql(
     `UPDATE PAR_MEMBRESIA m
-        SET EME_ID = :suspId,
+        SET EME_ID = :vencidaId,
             MEM_FECHA_ULTIMO_CAMBIO_ESTADO = SYSDATE
       WHERE m.MEM_ID = :memId
         AND TRUNC(SYSDATE) > TRUNC(m.MEM_FECHA_VENCIMIENTO)
-        AND m.EME_ID <> :suspId2
+        AND m.EME_ID <> :vencidaId
+        AND NOT EXISTS (
+          SELECT 1
+            FROM PAR_ESTADO_MEMBRESIA em
+           WHERE em.EME_ID = m.EME_ID
+             AND (
+               LOWER(em.EME_ESTADO) LIKE '%suspend%'
+               OR LOWER(em.EME_ESTADO) LIKE '%inactiv%'
+             )
+        )
         AND NOT EXISTS (
           SELECT 1
             FROM PAR_DETALLE_PAGO_MEMBRESIA dpm
@@ -596,7 +711,7 @@ async function suspendMembershipIfPastVencimientoForEntry(memId) {
            WHERE dpm.MEM_ID = m.MEM_ID
              AND p.PAG_FECHA_HORA >= m.MEM_FECHA_VENCIMIENTO
         )`,
-    { suspId, memId, suspId2: suspId },
+    { vencidaId, memId },
     { autoCommit: true },
   );
 }
@@ -673,15 +788,15 @@ export async function validateTagAndRegisterEntry(memCodigoRaw, opts = {}) {
 
   if (isMembershipSuspended(membership)) {
     throw new Error(
-      'Acceso denegado: la membresía está suspendida (periodo vencido). Renueva el pago en la máquina de cobro, sección «Pagar membresía».',
+      'Acceso denegado: la membresía está suspendida. Debe regularizarse desde administración o registrando la renovación correspondiente.',
     );
   }
-  if (isMembershipExpired(membership)) {
+  if (isMembershipExpiredStatus(membership) || isMembershipExpired(membership)) {
     throw new Error(
       'Acceso denegado: la membresía está vencida. Renueva el pago en la máquina de cobro, sección «Pagar membresía».',
     );
   }
-  if (!isMembershipActive(membership)) {
+  if (!isMembershipActive(membership) && !isMembershipCancelled(membership)) {
     throw new Error('Acceso denegado: la membresía no está activa.');
   }
 

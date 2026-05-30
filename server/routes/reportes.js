@@ -41,4 +41,15 @@ router.get('/afluencia/detallado', ctrl.afluenciaDetallada);
 router.get('/afluencia/anual/pdf', ctrl.afluenciaAnualPdf);
 router.get('/afluencia/anual', ctrl.afluenciaAnual);
 
+router.get('/perfil-flota/modelo', ctrl.perfilPorModelo);
+router.get('/perfil-flota/color', ctrl.perfilPorColor);
+router.get('/perfil-flota/heatmap', ctrl.heatmapAfluencia);
+router.get('/perfil-flota/geo-clientes', ctrl.perfilGeoClientes);
+
+router.get('/analisis-flota/pdf', ctrl.analisisFlotaPdf);
+router.get('/analisis-flota', ctrl.analisisFlota);
+
+
+router.get('/dashboard', ctrl.dashboardKpis);
+
 export default router;

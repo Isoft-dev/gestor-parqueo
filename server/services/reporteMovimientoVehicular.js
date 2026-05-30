@@ -1,5 +1,7 @@
 import PDFDocument from 'pdfkit/js/pdfkit.js';
 import { executeSql } from '../db/oracle.js';
+import { normalizarFiltrosGlobales, whereVehiculo, aplicarFiltrosGlobales } from '../utils/reporteFiltros.js';
+import { vehiculoCatalogGroupBy, vehiculoCatalogJoin, vehiculoCatalogSelect } from '../utils/vehiculoCatalogSql.js';
 
 function parseYmd(s) {
   const m = String(s ?? '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -53,7 +55,7 @@ function weekdayEs(dateLike) {
   return days[d.getDay()];
 }
 
-export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
+export async function getVehiculosFrecuentes(desdeStr, hastaStr, params = {}) {
   const v = validateRango(desdeStr, hastaStr);
   if (v.error) {
     const err = new Error(v.error);
@@ -61,12 +63,13 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
     throw err;
   }
   const periodo = fmtPeriodo(v.desde, v.hasta);
+  const f = normalizarFiltrosGlobales(params);
+  const { clause: tvWhere, binds: tvBinds } = whereVehiculo(f);
 
   const rows = await executeSql(
     `SELECT t.VEH_ID,
             v.VEH_PLACA,
-            v.VEH_MODELO,
-            v.VEH_COLOR,
+            ${vehiculoCatalogSelect('v')},
             CASE
               WHEN v.CLI_ID IS NULL THEN 'Esporádico'
               WHEN EXISTS (
@@ -80,8 +83,10 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
             COUNT(*) AS TOTAL_VISITAS
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
+       ${vehiculoCatalogJoin('v')}
       WHERE TRUNC(t.TIC_FECHA_HORA_ENTRADA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
-      GROUP BY t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+        ${tvWhere}
+      GROUP BY t.VEH_ID, v.VEH_PLACA, ${vehiculoCatalogGroupBy('v')},
                CASE
                  WHEN v.CLI_ID IS NULL THEN 'Esporádico'
                  WHEN EXISTS (
@@ -93,27 +98,30 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
                  ELSE 'Esporádico'
                END
       ORDER BY COUNT(*) DESC, v.VEH_PLACA`,
-    periodo
+    { ...periodo, ...tvBinds }
   );
 
   const detalle = rows.map((r) => ({
     vehiculoId: r.VEH_ID ?? r.veh_id,
     placa: r.VEH_PLACA ?? r.veh_placa ?? '—',
     modelo: r.VEH_MODELO ?? r.veh_modelo ?? '—',
+    marca: r.MAR_NOMBRE ?? r.mar_nombre ?? '—',
     color: r.VEH_COLOR ?? r.veh_color ?? '—',
+    tipoVehiculo: r.TVE_TIPO ?? r.tve_tipo ?? '—',
     visitas: Number(r.TOTAL_VISITAS ?? r.total_visitas ?? 0),
     tipoCliente: r.TIPO_CLIENTE ?? r.tipo_cliente ?? 'Esporádico',
   }));
 
+  const detalleFiltrado = aplicarFiltrosGlobales(detalle, f);
   return {
     periodo,
-    totalVehiculos: detalle.length,
-    top10: detalle.slice(0, 10),
-    detalle,
+    totalVehiculos: detalleFiltrado.length,
+    top10: detalleFiltrado.slice(0, 10),
+    detalle: detalleFiltrado,
   };
 }
 
-export async function getEntradasSalidas(desdeStr, hastaStr) {
+export async function getEntradasSalidas(desdeStr, hastaStr, params = {}) {
   const v = validateRango(desdeStr, hastaStr);
   if (v.error) {
     const err = new Error(v.error);
@@ -121,39 +129,47 @@ export async function getEntradasSalidas(desdeStr, hastaStr) {
     throw err;
   }
   const periodo = fmtPeriodo(v.desde, v.hasta);
+  const f = normalizarFiltrosGlobales(params);
+  const { clause: tvWhere, binds: tvBinds } = whereVehiculo(f);
 
   const tickets = await executeSql(
     `SELECT t.TIC_ID,
             t.TIC_CODIGO,
             v.VEH_PLACA,
+            ${vehiculoCatalogSelect('v')},
             t.TIC_FECHA_HORA_ENTRADA,
             t.TIC_FECHA_HORA_SALIDA,
             e.ETI_ESTADO
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
+       ${vehiculoCatalogJoin('v')}
        LEFT JOIN PAR_ESTADO_TICKET e ON e.ETI_ID = t.ETI_ID
       WHERE (
               TRUNC(t.TIC_FECHA_HORA_ENTRADA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
            OR TRUNC(t.TIC_FECHA_HORA_SALIDA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
             )
+        ${tvWhere}
       ORDER BY t.TIC_FECHA_HORA_ENTRADA DESC`,
-    periodo
+    { ...periodo, ...tvBinds }
   );
 
   const movimientosMem = await executeSql(
     `SELECT r.RMM_ID,
             v.VEH_PLACA,
+            ${vehiculoCatalogSelect('v')},
             r.RMM_FECHA_HORA_ENTRADA,
             r.RMM_FECHA_HORA_SALIDA
        FROM PAR_REGISTRO_MOVIMIENTO_MEMBRESIA r
        JOIN PAR_MEMBRESIA m ON m.MEM_ID = r.MEM_ID
        JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
+       ${vehiculoCatalogJoin('v')}
       WHERE (
               TRUNC(r.RMM_FECHA_HORA_ENTRADA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
            OR TRUNC(r.RMM_FECHA_HORA_SALIDA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
             )
+        ${tvWhere}
       ORDER BY r.RMM_FECHA_HORA_ENTRADA DESC`,
-    periodo
+    { ...periodo, ...tvBinds }
   );
 
   const detalleEsp = tickets.map((r) => {
@@ -166,6 +182,9 @@ export async function getEntradasSalidas(desdeStr, hastaStr) {
       tipoCliente: 'Esporádico',
       referencia: r.TIC_CODIGO ?? r.tic_codigo ?? `T-${r.TIC_ID ?? r.tic_id}`,
       placa: r.VEH_PLACA ?? r.veh_placa ?? '—',
+      modelo: r.VEH_MODELO ?? r.veh_modelo ?? '—',
+      color: r.VEH_COLOR ?? r.veh_color ?? '—',
+      tipoVehiculo: r.TVE_TIPO ?? r.tve_tipo ?? '—',
       horaEntrada: entrada,
       horaSalida: salida,
       tiempoEstadia: fmtDuracionMin(mins),
@@ -183,6 +202,9 @@ export async function getEntradasSalidas(desdeStr, hastaStr) {
       tipoCliente: 'Mensual',
       referencia: `MM-${r.RMM_ID ?? r.rmm_id}`,
       placa: r.VEH_PLACA ?? r.veh_placa ?? '—',
+      modelo: r.VEH_MODELO ?? r.veh_modelo ?? '—',
+      color: r.VEH_COLOR ?? r.veh_color ?? '—',
+      tipoVehiculo: r.TVE_TIPO ?? r.tve_tipo ?? '—',
       horaEntrada: entrada,
       horaSalida: salida,
       tiempoEstadia: fmtDuracionMin(mins),
@@ -205,16 +227,19 @@ export async function getEntradasSalidas(desdeStr, hastaStr) {
   const totalEntradas = detalle.reduce((s, r) => s + (inRange(r.horaEntrada) ? 1 : 0), 0);
   const totalSalidas = detalle.reduce((s, r) => s + (inRange(r.horaSalida) ? 1 : 0), 0);
 
+  const detalleFiltrado = aplicarFiltrosGlobales(detalle, f);
+  const totalEntradasF = detalleFiltrado.reduce((s, r) => s + (inRange(r.horaEntrada) ? 1 : 0), 0);
+  const totalSalidasF  = detalleFiltrado.reduce((s, r) => s + (inRange(r.horaSalida)  ? 1 : 0), 0);
   return {
     periodo,
-    totalRegistros: detalle.length,
-    totalEntradas,
-    totalSalidas,
-    detalle,
+    totalRegistros: detalleFiltrado.length,
+    totalEntradas: totalEntradasF,
+    totalSalidas: totalSalidasF,
+    detalle: detalleFiltrado,
   };
 }
 
-export async function getTiempoPromedioEstadia(desdeStr, hastaStr) {
+export async function getTiempoPromedioEstadia(desdeStr, hastaStr, params = {}) {
   const v = validateRango(desdeStr, hastaStr);
   if (v.error) {
     const err = new Error(v.error);
@@ -226,10 +251,12 @@ export async function getTiempoPromedioEstadia(desdeStr, hastaStr) {
   const rows = await executeSql(
     `SELECT t.TIC_CODIGO,
             v.VEH_PLACA,
+            ${vehiculoCatalogSelect('v')},
             t.TIC_FECHA_HORA_ENTRADA,
             t.TIC_FECHA_HORA_SALIDA
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
+       ${vehiculoCatalogJoin('v')}
        JOIN PAR_ESTADO_TICKET e ON e.ETI_ID = t.ETI_ID
       WHERE t.TIC_FECHA_HORA_ENTRADA IS NOT NULL
         AND t.TIC_FECHA_HORA_SALIDA IS NOT NULL
@@ -251,6 +278,7 @@ export async function getTiempoPromedioEstadia(desdeStr, hastaStr) {
       return {
         codigo: r.TIC_CODIGO ?? r.tic_codigo ?? '—',
         placa: r.VEH_PLACA ?? r.veh_placa ?? '—',
+        tipoVehiculo: r.TVE_TIPO ?? r.tve_tipo ?? '—',
         fechaSalida: salida,
         minutos: mins,
       };
@@ -290,6 +318,21 @@ export async function getTiempoPromedioEstadia(desdeStr, hastaStr) {
   const maxRow = detalle.reduce((m, r) => (r.minutos > m.minutos ? r : m), detalle[0]);
   const minRow = detalle.reduce((m, r) => (r.minutos < m.minutos ? r : m), detalle[0]);
 
+  const byTipo = new Map();
+  for (const row of detalle) {
+    const key = row.tipoVehiculo || 'Sin tipo';
+    const prev = byTipo.get(key) || { suma: 0, cantidad: 0 };
+    byTipo.set(key, { suma: prev.suma + row.minutos, cantidad: prev.cantidad + 1 });
+  }
+  const promedioPorTipoVehiculo = [...byTipo.entries()]
+    .map(([tipo, v2]) => ({
+      tipo,
+      promedioMinutos: Number((v2.suma / v2.cantidad).toFixed(2)),
+      promedioEtiqueta: fmtDuracionMin(v2.suma / v2.cantidad),
+      cantidadRegistros: v2.cantidad,
+    }))
+    .sort((a, b) => b.cantidadRegistros - a.cantidadRegistros);
+
   return {
     periodo,
     totalRegistros: detalle.length,
@@ -298,6 +341,7 @@ export async function getTiempoPromedioEstadia(desdeStr, hastaStr) {
       etiqueta: fmtDuracionMin(promedioGeneralMin),
     },
     promedioPorDiaSemana,
+    promedioPorTipoVehiculo,
     maximo: {
       placa: maxRow.placa,
       codigo: maxRow.codigo,

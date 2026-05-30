@@ -7,6 +7,9 @@ import * as serviceOps from '../services/reporteOperativoMaquinas.js';
 import * as serviceFin from '../services/reporteFinanciero.js';
 import * as serviceMemCli from '../services/reporteMembresiasClientes.js';
 import * as serviceAfl from '../services/reporteAfluencia.js';
+import * as serviceFlota from '../services/reportePerfilFlota.js';
+import * as serviceAnalisis from '../services/reporteAnalisisFlota.js';
+import * as serviceDashboard from '../services/reporteDashboard.js';
 
 export async function incidentesPorRango(req, res) {
   try {
@@ -171,8 +174,8 @@ export async function clientesMoraPdf(req, res) {
 
 export async function vehiculosFrecuentes(req, res) {
   try {
-    const { desde, hasta } = req.query;
-    const data = await serviceMovFreq.getVehiculosFrecuentes(desde, hasta);
+    const { desde, hasta, tipoVehiculo, tipoCliente } = req.query;
+    const data = await serviceMovFreq.getVehiculosFrecuentes(desde, hasta, { tipoVehiculo, tipoCliente });
     res.json(data);
   } catch (err) {
     if (err?.code === 'VALIDATION') {
@@ -184,8 +187,8 @@ export async function vehiculosFrecuentes(req, res) {
 
 export async function vehiculosFrecuentesPdf(req, res) {
   try {
-    const { desde, hasta } = req.query;
-    const data = await serviceMovFreq.getVehiculosFrecuentes(desde, hasta);
+    const { desde, hasta, tipoVehiculo, tipoCliente } = req.query;
+    const data = await serviceMovFreq.getVehiculosFrecuentes(desde, hasta, { tipoVehiculo, tipoCliente });
     const pdfBuffer = await serviceMovFreq.buildVehiculosFrecuentesPdfBuffer(data);
     const safeDesde = String(desde || '').replace(/\D/g, '');
     const safeHasta = String(hasta || '').replace(/\D/g, '');
@@ -205,8 +208,8 @@ export async function vehiculosFrecuentesPdf(req, res) {
 
 export async function entradasSalidas(req, res) {
   try {
-    const { desde, hasta } = req.query;
-    const data = await serviceMov.getEntradasSalidas(desde, hasta);
+    const { desde, hasta, tipoVehiculo, tipoCliente } = req.query;
+    const data = await serviceMov.getEntradasSalidas(desde, hasta, { tipoVehiculo, tipoCliente });
     res.json(data);
   } catch (err) {
     if (err?.code === 'VALIDATION') {
@@ -218,8 +221,8 @@ export async function entradasSalidas(req, res) {
 
 export async function entradasSalidasPdf(req, res) {
   try {
-    const { desde, hasta } = req.query;
-    const data = await serviceMov.getEntradasSalidas(desde, hasta);
+    const { desde, hasta, tipoVehiculo, tipoCliente } = req.query;
+    const data = await serviceMov.getEntradasSalidas(desde, hasta, { tipoVehiculo, tipoCliente });
     const pdfBuffer = await serviceMov.buildEntradasSalidasPdfBuffer(data);
     const safeDesde = String(desde || '').replace(/\D/g, '');
     const safeHasta = String(hasta || '').replace(/\D/g, '');
@@ -239,8 +242,8 @@ export async function entradasSalidasPdf(req, res) {
 
 export async function tiempoPromedioEstadia(req, res) {
   try {
-    const { desde, hasta } = req.query;
-    const data = await serviceMov.getTiempoPromedioEstadia(desde, hasta);
+    const { desde, hasta, tipoVehiculo, tipoCliente } = req.query;
+    const data = await serviceMov.getTiempoPromedioEstadia(desde, hasta, { tipoVehiculo, tipoCliente });
     res.json(data);
   } catch (err) {
     if (err?.code === 'VALIDATION') {
@@ -252,8 +255,8 @@ export async function tiempoPromedioEstadia(req, res) {
 
 export async function tiempoPromedioEstadiaPdf(req, res) {
   try {
-    const { desde, hasta } = req.query;
-    const data = await serviceMov.getTiempoPromedioEstadia(desde, hasta);
+    const { desde, hasta, tipoVehiculo, tipoCliente } = req.query;
+    const data = await serviceMov.getTiempoPromedioEstadia(desde, hasta, { tipoVehiculo, tipoCliente });
     const pdfBuffer = await serviceMov.buildTiempoPromedioPdfBuffer(data);
     const safeDesde = String(desde || '').replace(/\D/g, '');
     const safeHasta = String(hasta || '').replace(/\D/g, '');
@@ -554,5 +557,117 @@ export async function afluenciaAnualPdf(req, res) {
   } catch (err) {
     if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
     res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function perfilPorModelo(req, res) {
+  try {
+    const data = await serviceFlota.getPerfilPorModelo(req.query);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function perfilPorColor(req, res) {
+  try {
+    const data = await serviceFlota.getPerfilPorColor(req.query);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function heatmapAfluencia(req, res) {
+  try {
+    const data = await serviceFlota.getHeatmapAfluencia(req.query);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function perfilGeoClientes(req, res) {
+  try {
+    const data = await serviceFlota.getPerfilGeoClientes();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+
+export async function analisisFlota(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceAnalisis.getAnalisisFlota(desde, hasta);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al generar el reporte' });
+  }
+}
+
+export async function analisisFlotaPdf(req, res) {
+  try {
+    const {
+      desde,
+      hasta,
+      tipoCliente,
+      tipoVehiculo,
+      marca,
+      modelo,
+      color,
+      placa,
+      diaSemana,
+      mes,
+      horaIni,
+      horaFin,
+      estadiaMin,
+      estadiaMax,
+    } = req.query;
+    const pdfBuffer = await serviceAnalisis.buildAnalisisFlotaPdfBuffer({
+      desde,
+      hasta,
+      tipoCliente,
+      tipoVehiculo,
+      marca,
+      modelo,
+      color,
+      placa,
+      diaSemana,
+      mes,
+      horaIni,
+      horaFin,
+      estadiaMin,
+      estadiaMax,
+    });
+    const safeDesde = String(desde || '').replace(/\D/g, '');
+    const safeHasta = String(hasta || '').replace(/\D/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reporte-analisis-flota-${safeDesde}-${safeHasta}.pdf"`
+    );
+    res.send(pdfBuffer);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') return res.status(400).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Error al exportar el PDF' });
+  }
+}
+
+export async function dashboardKpis(req, res) {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await serviceDashboard.getDashboardKpis(desde, hasta);
+    res.json(data);
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message || 'Error al cargar el dashboard' });
   }
 }

@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+﻿import { Fragment, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useCallback } from 'react';
 import { API_BASE } from '../config.js';
 import { buildLabelMapFromCrudFields, getDbColumnLabel } from '../utils/dbColumnLabel.js';
+import { sanitizeFieldValue, getInputMode, getMaxLength } from '../utils/fieldValidation.js';
 import HelpHint from './HelpHint.jsx';
 import {
   filterManualMachineStatuses,
@@ -13,19 +15,25 @@ import {
   pickInoperativeMachineStatusId,
 } from '../utils/machineStatus.js';
 
-// ── CONFIG ────────────────────────────────────────────────────
+// CONFIG
 // ops: c=create, u=update, d=delete
 // updateFields: si existe, el formulario de edición solo muestra esos campos
 const SECTIONS = {
   'me-ms': {
-    label: 'ME-MS — Entrada/Salida',
+    label: 'ME-MS - Entrada/Salida',
     entities: [
       { key: 'estado-ticket', label: 'Estado Ticket', id: 'ETI_ID',
         fields: [{ k:'ETI_ID',l:'ID',req:true },{ k:'ETI_ESTADO',l:'Estado',req:true }],
         ops:{c:false,u:false,d:false} },
       { key: 'tarifa', label: 'Tarifa', id: 'TAR_ID',
-        fields: [{ k:'TAR_ID',l:'ID',req:true },{ k:'TAR_TIPO',l:'Tipo',req:true },{ k:'TAR_PRECIO',l:'Precio',t:'number',req:true },{ k:'TAR_TIEMPO_GRACIA',l:'Tiempo Gracia (min)',t:'number',req:true }],
-        ops:{c:true,u:true,d:true} },
+        fields: [
+          { k:'TAR_ID',l:'ID',req:false },
+          { k:'TAR_TIPO',l:'Nombre de la tarifa',req:true },
+          { k:'TAR_PRECIO',l:'Precio (Q por hora)',t:'number',req:true },
+          { k:'TAR_TIEMPO_GRACIA',l:'Minutos de gracia',t:'number',req:true },
+        ],
+        ops:{c:true,u:true,d:true},
+        readOnlyOnCreate:['TAR_ID'] },
       { key: 'ticket', label: 'Ticket', id: 'TIC_ID',
         fields: [
           { k:'TIC_ID',l:'ID',req:true },
@@ -43,7 +51,7 @@ const SECTIONS = {
             labelKey:'ETI_ESTADO',
           },
         ],
-        ops:{c:true,u:true,d:false},
+        ops:{c:false,u:true,d:false},
         updateFields:['TIC_FECHA_HORA_SALIDA','ETI_ID'],
         readOnlyOnCreate:['ETI_ID'],
       },
@@ -59,7 +67,7 @@ const SECTIONS = {
     ],
   },
   'mc': {
-    label: 'MC — Máquina Cobro',
+    label: 'MC - Máquina Cobro',
     entities: [
       { key: 'estado-maquina', label: 'Estado Máquina', id: 'EMA_ID',
         fields: [{ k:'EMA_ID',l:'ID',req:true },{ k:'EMA_ESTADO',l:'Estado',req:true },{ k:'EMA_DESCRIPCION',l:'Descripción' }],
@@ -165,7 +173,7 @@ const SECTIONS = {
     ],
   },
   'pa': {
-    label: 'PA — Parqueo General',
+    label: 'PA - Parqueo General',
     entities: [
       { key: 'rol', label: 'Rol', id: 'ROL_ID',
         fields: [{ k:'ROL_ID',l:'ID',req:true },{ k:'ROL_TIPO',l:'Tipo',req:true },{ k:'ROL_DESCRIPCION',l:'Descripción' }],
@@ -183,15 +191,29 @@ const SECTIONS = {
         fields: [{ k:'CLI_ID',l:'ID',req:true },{ k:'CLI_PRIMER_NOMBRE',l:'Primer Nombre',req:true },{ k:'CLI_SEGUNDO_NOMBRE',l:'Segundo Nombre' },{ k:'CLI_PRIMER_APELLIDO',l:'Primer Apellido',req:true },{ k:'CLI_SEGUNDO_APELLIDO',l:'Segundo Apellido' },{ k:'CLI_DPI',l:'DPI',req:true },{ k:'CLI_NIT',l:'NIT' },{ k:'CLI_CORREO',l:'Correo' },{ k:'CLI_TELEFONO',l:'Teléfono' },{ k:'CLI_ZONA',l:'Zona' },{ k:'CLI_CALLE',l:'Calle' },{ k:'CLI_NUMERO',l:'Número' },{ k:'CLI_COLONIA',l:'Colonia' },{ k:'CLI_CIUDAD',l:'Ciudad' },{ k:'CLI_CODIGO_POSTAL',l:'Cód. Postal' },{ k:'CLI_ACTIVO',l:'Activo',t:'checkbox' }],
         ops:{c:true,u:true,d:false} },
       { key: 'tipo-vehiculo', label: 'Tipo Vehículo', id: 'TVE_ID',
-        fields: [{ k:'TVE_ID',l:'ID',req:true },{ k:'TVE_TIPO',l:'Tipo',req:true },{ k:'TVE_MARCA',l:'Marca' },{ k:'TVE_DESCRIPCION',l:'Descripción' }],
+        fields: [{ k:'TVE_ID',l:'ID',req:true },{ k:'TVE_TIPO',l:'Tipo',req:true },{ k:'TVE_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'marca-vehiculo', label: 'Marca', id: 'MAR_ID',
+        fields: [{ k:'MAR_ID',l:'ID',req:true },{ k:'MAR_NOMBRE',l:'Marca',req:true },{ k:'MAR_DESCRIPCION',l:'Descripción' }],
+        ops:{c:true,u:true,d:true} },
+      { key: 'modelo-vehiculo', label: 'Modelo', id: 'MOD_ID',
+        fields: [
+          { k:'MOD_ID',l:'ID',req:true },
+          { k:'MOD_NOMBRE',l:'Modelo',req:true },
+          { k:'MAR_ID',l:'Marca',req:true,t:'select',catalog:'marca-vehiculo',valueKey:'MAR_ID',labelKey:'MAR_NOMBRE' },
+          { k:'TVE_ID',l:'Tipo de vehículo',req:true,t:'select',catalog:'tipo-vehiculo',valueKey:'TVE_ID',labelKey:'TVE_TIPO' },
+          { k:'MOD_DESCRIPCION',l:'Descripción' },
+        ],
+        ops:{c:true,u:true,d:true} },
+      { key: 'color-vehiculo', label: 'Color', id: 'COL_ID',
+        fields: [{ k:'COL_ID',l:'ID',req:true },{ k:'COL_NOMBRE',l:'Color',req:true },{ k:'COL_DESCRIPCION',l:'Descripción' }],
         ops:{c:true,u:true,d:true} },
       { key: 'vehiculo', label: 'Vehículo', id: 'VEH_ID',
         fields: [
           { k:'VEH_ID',l:'ID',req:true },
           { k:'VEH_PLACA',l:'Placa',req:true },
-          { k:'VEH_MODELO',l:'Modelo' },
-          { k:'VEH_COLOR',l:'Color' },
-          { k:'TVE_ID',l:'Tipo de vehículo',req:true,t:'select',catalog:'tipo-vehiculo',valueKey:'TVE_ID',labelKey:'TVE_TIPO' },
+          { k:'MOD_ID',l:'Modelo',req:true,t:'select',catalog:'modelo-vehiculo',valueKey:'MOD_ID',labelKey:'MOD_LABEL' },
+          { k:'COL_ID',l:'Color',t:'select',catalog:'color-vehiculo',valueKey:'COL_ID',labelKey:'COL_NOMBRE' },
           { k:'CLI_ID',l:'CLI_ID' },
         ],
         ops:{c:true,u:true,d:false} },
@@ -209,6 +231,8 @@ const SECTIONS = {
           { k:'MEM_FECHA_VENCIMIENTO',l:'Vencimiento',t:'datetime-local',req:true },
           { k:'EME_ID',l:'Estado membresía',t:'select',catalog:'estado-membresia',valueKey:'EME_ID',labelKey:'EME_ESTADO' },
           { k:'MEM_FECHA_ULTIMO_CAMBIO_ESTADO',l:'Último Cambio',t:'datetime-local' },
+          { k:'ESP_ID',l:'Espacio asignado',req:true,t:'select',catalog:'espacio',valueKey:'ESP_ID',labelKey:'ESP_CODIGO' },
+          { k:'ESP_UBICACION',l:'Ubicación' },
           {
             k:'MEM_VEH_PLACA',
             l:'Placa del vehículo',
@@ -217,7 +241,9 @@ const SECTIONS = {
             placeholder:'Ej. P-123ABC',
           },
         ],
-        ops:{c:true,u:true,d:false},
+        ops:{c:false,u:true,d:false},
+        updateFields:['ESP_ID','ESP_UBICACION'],
+        readOnlyOnUpdate:['MEM_ID'],
         readOnlyOnCreate:['MEM_FECHA_VENCIMIENTO'],
       },
       { key: 'registro-movimiento-membresia', label: 'Reg. Mov. Membresía', id: 'RMM_ID',
@@ -267,7 +293,7 @@ function collectEntitiesByKeys(keys) {
   return keys.map((k) => byKey.get(k)).filter(Boolean);
 }
 
-/** Mapa columna API → etiqueta de formulario (SECTIONS), con fallback en `getDbColumnLabel`. */
+/** Mapa columna API -> etiqueta de formulario (SECTIONS), con fallback en `getDbColumnLabel`. */
 const CRUD_COLUMN_LABELS = buildLabelMapFromCrudFields(SECTIONS);
 
 // ── HELPERS ───────────────────────────────────────────────────
@@ -308,21 +334,131 @@ function shouldHideFieldForCurrentForm(entityKey, fieldKey, form, isNewRecord = 
     return true;
   }
   if (
-    entityKey === 'registro-mantenimiento'
-    && isNewRecord
-    && fieldKey === 'REM_DESCRIPCION'
-    && String(form?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase() === 'FINALIZACION'
-  ) {
-    return true;
-  }
-  if (
     entityKey === 'maquina'
     && fieldKey === 'MAQ_FECHA_ULTIMA_RECARGA'
   ) {
     return true;
   }
+  if (entityKey === 'tarifa' && fieldKey === 'TAR_ID' && isNewRecord) {
+    return true;
+  }
   return false;
 }
+
+const MONTHLY_CLIENT_COMPACT_HIDDEN_COLUMNS = new Set([
+  'CLI_SEGUNDO_NOMBRE',
+  'CLI_SEGUNDO_APELLIDO',
+  'CLI_NIT',
+  'CLI_TELEFONO',
+  'CLI_ZONA',
+  'CLI_CALLE',
+  'CLI_NUMERO',
+  'CLI_COLONIA',
+  'CLI_CIUDAD',
+  'CLI_CODIGO_POSTAL',
+]);
+
+function clienteDireccionCompacta(row) {
+  const parts = [
+    row?.CLI_ZONA ? `Zona ${row.CLI_ZONA}` : '',
+    row?.CLI_CALLE ? `Calle ${row.CLI_CALLE}` : '',
+    row?.CLI_NUMERO ? `No. ${row.CLI_NUMERO}` : '',
+    row?.CLI_COLONIA ? `Col. ${row.CLI_COLONIA}` : '',
+    row?.CLI_CIUDAD ? String(row.CLI_CIUDAD) : '',
+    row?.CLI_CODIGO_POSTAL ? `CP ${row.CLI_CODIGO_POSTAL}` : '',
+  ]
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean);
+  return parts.join(', ');
+}
+
+function clienteCompactDetailItems(row) {
+  return [
+    { label: 'Nombre completo', value: clienteNombreCompleto(row) || '—' },
+    { label: 'NIT', value: row?.CLI_NIT || '—' },
+    { label: 'Telefono', value: row?.CLI_TELEFONO || '—' },
+    { label: 'Direccion', value: clienteDireccionCompacta(row) || '—' },
+  ];
+}
+
+function shouldHideTableColumn(
+  entityKey,
+  columnKey,
+  {
+    compactMonthlyClientTable = false,
+    isMonthlyClientVehicleView = false,
+    isMonthlyVehicleMembershipView = false,
+    isScopedMachineMaintenanceView = false,
+  } = {},
+) {
+  if (entityKey === 'ticket' && ['TIC_CODIGO', 'VEH_ID', 'MOD_ID', 'COL_ID', 'MAR_ID', 'TVE_ID', 'ETI_ID'].includes(columnKey)) {
+    return true;
+  }
+  if (entityKey === 'alerta' && columnKey === 'TAL_ID') return true;
+  if (entityKey === 'detalle-saldo' && ['SDI_ID', 'MAQ_ID', 'MAQ_CODIGO'].includes(columnKey)) return true;
+  if (entityKey === 'registro-mantenimiento' && columnKey === 'REM_ESTADO_RESULTANTE_EMA_ID') return true;
+  if (entityKey === 'registro-mantenimiento' && isScopedMachineMaintenanceView && ['MAQ_ID', 'MAQ_CODIGO'].includes(columnKey)) {
+    return true;
+  }
+  if (
+    entityKey === 'membresia'
+    && [
+      'EME_ESTADO',
+      'TME_TIPO',
+      'ESP_CODIGO',
+      'CLI_PRIMER_NOMBRE',
+      'CLI_SEGUNDO_NOMBRE',
+      'CLI_PRIMER_APELLIDO',
+      'CLI_SEGUNDO_APELLIDO',
+      'VEH_ID',
+      'VEH_MODELO',
+    ].includes(columnKey)
+  ) {
+    return true;
+  }
+  if (entityKey === 'vehiculo' && columnKey === 'TVE_ID') return true;
+  if (entityKey === 'vehiculo' && columnKey === 'EME_ID') return true;
+  if (entityKey === 'vehiculo' && isMonthlyClientVehicleView && ['COL_ID', 'MAR_ID', 'MEM_ID'].includes(columnKey)) {
+    return true;
+  }
+  if (
+    entityKey === 'detalle-pago-membresia'
+    && (
+      columnKey === 'DPM_MES_CANCELADO'
+      || columnKey === 'dpm_mes_cancelado'
+      || columnKey === 'CLI_PRIMER_NOMBRE'
+      || columnKey === 'CLI_SEGUNDO_NOMBRE'
+      || columnKey === 'CLI_PRIMER_APELLIDO'
+      || columnKey === 'CLI_SEGUNDO_APELLIDO'
+    )
+  ) {
+    return true;
+  }
+  if (
+    entityKey === 'bitacora-incidente-vehiculo'
+    && [
+      'VEH_ID',
+      'VEH_MODELO',
+      'BIV_RESUELTO',
+      'USU_PRIMER_NOMBRE',
+      'USU_PRIMER_APELLIDO',
+      'INC_ID',
+      'CLI_ID',
+      'CLI_PRIMER_NOMBRE',
+      'CLI_PRIMER_APELLIDO',
+      'CLI_CORREO',
+    ].includes(columnKey)
+  ) {
+    return true;
+  }
+  if (compactMonthlyClientTable && MONTHLY_CLIENT_COMPACT_HIDDEN_COLUMNS.has(columnKey)) return true;
+  if (entityKey === 'vehiculo' && isMonthlyClientVehicleView && columnKey === 'CLI_ID') return true;
+  if (entityKey === 'membresia' && isMonthlyVehicleMembershipView && ['CLI_ID', 'VEH_PLACA'].includes(columnKey)) {
+    return true;
+  }
+  return false;
+}
+
 function isCurrentSessionUser(rowUserId, sessionUserId) {
   if (rowUserId == null || sessionUserId == null) return false;
   return String(rowUserId).trim() !== '' && String(rowUserId) === String(sessionUserId);
@@ -343,6 +479,18 @@ function preparePayload(fields, form) {
     else out[f.k] = v || null;
   });
   return out;
+}
+
+function clienteNombreCompleto(row) {
+  return [
+    row?.CLI_PRIMER_NOMBRE,
+    row?.CLI_SEGUNDO_NOMBRE,
+    row?.CLI_PRIMER_APELLIDO,
+    row?.CLI_SEGUNDO_APELLIDO,
+  ]
+    .map((x) => String(x ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
 }
 
 function normPlacaVehiculo(s) {
@@ -371,12 +519,20 @@ async function resolveOrCreateVehiculoIdByPlacaForTicket(rawPlaca) {
   const existingId = await resolveVehiculoIdByPlaca(placa);
   if (existingId != null && String(existingId).trim() !== '') return existingId;
 
-  const tveRes = await fetch(`${API_BASE}/tipo-vehiculo`, { cache: 'no-store' });
-  const tveData = await tveRes.json();
-  const tveList = Array.isArray(tveData) ? tveData : [];
-  const tveId = tveList[0]?.TVE_ID;
-  if (!tveRes.ok || tveId == null || String(tveId).trim() === '') {
-    throw new Error('No hay tipos de vehículo disponibles para registrar la placa nueva.');
+  const [modeloRes, colorRes] = await Promise.all([
+    fetch(`${API_BASE}/modelo-vehiculo`, { cache: 'no-store' }),
+    fetch(`${API_BASE}/color-vehiculo`, { cache: 'no-store' }),
+  ]);
+  const [modeloData, colorData] = await Promise.all([modeloRes.json(), colorRes.json()]);
+  const modeloList = Array.isArray(modeloData) ? modeloData : [];
+  const colorList = Array.isArray(colorData) ? colorData : [];
+  const modId = modeloList[0]?.MOD_ID;
+  const colId = colorList[0]?.COL_ID;
+  if (!modeloRes.ok || modId == null || String(modId).trim() === '') {
+    throw new Error('No hay modelos de vehículo disponibles para registrar la placa nueva.');
+  }
+  if (!colorRes.ok || colId == null || String(colId).trim() === '') {
+    throw new Error('No hay colores disponibles para registrar la placa nueva.');
   }
 
   const createVehRes = await fetch(`${API_BASE}/vehiculo`, {
@@ -384,9 +540,8 @@ async function resolveOrCreateVehiculoIdByPlacaForTicket(rawPlaca) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       VEH_PLACA: placa,
-      TVE_ID: Number(tveId) || tveId,
-      VEH_MODELO: null,
-      VEH_COLOR: null,
+      MOD_ID: Number(modId) || modId,
+      COL_ID: Number(colId) || colId,
       CLI_ID: null,
     }),
   });
@@ -399,6 +554,15 @@ async function resolveOrCreateVehiculoIdByPlacaForTicket(rawPlaca) {
     throw new Error('Se creó el vehículo, pero no se recibió su identificador.');
   }
   return createdVehId;
+}
+
+async function resolveVehiculoByPlaca(rawPlaca) {
+  const placa = normPlacaVehiculo(rawPlaca);
+  if (!placa) return null;
+  const res = await fetch(`${API_BASE}/vehiculo`, { cache: 'no-store' });
+  const data = await res.json();
+  if (!res.ok || !Array.isArray(data)) return null;
+  return data.find((v) => normPlacaVehiculo(v.VEH_PLACA ?? v.veh_placa) === placa) || null;
 }
 
 async function parseJsonSafe(res) {
@@ -434,7 +598,7 @@ function getAdminListContextHint(sectionPath, entityKey) {
         'Vehículos vinculados a clientes mensuales. Los vehículos de clientes esporádicos con NIT permanecen en Tickets y vehículos.',
       'tipo-vehiculo': 'Tipos de vehículo disponibles (sedán, SUV, etc.) para clasificar cada placa.',
       'tipo-membresia': 'Planes disponibles: duración, precio y nombre comercial para nuevas membresías.',
-      'estado-membresia': 'Estados posibles del contrato (activa, vencida, suspendida…).',
+      'estado-membresia': 'Estados posibles del contrato (activa, cancelada, vencida o suspendida).',
       'registro-movimiento-membresia':
         'Movimientos de entrada y salida por membresía. Opcional: filtra por placa con la búsqueda.',
     },
@@ -474,6 +638,16 @@ function getAdminListContextHint(sectionPath, entityKey) {
       'tipo-cobro': 'Catálogo reutilizable al registrar un cobro (nombre y descripción).',
       'tipo-pago': 'Medios de pago para otros procesos del sistema (membresías, mensualidades, etc.).',
     },
+    informativo: {
+      'tipo-vehiculo': 'Catálogo informativo de tipos de vehículo usados para clasificar placas y reportes.',
+      'marca-vehiculo': 'Marcas disponibles para vincular modelos y analizar la flota.',
+      'modelo-vehiculo': 'Modelos registrados con su marca y tipo de vehículo asociado.',
+      'color-vehiculo': 'Colores disponibles para identificar vehículos en búsquedas y tickets.',
+      'tipo-membresia': 'Planes mensuales disponibles: duración, precio y nombre comercial.',
+      'estado-membresia': 'Estados posibles de una membresía durante su vigencia.',
+      'tipo-cobro': 'Tipos de cobro usados al cerrar tickets y registrar pagos.',
+      'estado-maquina': 'Estados operativos posibles para las máquinas del parqueo.',
+    },
     'bitacora-incidentes': {
       'bitacora-incidente-vehiculo':
         'Seguimiento de novedades por vehículo. Arriba puedes filtrar por incidente, fechas o si ya quedó resuelto.',
@@ -481,14 +655,14 @@ function getAdminListContextHint(sectionPath, entityKey) {
     },
     alertas: {
       'tipo-alerta': 'Motivos por los que el sistema genera alertas (saldo bajo, asistencia, etc.).',
-      'estado-alerta': 'Etapas de atención de una alerta (pendiente, en curso, cerrada…).',
+      'estado-alerta': 'Etapas de atención de una alerta (pendiente, en curso, cerrada...).',
       alerta: 'Listado de alertas generadas; revisa su estado y la máquina asociada.',
     },
   };
 
   const specific = HINTS[sectionPath]?.[entityKey];
   if (specific) return specific;
-  return 'Consulta o edita los registros de esta lista. Usa «+ Nuevo» para altas y «Editar» en cada fila cuando aplique.';
+  return 'Consulta o edita los registros de esta lista. Usa "+ Nuevo" para altas y "Editar" en cada fila cuando aplique.';
 }
 
 function getAdminListContextHelpModel(sectionPath, entityKey) {
@@ -554,6 +728,305 @@ function renderAdminListContextHint(help) {
       {help.note ? <p>{help.note}</p> : null}
     </>
   );
+}
+
+function getAdminSectionTitle(sectionPath) {
+  const titles = {
+    'clientes-mensuales': 'Clientes mensuales',
+    'tickets-vehiculos': 'Tickets y vehiculos',
+    usuarios: 'Gestion de usuarios',
+    maquinas: 'Gestion de maquinas',
+    tarifas: 'Gestion de cobro',
+    informativo: 'Informativo',
+    'bitacora-incidentes': 'Bitacora de incidentes',
+    alertas: 'Alertas',
+  };
+  return titles[sectionPath] || 'Modulo administrativo';
+}
+
+function getEntityIcon(entityKey) {
+  const icons = {
+    cliente: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+    ),
+    membresia: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="5" width="20" height="14" rx="3"/>
+        <line x1="2" y1="10" x2="22" y2="10"/>
+        <line x1="6" y1="15" x2="10" y2="15"/>
+        <line x1="6" y1="17.5" x2="8" y2="17.5"/>
+      </svg>
+    ),
+    'detalle-pago-membresia': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="9" y1="13" x2="15" y2="13"/>
+        <line x1="9" y1="17" x2="13" y2="17"/>
+      </svg>
+    ),
+    vehiculo: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 17H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1l3-4h8l3 4h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/>
+        <circle cx="7.5" cy="17" r="2.5"/>
+        <circle cx="16.5" cy="17" r="2.5"/>
+        <line x1="10" y1="17" x2="14" y2="17"/>
+      </svg>
+    ),
+    'tipo-vehiculo': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="18" rx="2"/>
+        <line x1="8" y1="9" x2="16" y2="9"/>
+        <line x1="8" y1="13" x2="14" y2="13"/>
+        <line x1="8" y1="17" x2="11" y2="17"/>
+      </svg>
+    ),
+    'tipo-membresia': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+      </svg>
+    ),
+    'estado-membresia': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <polyline points="9 12 11 14 15 10"/>
+      </svg>
+    ),
+    'registro-movimiento-membresia': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="23 4 23 10 17 10"/>
+        <polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+    ),
+    ticket: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 1 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 1 0 0-4z"/>
+        <path d="M9 8h6M9 12h6M9 16h4"/>
+      </svg>
+    ),
+    'estado-ticket': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 12l4 4L19 6"/>
+        <path d="M21 12a9 9 0 1 1-3.1-6.8"/>
+      </svg>
+    ),
+    cobro: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="6" width="18" height="12" rx="2"/>
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M7 10v4M17 10v4"/>
+      </svg>
+    ),
+    'tipo-cobro': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 7h16M4 12h16M4 17h10"/>
+        <path d="M18 15l2 2 3-4"/>
+      </svg>
+    ),
+    'tipo-pago': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="5" width="20" height="14" rx="3"/>
+        <path d="M2 10h20M6 15h3"/>
+      </svg>
+    ),
+    tarifa: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/>
+      </svg>
+    ),
+    usuario: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="7" r="4"/>
+        <path d="M5.5 21a6.5 6.5 0 0 1 13 0"/>
+      </svg>
+    ),
+    rol: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <path d="M9 12l2 2 4-4"/>
+      </svg>
+    ),
+    maquina: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5" y="2" width="14" height="20" rx="2"/>
+        <path d="M9 6h6M9 10h6M9 18h6"/>
+        <circle cx="12" cy="14" r="1"/>
+      </svg>
+    ),
+    'tipo-maquina': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="4" width="7" height="7" rx="1"/>
+        <rect x="13" y="4" width="7" height="7" rx="1"/>
+        <rect x="4" y="13" width="7" height="7" rx="1"/>
+        <path d="M13 16h7M16.5 13v7"/>
+      </svg>
+    ),
+    'estado-maquina': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2a10 10 0 1 0 10 10"/>
+        <path d="M12 6v6l4 2"/>
+      </svg>
+    ),
+    'detalle-maquina-ticket': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 6h9M4 12h16M4 18h9"/>
+        <path d="M16 5l4 4-4 4"/>
+      </svg>
+    ),
+    'saldo-disponible': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 7h16v10H4z"/>
+        <path d="M8 11h8M8 14h5"/>
+      </svg>
+    ),
+    'detalle-saldo': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 4h16v16H4z"/>
+        <path d="M8 8h8M8 12h8M8 16h4"/>
+      </svg>
+    ),
+    'recargo-maquina': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3v18"/>
+        <path d="M7 8h8a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h8"/>
+        <path d="M19 6l2 2 2-2"/>
+      </svg>
+    ),
+    'registro-mantenimiento': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4"/>
+        <path d="M16 3l5 5"/>
+      </svg>
+    ),
+    'bitacora-incidente-vehiculo': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 3h9l3 3v15H6z"/>
+        <path d="M14 3v4h4M9 12h6M9 16h4"/>
+      </svg>
+    ),
+    incidente: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 9v4"/>
+        <path d="M12 17h.01"/>
+        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>
+      </svg>
+    ),
+    'tipo-alerta': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+        <path d="M10 21h4"/>
+      </svg>
+    ),
+    'estado-alerta': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 11l3 3L22 4"/>
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+      </svg>
+    ),
+    alerta: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+        <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+      </svg>
+    ),
+    'marca-vehiculo': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 7h16l-2 10H6z"/>
+        <path d="M8 7l2-3h4l2 3"/>
+        <circle cx="9" cy="17" r="2"/>
+        <circle cx="15" cy="17" r="2"/>
+      </svg>
+    ),
+    'modelo-vehiculo': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 13h18"/>
+        <path d="M5 13l2-5h10l2 5"/>
+        <path d="M7 17h10"/>
+      </svg>
+    ),
+    'color-vehiculo': (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>
+        <path d="M8.5 14a3.5 3.5 0 0 0 7 0"/>
+      </svg>
+    ),
+  };
+  return icons[entityKey] || (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="8" x2="12" y2="12"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  );
+}
+
+function getEntityCardMeta(entityKey) {
+  /*
+   * Lógica de colores (tone):
+   *   ocean  (azul)   → Entidades principales / registros operativos core
+   *   mint   (verde)  → Financiero: cobros, pagos, saldos, recargas
+   *   sunset (naranja)→ Reglas de negocio, alertas, incidentes, mantenimiento
+   *   steel  (gris)   → Catálogos de referencia y estados
+   */
+  const meta = {
+    // ── Entidades core (ocean) ──────────────────────────────────────────────
+    cliente:                      { badge: 'CLI', eyebrow: 'Base maestra',          tone: 'ocean'  },
+    membresia:                    { badge: 'MEM', eyebrow: 'Planes y vigencias',     tone: 'ocean'  },
+    vehiculo:                     { badge: 'VEH', eyebrow: 'Flota vinculada',        tone: 'ocean'  },
+    ticket:                       { badge: 'TIC', eyebrow: 'Flujo de visita',        tone: 'ocean'  },
+    usuario:                      { badge: 'USR', eyebrow: 'Acceso al sistema',      tone: 'ocean'  },
+    maquina:                      { badge: 'MAQ', eyebrow: 'Equipos operativos',     tone: 'ocean'  },
+    'registro-movimiento-membresia': { badge: 'MOV', eyebrow: 'Registro de acceso', tone: 'ocean'  },
+    'detalle-maquina-ticket':     { badge: 'DMT', eyebrow: 'Trazabilidad',           tone: 'ocean'  },
+
+    // ── Financiero (mint) ───────────────────────────────────────────────────
+    cobro:                        { badge: 'COB', eyebrow: 'Pagos de salida',        tone: 'mint'   },
+    'detalle-pago-membresia':     { badge: 'PAG', eyebrow: 'Cobros aplicados',       tone: 'mint'   },
+    'saldo-disponible':           { badge: 'SAL', eyebrow: 'Efectivo en caja',       tone: 'mint'   },
+    'detalle-saldo':              { badge: 'DET', eyebrow: 'Denominaciones',         tone: 'mint'   },
+    'recargo-maquina':            { badge: 'REC', eyebrow: 'Recargas',               tone: 'mint'   },
+
+    // ── Reglas, alertas, incidentes y mantenimiento (sunset) ───────────────
+    tarifa:                       { badge: 'TAR', eyebrow: 'Reglas de precio',       tone: 'sunset' },
+    alerta:                       { badge: 'ALE', eyebrow: 'Operacion activa',       tone: 'sunset' },
+    'tipo-alerta':                { badge: 'TIP', eyebrow: 'Motivos de alerta',      tone: 'sunset' },
+    incidente:                    { badge: 'INC', eyebrow: 'Catalogo de sucesos',    tone: 'sunset' },
+    'bitacora-incidente-vehiculo':{ badge: 'BIT', eyebrow: 'Seguimiento',            tone: 'sunset' },
+    'registro-mantenimiento':     { badge: 'MAN', eyebrow: 'Servicio tecnico',       tone: 'sunset' },
+
+    // ── Catálogos y estados de referencia (steel) ──────────────────────────
+    'tipo-vehiculo':              { badge: 'TIP', eyebrow: 'Catalogo de apoyo',      tone: 'steel'  },
+    'marca-vehiculo':             { badge: 'MAR', eyebrow: 'Marca',                  tone: 'steel'  },
+    'modelo-vehiculo':            { badge: 'MOD', eyebrow: 'Modelo',                 tone: 'steel'  },
+    'color-vehiculo':             { badge: 'COL', eyebrow: 'Color',                  tone: 'steel'  },
+    'tipo-membresia':             { badge: 'PLA', eyebrow: 'Oferta comercial',       tone: 'steel'  },
+    'estado-membresia':           { badge: 'EST', eyebrow: 'Control operativo',      tone: 'steel'  },
+    'estado-ticket':              { badge: 'EST', eyebrow: 'Control de ticket',      tone: 'steel'  },
+    'estado-maquina':             { badge: 'EST', eyebrow: 'Disponibilidad',         tone: 'steel'  },
+    'estado-alerta':              { badge: 'EST', eyebrow: 'Atencion',               tone: 'steel'  },
+    'tipo-cobro':                 { badge: 'TIP', eyebrow: 'Catalogo de cobro',      tone: 'steel'  },
+    'tipo-pago':                  { badge: 'PAG', eyebrow: 'Medios de pago',         tone: 'steel'  },
+    'tipo-maquina':               { badge: 'TIP', eyebrow: 'Clasificacion',          tone: 'steel'  },
+    rol:                          { badge: 'ROL', eyebrow: 'Permisos',               tone: 'steel'  },
+  };
+
+  return meta[entityKey] || { badge: String(entityKey || 'SEC').slice(0, 3).toUpperCase(), eyebrow: 'Seccion', tone: 'steel' };
+}
+
+function getEntityCardTraits(targetEntity) {
+  if (!targetEntity?.ops) return ['Consulta'];
+
+  const traits = ['Consulta'];
+  if (targetEntity.ops.c) traits.push('Altas');
+  if (targetEntity.ops.u) traits.push('Edicion');
+  if (targetEntity.ops.d) traits.push('Eliminacion');
+  return traits;
 }
 
 function escapeHtml(s) {
@@ -705,6 +1178,73 @@ function labelEstadoTicket(etiId, catalogOptions) {
   return e?.ETI_ESTADO ? String(e.ETI_ESTADO) : (etiId == null ? '—' : String(etiId));
 }
 
+function labelTipoVehiculo(row, catalogOptions) {
+  const tveId = row?.TVE_ID ?? row?.tve_id;
+  if (row?.TVE_TIPO != null && String(row.TVE_TIPO).trim() !== '') return String(row.TVE_TIPO);
+  const tipo = (catalogOptions?.['tipo-vehiculo'] || []).find((x) => String(x.TVE_ID) === String(tveId));
+  return tipo?.TVE_TIPO ? String(tipo.TVE_TIPO) : (tveId == null ? '—' : String(tveId));
+}
+
+function labelEstadoMembresia(emeId, catalogOptions) {
+  const estado = (catalogOptions?.['estado-membresia'] || []).find((x) => String(x.EME_ID) === String(emeId));
+  return estado?.EME_ESTADO ? String(estado.EME_ESTADO) : (emeId == null ? '—' : String(emeId));
+}
+
+function getMembershipStatusBadge(statusValue) {
+  const label = String(statusValue ?? '').trim();
+  const rawStatus = label.toLowerCase();
+
+  if (!label || label === '—') {
+    return { label: label || '—', tone: 'neutral' };
+  }
+  if (rawStatus.includes('venc')) {
+    return { label: 'Vencida', tone: 'danger' };
+  }
+  if (rawStatus.includes('cancel')) {
+    return { label: 'Cancelada', tone: 'caution' };
+  }
+  if (rawStatus.includes('suspend') || rawStatus.includes('inactiv')) {
+    return { label: 'Suspendida', tone: 'warning' };
+  }
+  if (rawStatus.includes('activ')) {
+    return { label: 'Activa', tone: 'success' };
+  }
+  if (rawStatus.includes('por vencer')) {
+    return { label, tone: 'warning' };
+  }
+  return { label, tone: 'neutral' };
+}
+
+function normalizeStatusText(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function getMachineStatusBadge(statusValue) {
+  const label = String(statusValue ?? '').trim();
+  const rawStatus = normalizeStatusText(label);
+
+  if (!label || label === '—') {
+    return { label: label || '—', tone: 'neutral' };
+  }
+  if (rawStatus.includes('fuera') && rawStatus.includes('servicio')) {
+    return { label: 'Fuera de servicio', tone: 'danger' };
+  }
+  if (rawStatus.includes('manten')) {
+    return { label: 'Mantenimiento', tone: 'caution' };
+  }
+  if (rawStatus.includes('inoper') || rawStatus.includes('desactiv') || rawStatus.includes('no disponible')) {
+    return { label: 'Inoperativa', tone: 'neutral' };
+  }
+  if (rawStatus.includes('operativ') || (rawStatus.includes('en') && rawStatus.includes('servicio'))) {
+    return { label: 'Operativa', tone: 'success' };
+  }
+  return { label, tone: 'neutral' };
+}
+
 /** ETI_ID del estado «Activo» según catálogo API (coincide con seed PAR_ESTADO_TICKET). */
 function pickEtiIdActivo(estados) {
   const rows = Array.isArray(estados) ? estados : [];
@@ -714,6 +1254,70 @@ function pickEtiIdActivo(estados) {
   if (exact?.ETI_ID != null) return String(exact.ETI_ID);
   const loose = rows.find((x) => String(x?.ETI_ESTADO || '').toLowerCase().includes('activ'));
   return loose?.ETI_ID != null ? String(loose.ETI_ID) : '';
+}
+
+function pickEmeIdActiva(estados) {
+  const rows = Array.isArray(estados) ? estados : [];
+  const exact = rows.find(
+    (x) => x?.EME_ESTADO != null && String(x.EME_ESTADO).trim().toLowerCase() === 'activa',
+  );
+  if (exact?.EME_ID != null) return String(exact.EME_ID);
+  const loose = rows.find((x) => String(x?.EME_ESTADO || '').toLowerCase().includes('activ'));
+  return loose?.EME_ID != null ? String(loose.EME_ID) : '';
+}
+
+function getVehicleMembershipStatus(row, catalogOptions) {
+  const hasMembership = row?.MEM_ID != null && String(row.MEM_ID).trim() !== '';
+  if (!hasMembership) {
+    return { label: 'Sin membresía', tone: 'neutral', hasMembership: false };
+  }
+
+  const rawStatus = String(
+    row?.EME_ESTADO ?? labelEstadoMembresia(row?.EME_ID, catalogOptions) ?? '',
+  )
+    .trim()
+    .toLowerCase();
+  const vencimientoRaw = row?.MEM_FECHA_VENCIMIENTO ?? row?.mem_fecha_vencimiento ?? null;
+  const vencimiento = vencimientoRaw ? new Date(vencimientoRaw) : null;
+  const hasValidExpiry = vencimiento instanceof Date && !Number.isNaN(vencimiento.getTime());
+  const isCancelled = rawStatus.includes('cancel');
+  const isSuspended = rawStatus.includes('suspend') || rawStatus.includes('inactiv');
+
+  if (rawStatus.includes('venc')) {
+    return { label: 'Vencida', tone: 'danger', hasMembership: true };
+  }
+
+  if (isSuspended) {
+    return { label: 'Suspendida', tone: 'warning', hasMembership: true };
+  }
+
+  if (isCancelled) {
+    if (hasValidExpiry) {
+      const now = new Date();
+      const diffDays = (vencimiento.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDays < 0) {
+        return { label: 'Vencida', tone: 'danger', hasMembership: true };
+      }
+    }
+    return { label: 'Cancelada', tone: 'caution', hasMembership: true };
+  }
+
+  if (hasValidExpiry) {
+    const now = new Date();
+    const diffDays = (vencimiento.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+    if (diffDays < 0) {
+      return { label: 'Vencida', tone: 'danger', hasMembership: true };
+    }
+    if (!isCancelled && diffDays <= 7) {
+      return { label: 'Por vencer', tone: 'warning', hasMembership: true };
+    }
+  }
+
+  if (rawStatus.includes('activ')) {
+    return { label: 'Activa', tone: 'success', hasMembership: true };
+  }
+
+  return { ...getMembershipStatusBadge(row?.EME_ESTADO ?? labelEstadoMembresia(row?.EME_ID, catalogOptions) ?? 'Con membresía'), hasMembership: true };
 }
 
 /** Abre una ventana de navegador con detalle enriquecido de alerta. */
@@ -777,7 +1381,7 @@ const emptyTicketFilter = { eti: '', q: '' };
 const emptyCobroFilter = { q: '' };
 const emptyClienteFilter = { q: '' };
 const emptyMembresiaFilter = { q: '', eme: '' };
-const emptyDetalleMaqTicketFilter = { q: '', tx: '' };
+const emptyDetalleMaqTicketFilter = { q: '', desde: '', hasta: '', tx: '' };
 const emptyDetalleSaldoMaqFilter = { maq: '' };
 const emptyRecargoMaqFilter = { maq: '' };
 const emptyRmmPlacaFilter = { placa: '' };
@@ -792,6 +1396,9 @@ export default function CrudDemo({
   sessionIsFullAdmin = false,
   sectionPath = '',
 }) {
+  const TODAY = new Date().toISOString().slice(0, 10);
+  const NOW_LOCAL = (() => { const d = new Date(); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })();
+
   const readOnlyFieldStyle = {
     background: '#e5e7eb',
     color: '#4b5563',
@@ -828,7 +1435,14 @@ export default function CrudDemo({
   const [form, setForm]        = useState({});
   const [editId, setEditId]    = useState(null);
   const [msg, setMsg]          = useState('');
-  const [machineView, setMachineView] = useState({ maqId: null, title: '', rows: [] });
+  const [machineCardsRows, setMachineCardsRows] = useState([]);
+  const [machineCardsCatalogs, setMachineCardsCatalogs] = useState({ tipos: [], estados: [] });
+  const [machineCardsLoading, setMachineCardsLoading] = useState(false);
+  const [machineCreateOpen, setMachineCreateOpen] = useState(false);
+  const [machineCreateSaving, setMachineCreateSaving] = useState(false);
+  const [machineStatusSavingId, setMachineStatusSavingId] = useState(null);
+  const [machineStatusMenuId, setMachineStatusMenuId] = useState(null);
+  const [machineCreateForm, setMachineCreateForm] = useState({ MAQ_CODIGO: '', TMA_ID: '', EMA_ID: '' });
   const [bivFilter, setBivFilter] = useState(emptyBivFilter);
   const [alertaFilter, setAlertaFilter] = useState(emptyAlertaFilter);
   const [ticketFilter, setTicketFilter] = useState(emptyTicketFilter);
@@ -847,7 +1461,64 @@ export default function CrudDemo({
   const [vehClienteModal, setVehClienteModal] = useState(null);
   /** Catálogos para campos `t: 'select'` (clave = segmento API, p. ej. tipo-vehiculo). */
   const [catalogOptions, setCatalogOptions] = useState({});
+  const [monthlyWorkspaceView, setMonthlyWorkspaceView] = useState('cards');
+  const [monthlySelectedClient, setMonthlySelectedClient] = useState(null);
+  const [monthlySelectedVehicle, setMonthlySelectedVehicle] = useState(null);
+  const [expandedClientRowId, setExpandedClientRowId] = useState(null);
   const bivQueryKey = searchParams.toString();
+  const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []).map(applyEntityAccess);
+  const isMonthlyWorkspace = sectionPath === 'clientes-mensuales' && Boolean(filteredEntities?.length);
+  const isAdminCardWorkspace = Boolean(filteredEntities?.length);
+  const isMachineWorkspace = sectionPath === 'maquinas' && Boolean(filteredEntities?.length);
+  const adminSectionTitle = getAdminSectionTitle(sectionPath);
+  const isMonthlyClientVehicleView =
+    isMonthlyWorkspace && monthlyWorkspaceView === 'clienteVehiculos' && entity?.key === 'vehiculo';
+  const isMonthlyVehicleMembershipView =
+    isMonthlyWorkspace && monthlyWorkspaceView === 'vehiculoMembresia' && entity?.key === 'membresia';
+  const isMonthlyCompactClientTable =
+    isMonthlyWorkspace && monthlyWorkspaceView === 'entity' && entity?.key === 'cliente';
+  const showAdminEntityCards = isAdminCardWorkspace && monthlyWorkspaceView === 'cards';
+  const showMachineCards = isMachineWorkspace && showAdminEntityCards;
+
+  const refreshMachineCards = useCallback(async ({ silent = false, preserveMessage = false } = {}) => {
+    if (!silent) setMachineCardsLoading(true);
+    if (!preserveMessage) setMsg('');
+    try {
+      const [resMaq, resTipos, resEstados] = await Promise.all([
+        fetch(`${API_BASE}/maquina`, { cache: 'no-store' }),
+        fetch(`${API_BASE}/tipo-maquina`, { cache: 'no-store' }),
+        fetch(`${API_BASE}/estado-maquina`, { cache: 'no-store' }),
+      ]);
+      const [maqJson, tiposJson, estadosJson] = await Promise.all([
+        parseJsonSafe(resMaq),
+        parseJsonSafe(resTipos),
+        parseJsonSafe(resEstados),
+      ]);
+      if (!resMaq.ok) throw new Error(maqJson.error || maqJson.message || resMaq.statusText);
+      setMachineCardsRows(Array.isArray(maqJson) ? maqJson : []);
+      setMachineCardsCatalogs({
+        tipos: resTipos.ok && Array.isArray(tiposJson) ? tiposJson : [],
+        estados: resEstados.ok && Array.isArray(estadosJson) ? estadosJson : [],
+      });
+      return {
+        rows: Array.isArray(maqJson) ? maqJson : [],
+        tipos: resTipos.ok && Array.isArray(tiposJson) ? tiposJson : [],
+        estados: resEstados.ok && Array.isArray(estadosJson) ? estadosJson : [],
+      };
+    } catch (err) {
+      setMachineCardsRows([]);
+      setMachineCardsCatalogs({ tipos: [], estados: [] });
+      setMsg('Error: ' + err.message);
+      return null;
+    } finally {
+      if (!silent) setMachineCardsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showMachineCards) return;
+    refreshMachineCards();
+  }, [showMachineCards, refreshMachineCards]);
   const formatAlertaDetailValue = (key, value) => {
     if (key === 'MAQ_ID') return labelMaquina({ MAQ_ID: value }, catalogOptions);
     if (key === 'EAL_ID') return labelEstadoAlerta(value, catalogOptions);
@@ -937,7 +1608,7 @@ export default function CrudDemo({
     setCobroFilter({
       q: searchParams.get('cob_q') || '',
     });
-  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL â†’ form solo cuando cambia la query
+  }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL -> form solo cuando cambia la query
 
   useEffect(() => {
     if (editId !== '__new__') return;
@@ -965,6 +1636,8 @@ export default function CrudDemo({
     if (entity?.key !== 'detalle-maquina-ticket') return;
     setDetalleMaqTicketFilter({
       q: searchParams.get('dmt_q') || '',
+      desde: searchParams.get('dmt_desde') || '',
+      hasta: searchParams.get('dmt_hasta') || '',
       tx: searchParams.get('dmt_tx') || '',
     });
   }, [entity?.key, bivQueryKey]); // eslint-disable-line react-hooks/exhaustive-deps -- sync URL → form solo cuando cambia la query
@@ -1034,7 +1707,7 @@ export default function CrudDemo({
     });
   }, [entity?.key, editId, catalogOptions?.['estado-maquina']]);
 
-  /** Nuevo mantenimiento: el movimiento se define segÃºn el estado actual de la mÃ¡quina. */
+  /** Nuevo mantenimiento: el movimiento se define según el estado actual de la máquina. */
   useEffect(() => {
     if (entity?.key !== 'registro-mantenimiento' || editId !== '__new__') return;
     const machine = findMachineById(catalogOptions, form?.MAQ_ID);
@@ -1055,17 +1728,6 @@ export default function CrudDemo({
         : { ...prev, REM_ESTADO_RESULTANTE_EMA_ID: '' }
     ));
   }, [entity?.key, form?.REM_TIPO_MOVIMIENTO]);
-
-  useEffect(() => {
-    if (entity?.key !== 'registro-mantenimiento' || editId !== '__new__') return;
-    if (String(form?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase() !== 'FINALIZACION') return;
-    setForm((prev) => (
-      String(prev?.REM_DESCRIPCION ?? '').trim() === ''
-        ? prev
-        : { ...prev, REM_DESCRIPCION: '' }
-    ));
-  }, [entity?.key, editId, form?.REM_TIPO_MOVIMIENTO]);
-
 
   /** Nueva membresía: vencimiento automático según `TME_DURACION`. */
   useEffect(() => {
@@ -1118,15 +1780,15 @@ export default function CrudDemo({
         if (!rQuote.ok) throw new Error(dQuote.error || dQuote.message || rQuote.statusText);
         if (cancelled) return;
         const horas = Number(
-          dQuote?.estadia?.horasFacturables ??
-          dQuote?.estadia?.horasCobradas ??
-          dQuote?.cobro?.horas ??
-          0,
+          dQuote?.estadia?.horasFacturables
+          ?? dQuote?.estadia?.horasCobradas
+          ?? dQuote?.cobro?.horas
+          ?? 0,
         );
         const monto = Number(
-          dQuote?.montoTotal ??
-          dQuote?.cobro?.montoTotal ??
-          0,
+          dQuote?.montoTotal
+          ?? dQuote?.cobro?.montoTotal
+          ?? 0,
         );
         const tarifaId = dQuote?.tarifa?.TAR_ID ?? dQuote?.tarifa?.tar_id ?? '';
         setForm((prev) => ({
@@ -1159,6 +1821,29 @@ export default function CrudDemo({
     ));
   }, [entity?.key, editId, form?.COB_MONTO_RECIBIDO, form?.COB_MONTO_TOTAL]);
 
+
+  useEffect(() => {
+    if (entity?.key !== 'cliente') {
+      setExpandedClientRowId(null);
+    }
+  }, [entity?.key]);
+
+  useEffect(() => {
+    if (
+      !isMonthlyVehicleMembershipView
+      || editId !== '__new__'
+      || String(form?.EME_ID ?? '').trim() !== ''
+    ) {
+      return;
+    }
+    const emeIdActiva = pickEmeIdActiva(catalogOptions?.['estado-membresia']);
+    if (!emeIdActiva) return;
+    setForm((prev) => {
+      if (String(prev?.EME_ID ?? '').trim() !== '') return prev;
+      return { ...prev, EME_ID: emeIdActiva };
+    });
+  }, [catalogOptions?.['estado-membresia'], editId, form?.EME_ID, isMonthlyVehicleMembershipView]);
+
   useEffect(() => {
     if (entity) load();
   }, [entity, searchParams, sectionPath]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1188,6 +1873,12 @@ export default function CrudDemo({
           return;
         }
         listUrl = `${API_BASE}/recargo-maquina/maquina/${encodeURIComponent(String(rmaMaq).trim())}`;
+      }
+      if (entity.key === 'registro-mantenimiento') {
+        const remMaq = searchParams.get('rem_maq_id');
+        if (remMaq != null && String(remMaq).trim() !== '') {
+          listUrl = `${API_BASE}/registro-mantenimiento/maquina/${encodeURIComponent(String(remMaq).trim())}`;
+        }
       }
       if (entity.key === 'cliente') {
         const p = new URLSearchParams();
@@ -1323,12 +2014,39 @@ export default function CrudDemo({
       }
       if (entity.key === 'detalle-maquina-ticket') {
         const q = (searchParams.get('dmt_q') || '').trim().toUpperCase();
+        const desde = searchParams.get('dmt_desde') || '';
+        const hasta = searchParams.get('dmt_hasta') || '';
         const tx = (searchParams.get('dmt_tx') || '').trim().toUpperCase();
-        if (tx) {
+        const maq = (searchParams.get('dmt_maq_id') || '').trim();
+        if (maq) {
+          list = list.filter((r) => String(r.MAQ_ID ?? r.maq_id) === maq);
+        }
+        if (tx && !maq) {
           list = list.filter((r) => String(r.DMT_TRANSACCION ?? '').toUpperCase() === tx);
         }
         if (q) {
-          list = list.filter((r) => String(r.VEH_PLACA ?? '').toUpperCase().includes(q));
+          list = list.filter((r) => {
+            const placa = String(r.VEH_PLACA ?? '').toUpperCase();
+            const ticketId = String(r.TIC_ID ?? r.tic_id ?? '').toUpperCase();
+            const ticketCodigo = String(r.TIC_CODIGO ?? r.tic_codigo ?? '').toUpperCase();
+            return placa.includes(q) || ticketId.includes(q) || ticketCodigo.includes(q);
+          });
+        }
+        if (desde || hasta) {
+          const from = desde ? new Date(desde) : null;
+          const to = hasta ? new Date(hasta) : null;
+          const fromTime = from && !Number.isNaN(from.getTime()) ? from.getTime() : null;
+          const toTime = to && !Number.isNaN(to.getTime()) ? to.getTime() : null;
+          list = list.filter((r) => {
+            const raw = r.DMT_HORA_TRANSACCION ?? r.dmt_hora_transaccion ?? '';
+            if (!raw) return false;
+            const d = new Date(raw);
+            if (Number.isNaN(d.getTime())) return false;
+            const time = d.getTime();
+            if (fromTime != null && time < fromTime) return false;
+            if (toTime != null && time > toTime) return false;
+            return true;
+          });
         }
       }
       if (entity.key === 'vehiculo') {
@@ -1365,13 +2083,154 @@ export default function CrudDemo({
     setRows([]);
     setEditId(null);
     setMsg('');
-    setMachineView({ maqId: null, title: '', rows: [] });
+  }
+
+  function findMonthlyEntity(key) {
+    return sectionEntities.find((item) => item.key === key) || null;
+  }
+
+  function resetMonthlyWorkspaceToCards() {
+    setMonthlyWorkspaceView('cards');
+    setMonthlySelectedClient(null);
+    setMonthlySelectedVehicle(null);
+    setExpandedClientRowId(null);
+    setEntity(null);
+    setRows([]);
+    setEditId(null);
+    setForm({});
+    setMsg('');
+  }
+
+  function openMonthlyClientVehicles(row) {
+    const vehiculoEntity = findMonthlyEntity('vehiculo');
+    if (!vehiculoEntity) return;
+    setMonthlySelectedClient(row);
+    setMonthlySelectedVehicle(null);
+    setExpandedClientRowId(null);
+    setMonthlyWorkspaceView('clienteVehiculos');
+    setRows([]);
+    setEntity(vehiculoEntity);
+    setEditId(null);
+    setForm(emptyForm(vehiculoEntity.fields));
+    setMsg('');
+  }
+
+  function returnToMonthlyClients() {
+    const clienteEntity = findMonthlyEntity('cliente');
+    setMonthlyWorkspaceView('entity');
+    setMonthlySelectedClient(null);
+    setMonthlySelectedVehicle(null);
+    if (clienteEntity) {
+      setRows([]);
+      setEntity(clienteEntity);
+      setEditId(null);
+      setForm(emptyForm(clienteEntity.fields));
+    }
+    setMsg('');
+  }
+
+  function returnToMonthlyClientVehicles() {
+    const vehiculoEntity = findMonthlyEntity('vehiculo');
+    setMonthlyWorkspaceView('clienteVehiculos');
+    setMonthlySelectedVehicle(null);
+    if (vehiculoEntity) {
+      const nextForm = emptyForm(vehiculoEntity.fields);
+      if (monthlySelectedClient?.CLI_ID != null) {
+        nextForm.CLI_ID = String(monthlySelectedClient.CLI_ID);
+      }
+      setRows([]);
+      setEntity(vehiculoEntity);
+      setEditId(null);
+      setForm(nextForm);
+    }
+    setMsg('');
+  }
+
+  function openMonthlyVehicleMemberships(row, { startNew = false } = {}) {
+    const membresiaEntity = findMonthlyEntity('membresia');
+    if (!membresiaEntity) return;
+    const nextForm = emptyForm(membresiaEntity.fields);
+    nextForm.MEM_VEH_PLACA = String(row?.VEH_PLACA ?? '');
+    const emeIdActiva = pickEmeIdActiva(catalogOptions?.['estado-membresia']);
+    if (emeIdActiva) {
+      nextForm.EME_ID = emeIdActiva;
+    }
+    setMonthlySelectedClient((current) => current || (row?.CLI_ID != null ? { CLI_ID: row.CLI_ID } : null));
+    setMonthlySelectedVehicle(row);
+    setMonthlyWorkspaceView('vehiculoMembresia');
+    setRows([]);
+    setEntity(membresiaEntity);
+    setEditId(startNew ? '__new__' : null);
+    setForm(nextForm);
+    setMsg('');
+  }
+
+  function startNewMonthlyClientVehicle() {
+    if (!isMonthlyClientVehicleView || !entity || monthlySelectedClient?.CLI_ID == null) return;
+    const nextForm = emptyForm(entity.fields);
+    nextForm.CLI_ID = String(monthlySelectedClient.CLI_ID);
+    setEditId('__new__');
+    setForm(nextForm);
+    setMsg('');
+  }
+
+  function startNewMonthlyVehicleMembership() {
+    if (!isMonthlyVehicleMembershipView || !entity || !monthlySelectedVehicle) return;
+    const nextForm = emptyForm(entity.fields);
+    nextForm.MEM_VEH_PLACA = String(monthlySelectedVehicle?.VEH_PLACA ?? '');
+    const emeIdActiva = pickEmeIdActiva(catalogOptions?.['estado-membresia']);
+    if (emeIdActiva) {
+      nextForm.EME_ID = emeIdActiva;
+    }
+    setEditId('__new__');
+    setForm(nextForm);
+    setMsg('');
   }
 
   function selectEntity(e) {
-    if (entity?.key === e.key) return;
+    if (e.key === 'detalle-maquina-ticket') {
+      const p = new URLSearchParams(searchParams);
+      p.delete('dmt_maq_id');
+      p.delete('dmt_q');
+      p.delete('dmt_desde');
+      p.delete('dmt_hasta');
+      p.delete('dmt_tx');
+      setDetalleMaqTicketFilter(emptyDetalleMaqTicketFilter);
+      setSearchParams(p, { replace: true });
+    }
+    if (e.key === 'detalle-saldo') {
+      const p = new URLSearchParams(searchParams);
+      p.delete('ds_maq_id');
+      setDetalleSaldoMaqFilter(emptyDetalleSaldoMaqFilter);
+      setSearchParams(p, { replace: true });
+    }
+    if (e.key === 'recargo-maquina') {
+      const p = new URLSearchParams(searchParams);
+      p.delete('rma_maq_id');
+      setRecargoMaqFilter(emptyRecargoMaqFilter);
+      setSearchParams(p, { replace: true });
+    }
+    if (e.key === 'registro-mantenimiento') {
+      const p = new URLSearchParams(searchParams);
+      p.delete('rem_maq_id');
+      setSearchParams(p, { replace: true });
+    }
+    if (entity?.key === e.key) {
+      if (isAdminCardWorkspace && monthlyWorkspaceView === 'cards') {
+        setMonthlyWorkspaceView('entity');
+        setMonthlySelectedClient(null);
+        setMonthlySelectedVehicle(null);
+        setExpandedClientRowId(null);
+      }
+      return;
+    }
+    if (isAdminCardWorkspace) {
+      setMonthlyWorkspaceView('entity');
+      setMonthlySelectedClient(null);
+      setMonthlySelectedVehicle(null);
+      setExpandedClientRowId(null);
+    }
     setRows([]);
-    setMachineView({ maqId: null, title: '', rows: [] });
     setEntity(e);
     setEditId(null);
     setForm(emptyForm(e.fields));
@@ -1518,16 +2377,25 @@ export default function CrudDemo({
     e.preventDefault();
     const p = new URLSearchParams(searchParams);
     p.delete('dmt_q');
+    p.delete('dmt_desde');
+    p.delete('dmt_hasta');
     p.delete('dmt_tx');
     const qTrim = detalleMaqTicketFilter.q.trim();
+    const desdeTrim = detalleMaqTicketFilter.desde.trim();
+    const hastaTrim = detalleMaqTicketFilter.hasta.trim();
+    const isMachineScoped = Boolean((p.get('dmt_maq_id') || '').trim());
     if (qTrim) p.set('dmt_q', qTrim);
-    if (detalleMaqTicketFilter.tx) p.set('dmt_tx', detalleMaqTicketFilter.tx);
+    if (desdeTrim) p.set('dmt_desde', desdeTrim);
+    if (hastaTrim) p.set('dmt_hasta', hastaTrim);
+    if (!isMachineScoped && detalleMaqTicketFilter.tx) p.set('dmt_tx', detalleMaqTicketFilter.tx);
     setSearchParams(p, { replace: true });
   }
 
   function clearDetalleMaqTicketFilters() {
     const p = new URLSearchParams(searchParams);
     p.delete('dmt_q');
+    p.delete('dmt_desde');
+    p.delete('dmt_hasta');
     p.delete('dmt_tx');
     setSearchParams(p, { replace: true });
     setDetalleMaqTicketFilter(emptyDetalleMaqTicketFilter);
@@ -1641,20 +2509,228 @@ export default function CrudDemo({
     setVehiculoFilter(emptyVehiculoFilter);
   }
 
-  async function showMachineData(maqId, endpoint, title) {
+  function getMachineCardInfo(row) {
+    const tipoId = row?.TMA_ID ?? row?.tma_id;
+    const estadoId = row?.EMA_ID ?? row?.ema_id;
+    const tipoRow = machineCardsCatalogs.tipos.find((item) => String(item.TMA_ID) === String(tipoId));
+    const estadoRow = machineCardsCatalogs.estados.find((item) => String(item.EMA_ID) === String(estadoId));
+    const tipo = String(row?.TMA_TIPO ?? tipoRow?.TMA_TIPO ?? 'Maquina').trim();
+    const estado = String(row?.EMA_ESTADO ?? estadoRow?.EMA_ESTADO ?? 'Sin estado').trim();
+    const tipoNorm = normTipoMaquinaClient(tipo);
+    const isCobro = isTipoMaquinaCobroClient(tipo);
+    const isEntrada = tipoNorm.includes('entrada');
+    const isSalida = tipoNorm.includes('salida');
+    const role = isCobro
+      ? 'Cobro'
+      : isEntrada
+        ? 'Entrada'
+        : isSalida
+          ? 'Salida'
+          : tipo;
+    const variant = isCobro ? 'cash' : isSalida ? 'exit' : 'entry';
+    return { tipo, estado, role, isCobro, variant };
+  }
+
+  function openNewMachineForm() {
+    const inoperativaId = pickInoperativeMachineStatusId(machineCardsCatalogs.estados);
+    setMachineCreateForm({
+      MAQ_CODIGO: '',
+      TMA_ID: '',
+      EMA_ID: inoperativaId ? String(inoperativaId) : '',
+    });
+    setMachineCreateOpen(true);
+    setMsg('');
+  }
+
+  function closeNewMachineForm() {
+    setMachineCreateOpen(false);
+    setMachineCreateSaving(false);
+    setMachineCreateForm({ MAQ_CODIGO: '', TMA_ID: '', EMA_ID: '' });
+  }
+
+  async function submitNewMachine(e) {
+    e.preventDefault();
+    if (machineCreateSaving) return;
+    const codigo = String(machineCreateForm.MAQ_CODIGO ?? '').trim();
+    const tmaId = String(machineCreateForm.TMA_ID ?? '').trim();
+    const emaId = String(machineCreateForm.EMA_ID ?? '').trim() || pickInoperativeMachineStatusId(machineCardsCatalogs.estados);
+    if (!codigo) {
+      setMsg('Indica el código de la máquina.');
+      return;
+    }
+    if (!tmaId) {
+      setMsg('Selecciona el tipo de máquina.');
+      return;
+    }
+    if (!emaId) {
+      setMsg('No se encontró el estado inicial Inoperativa.');
+      return;
+    }
+    setMachineCreateSaving(true);
+    setMsg('');
     try {
-      setMsg('');
-      const res = await fetch(`${API_BASE}${endpoint}`);
+      const res = await fetch(`${API_BASE}/maquina`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          MAQ_CODIGO: codigo,
+          TMA_ID: Number(tmaId) || tmaId,
+          EMA_ID: Number(emaId) || emaId,
+        }),
+      });
       const json = await parseJsonSafe(res);
       if (!res.ok) throw new Error(json.error || json.message || res.statusText);
-      setMachineView({
-        maqId,
-        title,
-        rows: Array.isArray(json) ? json : [],
-      });
+      closeNewMachineForm();
+      await refreshMachineCards({ silent: true, preserveMessage: true });
+      setMsg('Máquina creada.');
     } catch (err) {
       setMsg('Error: ' + err.message);
+    } finally {
+      setMachineCreateSaving(false);
     }
+  }
+
+  async function updateMachineCardStatus(row, nextEmaId) {
+    const maqId = row?.MAQ_ID ?? row?.maq_id;
+    const currentEmaId = row?.EMA_ID ?? row?.ema_id;
+    const nextId = String(nextEmaId ?? '').trim();
+    if (maqId == null || String(maqId).trim() === '' || !nextId || String(currentEmaId ?? '') === nextId) return;
+    setMachineStatusSavingId(String(maqId));
+    setMachineStatusMenuId(null);
+    setMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/maquina/${encodeURIComponent(String(maqId))}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ EMA_ID: Number(nextId) || nextId }),
+      });
+      const json = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      setCatalogOptions((prev) => {
+        const current = Array.isArray(prev.maquina) ? prev.maquina : [];
+        if (!current.length) return prev;
+        return {
+          ...prev,
+          maquina: current.map((item) => (
+            String(item.MAQ_ID ?? item.maq_id) === String(maqId) ? { ...item, ...json } : item
+          )),
+        };
+      });
+      await refreshMachineCards({ silent: true, preserveMessage: true });
+      setMsg('Estado de máquina actualizado.');
+    } catch (err) {
+      setMsg('Error: ' + err.message);
+    } finally {
+      setMachineStatusSavingId(null);
+    }
+  }
+
+  function openMachineTransactions(row) {
+    const detalleEntity = findMonthlyEntity('detalle-maquina-ticket');
+    const maqId = row?.MAQ_ID ?? row?.maq_id;
+    if (!detalleEntity || maqId == null || String(maqId).trim() === '') return;
+    setMonthlyWorkspaceView('entity');
+    setMonthlySelectedClient(null);
+    setMonthlySelectedVehicle(null);
+    setExpandedClientRowId(null);
+    setRows([]);
+    setEntity(detalleEntity);
+    setEditId(null);
+    setForm(emptyForm(detalleEntity.fields));
+    setMsg('');
+    setDetalleMaqTicketFilter(emptyDetalleMaqTicketFilter);
+    const p = new URLSearchParams(searchParams);
+    p.delete('dmt_q');
+    p.delete('dmt_desde');
+    p.delete('dmt_hasta');
+    p.delete('dmt_tx');
+    p.delete('ds_maq_id');
+    p.delete('rma_maq_id');
+    p.delete('rem_maq_id');
+    p.set('dmt_maq_id', String(maqId).trim());
+    setSearchParams(p, { replace: true });
+  }
+
+  function openMachineBalance(row) {
+    const saldoEntity = findMonthlyEntity('detalle-saldo');
+    const maqId = row?.MAQ_ID ?? row?.maq_id;
+    if (!saldoEntity || maqId == null || String(maqId).trim() === '') return;
+    setMonthlyWorkspaceView('entity');
+    setMonthlySelectedClient(null);
+    setMonthlySelectedVehicle(null);
+    setExpandedClientRowId(null);
+    setRows([]);
+    setEntity(saldoEntity);
+    setEditId(null);
+    setForm(emptyForm(saldoEntity.fields));
+    setMsg('');
+    setDetalleSaldoMaqFilter({ maq: String(maqId).trim() });
+    const p = new URLSearchParams(searchParams);
+    p.delete('dmt_maq_id');
+    p.delete('dmt_q');
+    p.delete('dmt_desde');
+    p.delete('dmt_hasta');
+    p.delete('dmt_tx');
+    p.delete('rma_maq_id');
+    p.delete('rem_maq_id');
+    p.set('ds_maq_id', String(maqId).trim());
+    setSearchParams(p, { replace: true });
+  }
+
+  function openMachineRecharges(row) {
+    const recargaEntity = findMonthlyEntity('recargo-maquina');
+    const maqId = row?.MAQ_ID ?? row?.maq_id;
+    if (!recargaEntity || maqId == null || String(maqId).trim() === '') return;
+    setMonthlyWorkspaceView('entity');
+    setMonthlySelectedClient(null);
+    setMonthlySelectedVehicle(null);
+    setExpandedClientRowId(null);
+    setRows([]);
+    setEntity(recargaEntity);
+    setEditId(null);
+    setForm(emptyForm(recargaEntity.fields));
+    setMsg('');
+    setRecargoMaqFilter({ maq: String(maqId).trim() });
+    const p = new URLSearchParams(searchParams);
+    p.delete('dmt_maq_id');
+    p.delete('dmt_q');
+    p.delete('dmt_desde');
+    p.delete('dmt_hasta');
+    p.delete('dmt_tx');
+    p.delete('ds_maq_id');
+    p.delete('rem_maq_id');
+    p.set('rma_maq_id', String(maqId).trim());
+    setSearchParams(p, { replace: true });
+  }
+
+  function openMachineMaintenance(row) {
+    const mantenimientoEntity = findMonthlyEntity('registro-mantenimiento');
+    const maqId = row?.MAQ_ID ?? row?.maq_id;
+    if (!mantenimientoEntity || maqId == null || String(maqId).trim() === '') return;
+    const nextForm = {
+      ...emptyForm(mantenimientoEntity.fields),
+      MAQ_ID: String(maqId).trim(),
+      REM_MANTENIMIENTO_FECHA: toDateTimeLocalInput(new Date()),
+    };
+    setMonthlyWorkspaceView('entity');
+    setMonthlySelectedClient(null);
+    setMonthlySelectedVehicle(null);
+    setExpandedClientRowId(null);
+    setRows([]);
+    setEntity(mantenimientoEntity);
+    setEditId('__new__');
+    setForm(nextForm);
+    setMsg('');
+    const p = new URLSearchParams(searchParams);
+    p.delete('dmt_maq_id');
+    p.delete('dmt_q');
+    p.delete('dmt_desde');
+    p.delete('dmt_hasta');
+    p.delete('dmt_tx');
+    p.delete('ds_maq_id');
+    p.delete('rma_maq_id');
+    p.set('rem_maq_id', String(maqId).trim());
+    setSearchParams(p, { replace: true });
   }
 
   async function quickRecargarDetalleSaldo(row) {
@@ -1773,33 +2849,66 @@ export default function CrudDemo({
       }
     }
     if (entity.key === 'membresia') {
-      const placa = String(form.MEM_VEH_PLACA ?? '').trim();
-      if (!placa) {
-        setMsg('Indica la placa del vehículo.');
-        return;
+      if (isEdit) {
+        const espId = String(form.ESP_ID ?? '').trim();
+        if (!espId) {
+          setMsg('Selecciona el espacio asignado.');
+          return;
+        }
+        payload.ESP_ID = Number(espId) || espId;
+        payload.ESP_UBICACION = String(form.ESP_UBICACION ?? '').trim() || null;
+        delete payload.MEM_ID;
+      } else {
+        const placa = String(
+          isMonthlyVehicleMembershipView
+            ? (monthlySelectedVehicle?.VEH_PLACA ?? form.MEM_VEH_PLACA ?? '')
+            : (form.MEM_VEH_PLACA ?? ''),
+        ).trim();
+        if (!placa) {
+          setMsg('Indica la placa del vehículo.');
+          return;
+        }
+        let vehiculoPlaca = null;
+        let vehId;
+        try {
+          vehiculoPlaca = await resolveVehiculoByPlaca(placa);
+          vehId = vehiculoPlaca?.VEH_ID ?? vehiculoPlaca?.veh_id ?? null;
+        } catch (err) {
+          setMsg('Error al buscar el vehículo: ' + err.message);
+          return;
+        }
+        if (vehId == null || String(vehId).trim() === '') {
+          setMsg('No existe un vehículo registrado con esa placa.');
+          return;
+        }
+        if (
+          isMonthlyVehicleMembershipView &&
+          monthlySelectedClient?.CLI_ID != null &&
+          String(vehiculoPlaca?.CLI_ID ?? vehiculoPlaca?.cli_id ?? '') !== String(monthlySelectedClient.CLI_ID)
+        ) {
+          setMsg('La placa indicada no pertenece al cliente seleccionado.');
+          return;
+        }
+        if (
+          isMonthlyVehicleMembershipView &&
+          monthlySelectedVehicle?.VEH_ID != null &&
+          String(vehId ?? '') !== String(monthlySelectedVehicle.VEH_ID)
+        ) {
+          setMsg('La membresía debe activarse sobre el vehículo seleccionado.');
+          return;
+        }
+        payload.VEH_ID = Number(vehId) || vehId;
+        const tmeId = String(form.TME_ID ?? '').trim();
+        const inicio = String(form.MEM_FECHA_INICIO ?? '').trim();
+        const tipos = catalogOptions?.['tipo-membresia'] || [];
+        const tipo = tipos.find((x) => String(x.TME_ID) === tmeId);
+        const vencEsperado = calcMembresiaVencimientoInput(inicio, Number(tipo?.TME_DURACION));
+        if (!vencEsperado) {
+          setMsg('No se pudo calcular la fecha de vencimiento según la duración del tipo de membresía.');
+          return;
+        }
+        payload.MEM_FECHA_VENCIMIENTO = new Date(vencEsperado).toISOString();
       }
-      let vehId;
-      try {
-        vehId = await resolveVehiculoIdByPlaca(placa);
-      } catch (err) {
-        setMsg('Error al buscar el vehículo: ' + err.message);
-        return;
-      }
-      if (vehId == null || String(vehId).trim() === '') {
-        setMsg('No existe un vehículo registrado con esa placa.');
-        return;
-      }
-      payload.VEH_ID = Number(vehId) || vehId;
-      const tmeId = String(form.TME_ID ?? '').trim();
-      const inicio = String(form.MEM_FECHA_INICIO ?? '').trim();
-      const tipos = catalogOptions?.['tipo-membresia'] || [];
-      const tipo = tipos.find((x) => String(x.TME_ID) === tmeId);
-      const vencEsperado = calcMembresiaVencimientoInput(inicio, Number(tipo?.TME_DURACION));
-      if (!vencEsperado) {
-        setMsg('No se pudo calcular la fecha de vencimiento según la duración del tipo de membresía.');
-        return;
-      }
-      payload.MEM_FECHA_VENCIMIENTO = new Date(vencEsperado).toISOString();
     }
     if (entity.key === 'bitacora-incidente-vehiculo' && !isEdit) {
       const placa = String(form.VEH_ID ?? '').trim();
@@ -1877,6 +2986,9 @@ export default function CrudDemo({
       }
     }
     if (entity.key === 'vehiculo' && sectionPath === 'clientes-mensuales') {
+      if (isMonthlyClientVehicleView && monthlySelectedClient?.CLI_ID != null) {
+        payload.CLI_ID = Number(monthlySelectedClient.CLI_ID) || monthlySelectedClient.CLI_ID;
+      }
       const cli = payload.CLI_ID;
       if (cli == null || String(cli).trim() === '') {
         setMsg(
@@ -1924,6 +3036,13 @@ export default function CrudDemo({
         throw new Error(json.error || json.message || res.statusText);
       }
       let okMsg = isEdit ? 'Actualizado.' : 'Creado.';
+      if (
+        entity.key === 'membresia'
+        && isMonthlyVehicleMembershipView
+        && !isEdit
+      ) {
+        okMsg = 'Membresía activada para el vehículo seleccionado.';
+      }
       if (
         entity.key === 'vehiculo'
         && sectionPath === 'tickets-vehiculos'
@@ -1989,8 +3108,16 @@ export default function CrudDemo({
   }
 
   async function deactivateCliente(row) {
+    return setClienteActivo(row, false);
+  }
+
+  async function activateCliente(row) {
+    return setClienteActivo(row, true);
+  }
+
+  async function setClienteActivo(row, shouldActivate) {
     try {
-      const payload = { ...row, CLI_ACTIVO: 0 };
+      const payload = { ...row, CLI_ACTIVO: shouldActivate ? 1 : 0 };
       const res = await fetch(`${API_BASE}/cliente/${row.CLI_ID}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1998,7 +3125,7 @@ export default function CrudDemo({
       });
       const json = await parseJsonSafe(res);
       if (!res.ok) throw new Error(json.error || json.message || res.statusText);
-      setMsg('Cliente desactivado.');
+      setMsg(shouldActivate ? 'Cliente activado.' : 'Cliente desactivado.');
       load();
     } catch (err) {
       setMsg('Error: ' + err.message);
@@ -2044,7 +3171,6 @@ export default function CrudDemo({
     window.open(`${API_BASE}/ticket/${id}/comprobante.pdf`, '_blank');
   }
 
-  const sectionEntities = filteredEntities ?? (SECTIONS[section]?.entities ?? []).map(applyEntityAccess);
   const isNewRecord = editId === '__new__';
   const formFields = entity
     ? !isNewRecord && editId && (entity.updateFields || entity.readOnlyOnUpdate)
@@ -2063,6 +3189,12 @@ export default function CrudDemo({
           if (entity?.key === 'ticket' && ['TIC_ID', 'TIC_CODIGO', 'TIC_FECHA_HORA_SALIDA'].includes(f.k)) {
             return false;
           }
+          if (isMonthlyClientVehicleView && entity?.key === 'vehiculo' && f.k === 'CLI_ID') {
+            return false;
+          }
+          if (isMonthlyVehicleMembershipView && entity?.key === 'membresia' && f.k === 'MEM_VEH_PLACA') {
+            return false;
+          }
           if (shouldHideFieldOnCreate(entity?.key, f.k)) {
             return false;
           }
@@ -2071,12 +3203,90 @@ export default function CrudDemo({
           }
           return true;
         })
-      : formFields.filter((f) => !shouldHideFieldForCurrentForm(entity?.key, f.k, form, isNewRecord));
+      : formFields.filter((f) => {
+          if (isMonthlyClientVehicleView && entity?.key === 'vehiculo' && f.k === 'CLI_ID') {
+            return false;
+          }
+          if (isMonthlyVehicleMembershipView && entity?.key === 'membresia' && f.k === 'MEM_VEH_PLACA') {
+            return false;
+          }
+          return !shouldHideFieldForCurrentForm(entity?.key, f.k, form, isNewRecord);
+        });
 
   const listContextHint = useMemo(() => {
     if (!sectionPath || !entity?.key) return null;
     return getAdminListContextHelpModel(sectionPath, entity.key);
   }, [sectionPath, entity?.key]);
+  const monthlySelectedClientName = clienteNombreCompleto(monthlySelectedClient) || 'Cliente seleccionado';
+  const monthlySelectedVehiclePlate = String(monthlySelectedVehicle?.VEH_PLACA ?? '').trim() || 'Vehículo seleccionado';
+  const monthlySelectedVehicleType = labelTipoVehiculo(monthlySelectedVehicle, catalogOptions);
+  const monthlySelectedVehicleStatus = getVehicleMembershipStatus(monthlySelectedVehicle, catalogOptions)?.label || '—';
+  const displayRows = useMemo(() => {
+    if (isMonthlyClientVehicleView && monthlySelectedClient?.CLI_ID != null) {
+      return rows.filter((row) => String(row.CLI_ID ?? '') === String(monthlySelectedClient.CLI_ID));
+    }
+    if (isMonthlyVehicleMembershipView) {
+      const selectedVehId = monthlySelectedVehicle?.VEH_ID;
+      const selectedVehPlaca = normPlacaVehiculo(monthlySelectedVehicle?.VEH_PLACA ?? '');
+      return rows.filter((row) => {
+        const sameVehId =
+          selectedVehId != null
+          && String(row.VEH_ID ?? row.veh_id ?? '') === String(selectedVehId);
+        const samePlaca =
+          selectedVehPlaca !== ''
+          && normPlacaVehiculo(row.VEH_PLACA ?? row.veh_placa ?? '') === selectedVehPlaca;
+        return sameVehId || samePlaca;
+      });
+    }
+    return rows;
+  }, [
+    isMonthlyClientVehicleView,
+    isMonthlyVehicleMembershipView,
+    monthlySelectedClient?.CLI_ID,
+    monthlySelectedVehicle?.VEH_ID,
+    monthlySelectedVehicle?.VEH_PLACA,
+    rows,
+  ]);
+  const scopedRemMaqId = entity?.key === 'registro-mantenimiento'
+    ? String(searchParams.get('rem_maq_id') || '').trim()
+    : '';
+  const displayColumns = useMemo(() => {
+    if (!entity?.key || displayRows.length === 0) return [];
+    return Object.keys(displayRows[0]).filter((columnKey) => !shouldHideTableColumn(entity.key, columnKey, {
+      compactMonthlyClientTable: isMonthlyCompactClientTable,
+      isMonthlyClientVehicleView,
+      isMonthlyVehicleMembershipView,
+      isScopedMachineMaintenanceView: Boolean(scopedRemMaqId),
+    }));
+  }, [
+    displayRows,
+    entity?.key,
+    isMonthlyClientVehicleView,
+    isMonthlyCompactClientTable,
+    isMonthlyVehicleMembershipView,
+    scopedRemMaqId,
+  ]);
+  const showTableActions =
+    !!entity
+    && (entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket' || entity.key === 'detalle-saldo');
+  const scopedDmtMaqId = entity?.key === 'detalle-maquina-ticket'
+    ? String(searchParams.get('dmt_maq_id') || '').trim()
+    : '';
+  const scopedMachineActionMaqId = entity?.key === 'detalle-saldo'
+    ? String(searchParams.get('ds_maq_id') || '').trim()
+    : entity?.key === 'recargo-maquina'
+      ? String(searchParams.get('rma_maq_id') || '').trim()
+      : entity?.key === 'registro-mantenimiento'
+        ? String(searchParams.get('rem_maq_id') || '').trim()
+        : scopedDmtMaqId;
+  const scopedMachineAction = scopedMachineActionMaqId
+    ? findMachineById(catalogOptions, scopedMachineActionMaqId)
+      || machineCardsRows.find((row) => String(row.MAQ_ID ?? row.maq_id) === scopedMachineActionMaqId)
+    : null;
+  const scopedMachineActionLabel = scopedMachineActionMaqId
+    ? String(scopedMachineAction?.MAQ_CODIGO ?? scopedMachineAction?.maq_codigo ?? '').trim()
+      || labelMaquina({ MAQ_ID: scopedMachineActionMaqId }, catalogOptions)
+    : '';
 
   return (
     <div className="crudx-shell">
@@ -2097,24 +3307,395 @@ export default function CrudDemo({
       )}
 
       <div className="crudx-main">
-        <div className="crudx-entity-chips">
-          {sectionEntities.map(e => (
-            <button
-              key={e.key}
-              onClick={() => selectEntity(e)}
-              className={`crudx-chip${entity?.key === e.key ? ' crudx-chip--active' : ''}`}
-            >
-              {e.label}
-            </button>
-          ))}
-        </div>
-          {!entity && <p className="crudx-empty">Selecciona una entidad</p>}
+        {isAdminCardWorkspace && monthlyWorkspaceView !== 'cards' ? (
+          <div className="crudx-monthly-nav">
+            <div className="crudx-monthly-nav__text">
+              <span className="crudx-monthly-nav__eyebrow">{adminSectionTitle}</span>
+              <strong>
+                {scopedDmtMaqId
+                  ? `Transacciones de ${scopedMachineActionLabel || `MAQ_ID ${scopedDmtMaqId}`}`
+                : entity?.key === 'detalle-saldo' && scopedMachineActionMaqId
+                  ? `Saldo de ${scopedMachineActionLabel || `MAQ_ID ${scopedMachineActionMaqId}`}`
+                : entity?.key === 'recargo-maquina' && scopedMachineActionMaqId
+                  ? `Recargas de ${scopedMachineActionLabel || `MAQ_ID ${scopedMachineActionMaqId}`}`
+                : entity?.key === 'registro-mantenimiento' && scopedMachineActionMaqId
+                  ? `Mantenimiento de ${scopedMachineActionLabel || `MAQ_ID ${scopedMachineActionMaqId}`}`
+                : isMonthlyVehicleMembershipView
+                  ? `Membresías de ${monthlySelectedVehiclePlate}`
+                  : isMonthlyClientVehicleView
+                    ? `Vehículos de ${monthlySelectedClientName}`
+                  : entity?.label || 'Seccion'}
+              </strong>
+            </div>
+            <div className="crudx-monthly-nav__actions">
+              {isMonthlyVehicleMembershipView ? (
+                <button type="button" className="crudx-btn-secondary" onClick={returnToMonthlyClientVehicles}>
+                  Volver a vehículos
+                </button>
+              ) : null}
+              {isMonthlyClientVehicleView ? (
+                <button type="button" className="crudx-btn-secondary" onClick={returnToMonthlyClients}>
+                  Volver a clientes
+                </button>
+              ) : null}
+              <button type="button" className="crudx-btn-secondary" onClick={resetMonthlyWorkspaceToCards}>
+                Volver a modulos
+              </button>
+            </div>
+          </div>
+        ) : null}
 
-          {entity && (
+        {showMachineCards ? (
+          <>
+            <div className="crudx-machine-cardbar">
+              <div>
+                <span>Máquinas registradas</span>
+                <strong>{machineCardsRows.length} equipos</strong>
+              </div>
+              <button type="button" className="crudx-entity-card__action crudx-entity-card__action--primary" onClick={openNewMachineForm}>
+                + Nueva máquina
+              </button>
+            </div>
+            {msg ? (
+              <div className={`crudx-machine-toast ${isCrudErrorMessage(msg) ? 'crudx-machine-toast--error' : 'crudx-machine-toast--ok'}`}>
+                <span className="crudx-machine-toast__icon" aria-hidden="true">
+                  {isCrudErrorMessage(msg) ? '!' : '✓'}
+                </span>
+                <div>
+                  <strong>{isCrudErrorMessage(msg) ? 'No se pudo completar' : 'Listo'}</strong>
+                  <p>{msg}</p>
+                </div>
+              </div>
+            ) : null}
+            {machineCreateOpen ? (
+              <form className="crudx-machine-create" onSubmit={submitNewMachine}>
+                <div className="crudx-machine-create__head">
+                  <div>
+                    <span>Nueva máquina</span>
+                    <strong>Alta directa en tarjetas</strong>
+                  </div>
+                  <button type="button" className="crudx-btn-secondary crudx-btn-xs" onClick={closeNewMachineForm}>
+                    Cerrar
+                  </button>
+                </div>
+                <div className="crudx-machine-create__grid">
+                  <label className="reporte-inc-field">
+                    <span>Código</span>
+                    <input
+                      value={machineCreateForm.MAQ_CODIGO}
+                      onChange={(event) => setMachineCreateForm((prev) => ({ ...prev, MAQ_CODIGO: event.target.value }))}
+                      placeholder="Ej. Entrada_2"
+                      required
+                    />
+                  </label>
+                  <label className="reporte-inc-field">
+                    <span>Tipo de máquina</span>
+                    <select
+                      value={machineCreateForm.TMA_ID}
+                      onChange={(event) => setMachineCreateForm((prev) => ({ ...prev, TMA_ID: event.target.value }))}
+                      required
+                    >
+                      <option value="">Selecciona tipo</option>
+                      {machineCardsCatalogs.tipos.map((tipo) => (
+                        <option key={tipo.TMA_ID} value={String(tipo.TMA_ID)}>
+                          {tipo.TMA_TIPO}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="reporte-inc-field">
+                    <span>Estado inicial</span>
+                    <select value={machineCreateForm.EMA_ID} disabled>
+                      <option value={machineCreateForm.EMA_ID}>
+                        {
+                          machineCardsCatalogs.estados.find((estado) => String(estado.EMA_ID) === String(machineCreateForm.EMA_ID))?.EMA_ESTADO
+                          || 'Inoperativa'
+                        }
+                      </option>
+                    </select>
+                  </label>
+                </div>
+                <div className="crudx-machine-create__actions">
+                  <button type="submit" className="admin-btn-primary" disabled={machineCreateSaving}>
+                    {machineCreateSaving ? 'Creando...' : 'Crear máquina'}
+                  </button>
+                  <button type="button" className="admin-btn-ghost" onClick={closeNewMachineForm}>
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            ) : null}
+            <div className="crudx-machine-carddeck" aria-label="Maquinas registradas">
+              {machineCardsLoading ? (
+                <p className="crudx-empty crudx-empty--carddeck">Cargando maquinas...</p>
+              ) : null}
+              {!machineCardsLoading && machineCardsRows.length === 0 ? (
+                <p className="crudx-empty crudx-empty--carddeck">No hay maquinas registradas.</p>
+              ) : null}
+              {!machineCardsLoading && machineCardsRows.length > 0 ? (
+                [
+                  { variant: 'entry', label: 'Entrada' },
+                  { variant: 'cash', label: 'Cobro' },
+                  { variant: 'exit', label: 'Salida' },
+                ].map(({ variant, label }) => {
+                  const colRows = machineCardsRows.filter((row) => getMachineCardInfo(row).variant === variant);
+                  return (
+                    <div key={variant} className={`crudx-machine-col crudx-machine-col--${variant}`}>
+                      <div className="crudx-machine-col__header">
+                        <span className={`crudx-machine-col__label crudx-machine-col__label--${variant}`}>{label}</span>
+                      </div>
+                      {colRows.length === 0 ? (
+                        <p className="crudx-empty crudx-empty--col">Sin maquinas de este tipo.</p>
+                      ) : null}
+                      {colRows.map((row) => {
+                        const info = getMachineCardInfo(row);
+                        const machineStatusBadge = getMachineStatusBadge(info.estado);
+                        const maqId = row.MAQ_ID ?? row.maq_id;
+                        const codigo = String(row.MAQ_CODIGO ?? row.maq_codigo ?? `Maquina ${maqId}`).trim();
+                        const currentEmaId = row.EMA_ID ?? row.ema_id;
+                        const currentStatusRow = machineCardsCatalogs.estados.find((estado) => (
+                          String(estado.EMA_ID ?? estado.ema_id) === String(currentEmaId ?? '')
+                        ));
+                        const manualStatusOptionsBase = filterManualMachineStatuses(machineCardsCatalogs.estados);
+                        const manualStatusOptions = currentStatusRow
+                          && !manualStatusOptionsBase.some((estado) => String(estado.EMA_ID ?? estado.ema_id) === String(currentEmaId ?? ''))
+                          ? [currentStatusRow, ...manualStatusOptionsBase]
+                          : manualStatusOptionsBase;
+                        const statusSaving = String(machineStatusSavingId ?? '') === String(maqId ?? '');
+                        const statusLocked = isMachineStatusMaintenance(info.estado);
+                        const statusMenuOpen = String(machineStatusMenuId ?? '') === String(maqId ?? '');
+                        return (
+                          <article
+                            key={String(maqId)}
+                            className={`crudx-machine-card crudx-machine-card--${info.variant}`}
+                          >
+                            <div className="crudx-machine-card__head">
+                              <span className="crudx-machine-card__eyebrow">{info.role}</span>
+                              <span className="crudx-machine-card__icon" aria-hidden="true">
+                                {getEntityIcon('maquina')}
+                              </span>
+                            </div>
+                            <div>
+                              <div className="crudx-machine-card__titleline">
+                                <h3>{codigo}</h3>
+                                <span>ID {maqId}</span>
+                              </div>
+                              <p>{info.tipo}</p>
+                            </div>
+                            <div className="crudx-machine-card__meta">
+                              <div className="crudx-machine-status-menu">
+                                <button
+                                  type="button"
+                                  className={`crudx-machine-status-trigger crudx-machine-status-trigger--${machineStatusBadge.tone}`}
+                                  onClick={() => {
+                                    if (statusSaving || statusLocked) return;
+                                    setMachineStatusMenuId((current) => (
+                                      String(current ?? '') === String(maqId ?? '') ? null : String(maqId ?? '')
+                                    ));
+                                  }}
+                                  disabled={statusSaving || statusLocked}
+                                  aria-haspopup="listbox"
+                                  aria-expanded={statusMenuOpen}
+                                  aria-label={`Cambiar estado de ${codigo}`}
+                                  title={statusLocked ? 'Finaliza el mantenimiento desde la acción Mantenimiento' : 'Cambiar estado de la máquina'}
+                                >
+                                  <span>{statusSaving ? 'Actualizando...' : machineStatusBadge.label}</span>
+                                  <span className="crudx-machine-status-trigger__chevron" aria-hidden="true" />
+                                </button>
+                                {statusMenuOpen ? (
+                                  <div className="crudx-machine-status-options" role="listbox" aria-label={`Estados disponibles para ${codigo}`}>
+                                    {manualStatusOptions.map((estado) => {
+                                      const value = String(estado.EMA_ID ?? estado.ema_id ?? '');
+                                      if (!value) return null;
+                                      const label = String(estado.EMA_ESTADO ?? estado.ema_estado ?? value);
+                                      const optionBadge = getMachineStatusBadge(label);
+                                      const isSelected = value === String(currentEmaId ?? '');
+                                      return (
+                                        <button
+                                          key={value}
+                                          type="button"
+                                          role="option"
+                                          aria-selected={isSelected}
+                                          className={`crudx-machine-status-option${isSelected ? ' crudx-machine-status-option--selected' : ''}`}
+                                          onClick={() => updateMachineCardStatus(row, value)}
+                                        >
+                                          <span className={`crudx-machine-status-option__dot crudx-machine-status-option__dot--${optionBadge.tone}`} />
+                                          <span>{optionBadge.label}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="crudx-machine-card__actions" aria-label={`Acciones de ${codigo}`}>
+                              <button
+                                type="button"
+                                className="crudx-machine-action"
+                                onClick={() => openMachineTransactions(row)}
+                              >
+                                Transacciones
+                              </button>
+                              <button
+                                type="button"
+                                className="crudx-machine-action"
+                                onClick={() => openMachineMaintenance(row)}
+                              >
+                                Mantenimiento
+                              </button>
+                              {info.isCobro ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="crudx-machine-action"
+                                    onClick={() => openMachineRecharges(row)}
+                                  >
+                                    Recargas
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="crudx-machine-action crudx-machine-action--primary"
+                                    onClick={() => openMachineBalance(row)}
+                                  >
+                                    Saldo
+                                  </button>
+                                </>
+                              ) : null}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              ) : null}
+            </div>
+            <div className="crudx-machine-support">
+              <div className="crudx-machine-support__head">
+                <span>Administracion de apoyo</span>
+              </div>
+              <div className="crudx-entity-carddeck crudx-machine-support-carddeck" aria-label="Tarjetas de apoyo de maquinas">
+                {sectionEntities.filter((item) => item.key !== 'maquina').map((e) => {
+                  const cardMeta = getEntityCardMeta(e.key);
+                  const cardTraits = getEntityCardTraits(e);
+                  const cardSummary = getAdminListContextHint(sectionPath, e.key);
+                  return (
+                    <article key={e.key} className={`crudx-entity-card crudx-entity-card--${cardMeta.tone}`}>
+                      <div className="crudx-entity-card__glow" aria-hidden="true" />
+                      <div className="crudx-entity-card__head">
+                        <span className="crudx-entity-card__eyebrow">
+                          <span className="crudx-entity-card__badge-inline">{cardMeta.badge}</span>
+                          {' · '}
+                          {cardMeta.eyebrow.toUpperCase()}
+                        </span>
+                        <span className="crudx-entity-card__icon" aria-hidden="true">
+                          {getEntityIcon(e.key)}
+                        </span>
+                      </div>
+                      <div className="crudx-entity-card__title">{e.label}</div>
+                      <p className="crudx-entity-card__summary">{cardSummary}</p>
+                      <div className="crudx-entity-card__traits" aria-label={`Acciones disponibles en ${e.label}`}>
+                        {cardTraits.map((trait) => (
+                          <span key={trait} className="crudx-entity-card__trait">{trait}</span>
+                        ))}
+                      </div>
+                      <div className="crudx-entity-card__actions">
+                        <button
+                          type="button"
+                          className="crudx-entity-card__action crudx-entity-card__action--primary"
+                          onClick={() => selectEntity(e)}
+                        >
+                          Abrir →
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        ) : showAdminEntityCards ? (
+          <div className="crudx-entity-carddeck" aria-label={`Secciones de ${adminSectionTitle}`}>
+            {sectionEntities.map((e) => {
+              const cardMeta = getEntityCardMeta(e.key);
+              const cardTraits = getEntityCardTraits(e);
+              const cardSummary = getAdminListContextHint(sectionPath, e.key);
+              const isActiveCard = entity?.key === e.key;
+
+              return (
+                <article
+                  key={e.key}
+                  className={`crudx-entity-card crudx-entity-card--${cardMeta.tone}${isActiveCard ? ' crudx-entity-card--active' : ''}`}
+                >
+                  <div className="crudx-entity-card__glow" aria-hidden="true" />
+                  <div className="crudx-entity-card__head">
+                    <span className="crudx-entity-card__eyebrow">
+                      <span className="crudx-entity-card__badge-inline">{cardMeta.badge}</span>
+                      {' · '}
+                      {cardMeta.eyebrow.toUpperCase()}
+                    </span>
+                    <span className="crudx-entity-card__icon" aria-hidden="true">
+                      {getEntityIcon(e.key)}
+                    </span>
+                  </div>
+
+                  <div className="crudx-entity-card__title">{e.label}</div>
+                  <p className="crudx-entity-card__summary">{cardSummary}</p>
+
+                  <div className="crudx-entity-card__traits" aria-label={`Acciones disponibles en ${e.label}`}>
+                    {cardTraits.map((trait) => (
+                      <span key={trait} className="crudx-entity-card__trait">
+                        {trait}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="crudx-entity-card__actions">
+                    <button
+                      type="button"
+                      className="crudx-entity-card__action crudx-entity-card__action--primary"
+                      onClick={() => selectEntity(e)}
+                    >
+                      Abrir →
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : !isAdminCardWorkspace ? (
+          <div className="crudx-entity-chips">
+            {sectionEntities.map((e) => (
+              <button
+                key={e.key}
+                onClick={() => selectEntity(e)}
+                className={`crudx-chip${entity?.key === e.key ? ' crudx-chip--active' : ''}`}
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+          {!entity && !showMachineCards && (
+            <p className={`crudx-empty${showAdminEntityCards ? ' crudx-empty--carddeck' : ''}`}>
+              {showAdminEntityCards
+                ? 'Elige una tarjeta para abrir la seccion que quieras trabajar.'
+                : 'Selecciona una entidad'}
+            </p>
+          )}
+
+          {entity && (!isAdminCardWorkspace || monthlyWorkspaceView !== 'cards') && (
             <>
               <div className="crudx-toolbar">
                 <div className="crudx-toolbar__title">
-                  <strong>{entity.label}</strong>
+                  <strong>
+                    {isMonthlyVehicleMembershipView
+                      ? 'Membresías del vehículo'
+                      : isMonthlyClientVehicleView
+                        ? 'Vehículos del cliente'
+                        : entity.label}
+                  </strong>
                   {listContextHint ? (
                     <HelpHint
                       label={`Mostrar ayuda sobre ${entity.label}`}
@@ -2124,13 +3705,31 @@ export default function CrudDemo({
                     </HelpHint>
                   ) : null}
                 </div>
-                {!loading && rows.length > 0 ? (
+                {!loading && displayRows.length > 0 ? (
                   <span className="crudx-msg" style={{ fontWeight: 500, color: '#475569' }}>
-                    {rows.length} registro{rows.length === 1 ? '' : 's'}
+                    {displayRows.length} registro{displayRows.length === 1 ? '' : 's'}
                   </span>
                 ) : null}
                 {entity.ops.c && !editId && (
-                  <button onClick={() => { setEditId('__new__'); setForm(emptyForm(entity.fields)); }}
+                  <button
+                    onClick={
+                      isMonthlyVehicleMembershipView
+                        ? startNewMonthlyVehicleMembership
+                        : isMonthlyClientVehicleView
+                          ? startNewMonthlyClientVehicle
+                          : () => {
+                              const nextForm = emptyForm(entity.fields);
+                              const remMaqId = entity.key === 'registro-mantenimiento'
+                                ? String(searchParams.get('rem_maq_id') || '').trim()
+                                : '';
+                              if (remMaqId) {
+                                nextForm.MAQ_ID = remMaqId;
+                                nextForm.REM_MANTENIMIENTO_FECHA = toDateTimeLocalInput(new Date());
+                              }
+                              setEditId('__new__');
+                              setForm(nextForm);
+                            }
+                    }
                     className="crudx-btn-secondary">
                     + Nuevo
                   </button>
@@ -2146,6 +3745,41 @@ export default function CrudDemo({
                 )}
               </div>
 
+              {entity?.key === 'registro-mantenimiento' && scopedMachineActionMaqId ? (
+                <div className="crudx-scoped-filter-note">
+                  <span>Máquina</span>
+                  <strong>{scopedMachineActionLabel || `MAQ_ID ${scopedMachineActionMaqId}`} · ID {scopedMachineActionMaqId}</strong>
+                </div>
+              ) : null}
+
+              {isMonthlyClientVehicleView ? (
+                <section className="crudx-monthly-client-head" aria-label="Cliente seleccionado">
+                  <div>
+                    <span className="crudx-monthly-client-head__eyebrow">Cliente seleccionado</span>
+                    <h2>{monthlySelectedClientName}</h2>
+                  </div>
+                  <div className="crudx-monthly-client-head__meta">
+                    <span>CLI_ID: {monthlySelectedClient?.CLI_ID ?? '-'}</span>
+                    <span>DPI: {monthlySelectedClient?.CLI_DPI || '-'}</span>
+                    <span>Correo: {monthlySelectedClient?.CLI_CORREO || '-'}</span>
+                  </div>
+                </section>
+              ) : isMonthlyVehicleMembershipView ? (
+                <section className="crudx-monthly-client-head" aria-label="Vehículo seleccionado">
+                  <div>
+                    <span className="crudx-monthly-client-head__eyebrow">Vehículo seleccionado</span>
+                    <h2>{monthlySelectedVehiclePlate}</h2>
+                  </div>
+                  <div className="crudx-monthly-client-head__meta">
+                    <span>Cliente: {monthlySelectedClientName}</span>
+                    <span>Tipo: {monthlySelectedVehicleType || '—'}</span>
+                    <span>Modelo: {monthlySelectedVehicle?.VEH_MODELO || '—'}</span>
+                    <span>Color: {monthlySelectedVehicle?.VEH_COLOR || '—'}</span>
+                    <span>Membresía: {monthlySelectedVehicleStatus && monthlySelectedVehicleStatus !== '—' ? monthlySelectedVehicleStatus : 'Pendiente de activar'}</span>
+                  </div>
+                </section>
+              ) : null}
+
               {entity.key === 'bitacora-incidente-vehiculo' ? (
                 <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyBivFilters}>
                   <label className="crudx-ticket-search-estado">
@@ -2155,7 +3789,7 @@ export default function CrudDemo({
                       type="search"
                       value={bivFilter.placa}
                       onChange={(e) => setBivFilter((f) => ({ ...f, placa: e.target.value }))}
-                      placeholder="🔍 Placa"
+                      placeholder="Placa"
                       aria-label="Filtrar por placa"
                     />
                   </label>
@@ -2178,6 +3812,7 @@ export default function CrudDemo({
                       className="admin-search-input"
                       type="date"
                       value={bivFilter.desde}
+                      max={TODAY}
                       onChange={(e) => setBivFilter((f) => ({ ...f, desde: e.target.value }))}
                       aria-label="Fecha desde"
                     />
@@ -2188,6 +3823,7 @@ export default function CrudDemo({
                       className="admin-search-input"
                       type="date"
                       value={bivFilter.hasta}
+                      max={TODAY}
                       onChange={(e) => setBivFilter((f) => ({ ...f, hasta: e.target.value }))}
                       aria-label="Fecha hasta"
                     />
@@ -2283,7 +3919,7 @@ export default function CrudDemo({
                       aria-label="Máquina de cobro"
                     >
                       <option value="" disabled>
-                        Seleccione una máquina…
+                        Seleccione una máquina...
                       </option>
                       {maquinasTipoCobroList(catalogOptions, { onlyOperative: true }).map((x) => (
                         <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
@@ -2353,7 +3989,7 @@ export default function CrudDemo({
                       aria-label="Filtrar recargos por máquina de cobro"
                     >
                       <option value="" disabled>
-                        Seleccione una máquina…
+                        Seleccione una máquina...
                       </option>
                       {maquinasTipoCobroList(catalogOptions, { onlyOperative: true }).map((x) => (
                         <option key={x.MAQ_ID} value={String(x.MAQ_ID)}>
@@ -2385,7 +4021,7 @@ export default function CrudDemo({
                         type="search"
                         value={vehiculoFilter.q}
                         onChange={(e) => setVehiculoFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="🔍 Placa"
+                        placeholder="Placa"
                         autoComplete="off"
                         aria-label="Filtrar vehículos por placa"
                       />
@@ -2430,7 +4066,7 @@ export default function CrudDemo({
                         type="search"
                         value={ticketFilter.q}
                         onChange={(e) => setTicketFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="🔍 Código o placa"
+                        placeholder="Código o placa"
                         autoComplete="off"
                         aria-label="Buscar por código de ticket o placa"
                       />
@@ -2479,7 +4115,7 @@ export default function CrudDemo({
                         type="search"
                         value={cobroFilter.q}
                         onChange={(e) => setCobroFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="🔍 Ticket ID o NIT / CF"
+                        placeholder="Ticket ID o NIT / CF"
                         autoComplete="off"
                         aria-label="Buscar cobro por ticket ID o NIT / CF"
                       />
@@ -2509,7 +4145,7 @@ export default function CrudDemo({
                         type="search"
                         value={clienteFilter.q}
                         onChange={(e) => setClienteFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="🔍 Nombre o DPI"
+                        placeholder="Nombre o DPI"
                         autoComplete="off"
                         aria-label="Buscar cliente por nombre, apellido, nombre completo o DPI"
                       />
@@ -2530,7 +4166,7 @@ export default function CrudDemo({
                     </div>
                   </form>
                 </div>
-              ) : entity.key === 'membresia' ? (
+              ) : entity.key === 'membresia' && !isMonthlyVehicleMembershipView ? (
                 <div className="crudx-ticket-search-block">
                   <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyMembresiaFilters}>
                     <div className="admin-search-input-wrap">
@@ -2539,7 +4175,7 @@ export default function CrudDemo({
                         type="search"
                         value={membresiaFilter.q}
                         onChange={(e) => setMembresiaFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="🔍 Cliente o placa"
+                        placeholder="Buscar cliente o placa"
                         autoComplete="off"
                         aria-label="Filtrar membresía por cliente o placa"
                       />
@@ -2585,7 +4221,7 @@ export default function CrudDemo({
                         type="search"
                         value={dpmPlacaFilter.placa}
                         onChange={(e) => setDpmPlacaFilter((f) => ({ ...f, placa: e.target.value }))}
-                        placeholder="🔍 Placa"
+                        placeholder="Placa"
                         autoComplete="off"
                         aria-label="Filtrar detalle de pago membresía por placa; deja vacío para ver todos"
                       />
@@ -2608,6 +4244,12 @@ export default function CrudDemo({
                 </div>
               ) : entity.key === 'detalle-maquina-ticket' ? (
                 <div className="crudx-ticket-search-block">
+                  {scopedDmtMaqId ? (
+                    <div className="crudx-scoped-filter-note">
+                      <span>Máquina</span>
+                      <strong>{scopedMachineActionLabel || `MAQ_ID ${scopedDmtMaqId}`}</strong>
+                    </div>
+                  ) : null}
                   <form className="admin-search-form crudx-ticket-search-form" onSubmit={applyDetalleMaqTicketFilters}>
                     <div className="admin-search-input-wrap">
                       <input
@@ -2615,25 +4257,51 @@ export default function CrudDemo({
                         type="search"
                         value={detalleMaqTicketFilter.q}
                         onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="🔍 Placa"
+                        placeholder="Placa o ticket"
                         autoComplete="off"
-                        aria-label="Filtrar detalle máquina-ticket por placa"
+                        aria-label="Filtrar detalle máquina-ticket por placa o ticket"
                       />
                     </div>
                     <label className="crudx-ticket-search-estado">
-                      <span className="crudx-ticket-search-estado-label">Transacción</span>
-                      <select
-                        className="admin-search-select"
-                        value={detalleMaqTicketFilter.tx}
-                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, tx: e.target.value }))}
-                        aria-label="Filtrar detalle máquina-ticket por transacción"
-                      >
-                        <option value="">Todas</option>
-                        {detalleMaqTicketTxOptions.map((tx) => (
-                          <option key={tx} value={tx}>{tx}</option>
-                        ))}
-                      </select>
+                      <span className="crudx-ticket-search-estado-label">Desde</span>
+                      <input
+                        className="admin-search-input"
+                        type="datetime-local"
+                        value={detalleMaqTicketFilter.desde}
+                        max={NOW_LOCAL}
+                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, desde: e.target.value }))}
+                        autoComplete="off"
+                        aria-label="Fecha y hora inicial"
+                      />
                     </label>
+                    <label className="crudx-ticket-search-estado">
+                      <span className="crudx-ticket-search-estado-label">Hasta</span>
+                      <input
+                        className="admin-search-input"
+                        type="datetime-local"
+                        value={detalleMaqTicketFilter.hasta}
+                        max={NOW_LOCAL}
+                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, hasta: e.target.value }))}
+                        autoComplete="off"
+                        aria-label="Fecha y hora final"
+                      />
+                    </label>
+                    {!scopedDmtMaqId ? (
+                      <label className="crudx-ticket-search-estado">
+                        <span className="crudx-ticket-search-estado-label">Transacción</span>
+                        <select
+                          className="admin-search-select"
+                          value={detalleMaqTicketFilter.tx}
+                          onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, tx: e.target.value }))}
+                          aria-label="Filtrar detalle máquina-ticket por transacción"
+                        >
+                          <option value="">Todas</option>
+                          {detalleMaqTicketTxOptions.map((tx) => (
+                            <option key={tx} value={tx}>{tx}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
                         Buscar
@@ -2659,7 +4327,7 @@ export default function CrudDemo({
                         type="search"
                         value={rmmPlacaFilter.placa}
                         onChange={(e) => setRmmPlacaFilter((f) => ({ ...f, placa: e.target.value }))}
-                        placeholder="🔍 Placa (opcional, acota la lista)"
+                        placeholder="Placa (opcional, acota la lista)"
                         autoComplete="off"
                         aria-label="Filtrar movimientos de membresía por placa; deja vacío para ver todos"
                       />
@@ -2713,15 +4381,35 @@ export default function CrudDemo({
                         El vencimiento se calcula automáticamente según el tipo de membresía (duración en días) y la fecha de inicio.
                       </p>
                     ) : null}
+                    {entity.key === 'membresia' && isNewRecord && isMonthlyVehicleMembershipView ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        La membresía se activará para la placa <strong>{monthlySelectedVehiclePlate}</strong>. Solo completa el plan, la fecha de inicio y ajusta el estado si hace falta.
+                      </p>
+                    ) : null}
+                    {entity.key === 'membresia' && !isNewRecord ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        Esta vista es consultiva. La edición solo permite ajustar el espacio asignado y su ubicación; el plan, estado, placa y vigencia se gestionan por el flujo de pago/renovación.
+                      </p>
+                    ) : null}
                     {entity.key === 'ticket' && isNewRecord ? (
                       <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
                         El código del ticket se genera solo. La salida se registra al editar el ticket. Al crear,
                         el estado queda en Activo y no es editable.
                       </p>
                     ) : null}
+                    {entity.key === 'vehiculo' && isNewRecord && isMonthlyClientVehicleView ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        Este vehículo quedará vinculado automáticamente a <strong>{monthlySelectedClientName}</strong>.
+                      </p>
+                    ) : null}
                     {entity.key === 'registro-mantenimiento' && isNewRecord ? (
                       <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
                         El flujo se define por el estado actual de la máquina: si está <strong>Operativa</strong> se registrará <strong>Inicio</strong>; si ya está en <strong>Mantenimiento</strong> se registrará <strong>Finalización</strong>.
+                      </p>
+                    ) : null}
+                    {entity.key === 'tarifa' && isNewRecord ? (
+                      <p className="crudx-form-note" style={{ gridColumn: '1 / -1', marginTop: 0 }}>
+                        Define el precio por hora de estacionamiento. Los <strong>minutos de gracia</strong> son el tiempo inicial sin cobro (ej. 15 min = si sales antes de 15 min no se cobra). El ID se genera automáticamente.
                       </p>
                     ) : null}
                     {visibleFormFields.map((f) => {
@@ -2755,6 +4443,10 @@ export default function CrudDemo({
                         entity?.key === 'maquina' &&
                         f.k === 'EMA_ID' &&
                         isMachineStatusMaintenanceById(catalogOptions, form?.EMA_ID);
+                      const lockScopedMaintenanceMachine =
+                        entity?.key === 'registro-mantenimiento' &&
+                        f.k === 'MAQ_ID' &&
+                        Boolean((searchParams.get('rem_maq_id') || '').trim());
                       const fieldDisabled =
                         (f.k === entity.id && editId !== '__new__') ||
                         (isNewRecord && f.k === entity?.id) ||
@@ -2764,7 +4456,8 @@ export default function CrudDemo({
                         lockByAlertBusinessRule ||
                         lockResolverUserByRole ||
                         lockOwnSessionActivationToggle ||
-                        lockMachineStatusByMaintenanceFlow;
+                        lockMachineStatusByMaintenanceFlow ||
+                        lockScopedMaintenanceMachine;
                       const maintenanceMachine =
                         entity?.key === 'registro-mantenimiento'
                           ? findMachineById(catalogOptions, form?.MAQ_ID)
@@ -2785,7 +4478,13 @@ export default function CrudDemo({
                             }
                             if (f.catalog !== 'maquina') return catalogOptions[f.catalog] || [];
                             if (entity?.key === 'registro-mantenimiento') {
-                              return maquinasMantenimientoElegiblesList(catalogOptions);
+                              const eligible = maquinasMantenimientoElegiblesList(catalogOptions);
+                              const scopedMaqId = String(searchParams.get('rem_maq_id') || '').trim();
+                              const scopedMaq = scopedMaqId ? findMachineById(catalogOptions, scopedMaqId) : null;
+                              if (scopedMaq && !eligible.some((item) => String(item.MAQ_ID) === scopedMaqId)) {
+                                return [scopedMaq, ...eligible];
+                              }
+                              return eligible;
                             }
                             if (f.maquinaSoloCobro) {
                               return maquinasTipoCobroList(catalogOptions, {
@@ -2815,6 +4514,10 @@ export default function CrudDemo({
                               : f.t === 'select'
                                 ? ' crudx-field--select'
                                 : ''
+                          }${
+                            entity?.key === 'registro-mantenimiento' && f.k === 'REM_DESCRIPCION'
+                              ? ' crudx-field--maintenance-desc'
+                              : ''
                           }`}
                         >
                           {f.t === 'checkbox' ? (
@@ -2841,7 +4544,21 @@ export default function CrudDemo({
                                 required={!!f.req && !(isNewRecord && f.k === entity?.id)}
                                 disabled={effectiveFieldDisabled}
                                 style={effectiveFieldDisabled ? readOnlyFieldStyle : undefined}
-                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
+                                onChange={(ev) => {
+                                  const nextValue = ev.target.value;
+                                  setForm((p) => {
+                                    if (entity?.key === 'membresia' && f.k === 'ESP_ID') {
+                                      const selectedEspacio = (catalogOptions?.espacio || [])
+                                        .find((row) => String(row?.ESP_ID) === String(nextValue));
+                                      return {
+                                        ...p,
+                                        [f.k]: nextValue,
+                                        ESP_UBICACION: selectedEspacio?.ESP_UBICACION ?? p.ESP_UBICACION ?? '',
+                                      };
+                                    }
+                                    return { ...p, [f.k]: nextValue };
+                                  });
+                                }}
                                 aria-label={lbl}
                                 title={lbl}
                               >
@@ -2889,6 +4606,22 @@ export default function CrudDemo({
                                 </p>
                               ) : null}
                             </>
+                          ) : entity?.key === 'registro-mantenimiento' && f.k === 'REM_DESCRIPCION' ? (
+                            <>
+                              <label htmlFor={fieldId}>{lbl}</label>
+                              <textarea
+                                id={fieldId}
+                                className="crudx-textarea"
+                                value={form[f.k] ?? ''}
+                                placeholder="Detalle breve del trabajo realizado o hallazgo encontrado"
+                                disabled={fieldDisabled}
+                                style={fieldDisabled ? readOnlyFieldStyle : undefined}
+                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
+                                aria-label={lbl}
+                                title={lbl}
+                                rows={2}
+                              />
+                            </>
                           ) : (
                             <>
                               <label htmlFor={fieldId}>{lbl}</label>
@@ -2904,7 +4637,9 @@ export default function CrudDemo({
                                 required={!!f.req && !(isNewRecord && f.k === entity?.id)}
                                 disabled={fieldDisabled}
                                 style={fieldDisabled ? readOnlyFieldStyle : undefined}
-                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
+                                inputMode={getInputMode(f.k)}
+                                maxLength={getMaxLength(f.k)}
+                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: sanitizeFieldValue(f.k, ev.target.value) }))}
                                 aria-label={lbl}
                                 title={lbl}
                               />
@@ -2937,15 +4672,17 @@ export default function CrudDemo({
                 </div>
               ) : entity?.key === 'detalle-saldo' && !(searchParams.get('ds_maq_id') || '').trim() ? (
                 <p className="crudx-empty" role="status">
-                  Elige una máquina de cobro arriba y pulsa «Aplicar filtros» para cargar el detalle de saldo.
+                  Elige una máquina de cobro arriba y pulsa "Aplicar filtros" para cargar el detalle de saldo.
                 </p>
               ) : entity?.key === 'recargo-maquina' && !(searchParams.get('rma_maq_id') || '').trim() ? (
                 <p className="crudx-empty" role="status">
                   Elige una maquina de cobro arriba y pulsa "Buscar" para consultar el historial.
                 </p>
-              ) : rows.length === 0 ? (
+              ) : displayRows.length === 0 ? (
                 <p className="crudx-empty" role="status">
-                  {entity?.key === 'detalle-saldo'
+                  {isMonthlyVehicleMembershipView
+                    ? 'Este vehículo todavía no tiene membresías registradas.'
+                    : entity?.key === 'detalle-saldo'
                     ? 'No hay registros de detalle de saldo para la máquina seleccionada.'
                     : entity?.key === 'recargo-maquina'
                       ? 'No hay registros de detalle saldo para la maquina seleccionada.'
@@ -2967,11 +4704,14 @@ export default function CrudDemo({
                   <table className="crudx-table">
                     <thead>
                       <tr>
-                        {Object.keys(rows[0])
+                        {Object.keys(displayRows[0])
+                          .filter((c) => !(entity?.key === 'ticket' && ['TIC_CODIGO', 'VEH_ID', 'MOD_ID', 'COL_ID', 'MAR_ID', 'TVE_ID', 'ETI_ID'].includes(c)))
                           .filter((c) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
                           .filter((c) => !(entity?.key === 'detalle-saldo' && c === 'SDI_ID'))
                           .filter((c) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_ID'))
                           .filter((c) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_CODIGO'))
+                          .filter((c) => !(entity?.key === 'registro-mantenimiento' && c === 'REM_ESTADO_RESULTANTE_EMA_ID'))
+                          .filter((c) => !(entity?.key === 'registro-mantenimiento' && scopedRemMaqId && ['MAQ_ID', 'MAQ_CODIGO'].includes(c)))
                           .filter((c) => !(entity?.key === 'membresia' && c === 'EME_ESTADO'))
                           .filter((c) => !(entity?.key === 'membresia' && c === 'TME_TIPO'))
                           .filter((c) => !(entity?.key === 'membresia' && c === 'ESP_CODIGO'))
@@ -2982,6 +4722,11 @@ export default function CrudDemo({
                           .filter((c) => !(entity?.key === 'membresia' && c === 'VEH_ID'))
                           .filter((c) => !(entity?.key === 'membresia' && c === 'VEH_MODELO'))
                           .filter((c) => !(entity?.key === 'vehiculo' && c === 'TVE_ID'))
+                          .filter((c) => !(entity?.key === 'vehiculo' && c === 'EME_ID'))
+                          .filter((c) => !(isMonthlyClientVehicleView && entity?.key === 'vehiculo' && ['COL_ID', 'MAR_ID', 'MEM_ID'].includes(c)))
+                          .filter((c) => !(isMonthlyCompactClientTable && MONTHLY_CLIENT_COMPACT_HIDDEN_COLUMNS.has(c)))
+                          .filter((c) => !(isMonthlyClientVehicleView && entity?.key === 'vehiculo' && c === 'CLI_ID'))
+                          .filter((c) => !(isMonthlyVehicleMembershipView && entity?.key === 'membresia' && ['CLI_ID', 'VEH_PLACA'].includes(c)))
                           .filter(
                             (c) =>
                               !(
@@ -3033,12 +4778,26 @@ export default function CrudDemo({
                                     ? 'Estado membresía'
                                     : entity?.key === 'membresia' && c === 'TME_ID'
                                       ? 'Tipo membresía'
-                                      : entity?.key === 'membresia' && c === 'CLI_ID'
+                                  : entity?.key === 'membresia' && c === 'CLI_ID'
                                         ? 'Cliente'
                                         : entity?.key === 'membresia' && c === 'ESP_ID'
                                           ? 'Espacio'
+                                  : isMonthlyClientVehicleView && entity?.key === 'vehiculo' && c === 'VEH_MODELO'
+                                    ? 'Modelo'
+                                    : isMonthlyClientVehicleView && entity?.key === 'vehiculo' && c === 'VEH_COLOR'
+                                      ? 'Color'
+                                      : isMonthlyClientVehicleView && entity?.key === 'vehiculo' && c === 'EME_ESTADO'
+                                        ? 'Estado'
+                                  : entity?.key === 'cliente' && c === 'CLI_ACTIVO'
+                                    ? 'Estado'
                                   : entity?.key === 'bitacora-incidente-vehiculo' && c === 'USU_ID'
                                     ? 'Usuario'
+                                    : entity?.key === 'registro-mantenimiento' && c === 'REM_MANTENIMIENTO_FECHA'
+                                      ? 'Fecha'
+                                    : entity?.key === 'registro-mantenimiento' && c === 'REM_TIPO_MOVIMIENTO'
+                                      ? 'Movimiento'
+                                    : entity?.key === 'registro-mantenimiento' && c === 'REM_ESTADO_RESULTANTE'
+                                      ? 'Estado resultante'
                                     : entity?.key === 'registro-movimiento-membresia' && c === 'VEH_PLACA'
                                       ? 'Placa'
                                       : entity?.key === 'registro-movimiento-membresia' && c === 'MEM_ID'
@@ -3060,13 +4819,26 @@ export default function CrudDemo({
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((row, i) => (
-                        <tr key={i}>
+                      {displayRows.map((row, i) => {
+                        const rowKey = row?.[entity.id] ?? i;
+                        const isExpandedClientDetail =
+                          isMonthlyCompactClientTable
+                          && String(expandedClientRowId ?? '') === String(row?.CLI_ID ?? '');
+                        const vehicleMembershipStatus =
+                          isMonthlyClientVehicleView && entity.key === 'vehiculo'
+                            ? getVehicleMembershipStatus(row, catalogOptions)
+                            : null;
+                        return (
+                        <Fragment key={rowKey}>
+                          <tr>
                           {Object.entries(row)
+                            .filter(([c]) => !(entity?.key === 'ticket' && ['TIC_CODIGO', 'VEH_ID', 'MOD_ID', 'COL_ID', 'MAR_ID', 'TVE_ID', 'ETI_ID'].includes(c)))
                             .filter(([c]) => !(entity?.key === 'alerta' && c === 'TAL_ID'))
                             .filter(([c]) => !(entity?.key === 'detalle-saldo' && c === 'SDI_ID'))
                             .filter(([c]) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_ID'))
                             .filter(([c]) => !(entity?.key === 'detalle-saldo' && c === 'MAQ_CODIGO'))
+                            .filter(([c]) => !(entity?.key === 'registro-mantenimiento' && c === 'REM_ESTADO_RESULTANTE_EMA_ID'))
+                            .filter(([c]) => !(entity?.key === 'registro-mantenimiento' && scopedRemMaqId && ['MAQ_ID', 'MAQ_CODIGO'].includes(c)))
                             .filter(([c]) => !(entity?.key === 'membresia' && c === 'EME_ESTADO'))
                             .filter(([c]) => !(entity?.key === 'membresia' && c === 'TME_TIPO'))
                             .filter(([c]) => !(entity?.key === 'membresia' && c === 'ESP_CODIGO'))
@@ -3077,6 +4849,11 @@ export default function CrudDemo({
                             .filter(([c]) => !(entity?.key === 'membresia' && c === 'VEH_ID'))
                             .filter(([c]) => !(entity?.key === 'membresia' && c === 'VEH_MODELO'))
                             .filter(([c]) => !(entity?.key === 'vehiculo' && c === 'TVE_ID'))
+                            .filter(([c]) => !(entity?.key === 'vehiculo' && c === 'EME_ID'))
+                            .filter(([c]) => !(isMonthlyClientVehicleView && entity?.key === 'vehiculo' && ['COL_ID', 'MAR_ID', 'MEM_ID'].includes(c)))
+                            .filter(([c]) => !(isMonthlyCompactClientTable && MONTHLY_CLIENT_COMPACT_HIDDEN_COLUMNS.has(c)))
+                            .filter(([c]) => !(isMonthlyClientVehicleView && entity?.key === 'vehiculo' && c === 'CLI_ID'))
+                            .filter(([c]) => !(isMonthlyVehicleMembershipView && entity?.key === 'membresia' && ['CLI_ID', 'VEH_PLACA'].includes(c)))
                             .filter(
                               ([c]) =>
                                 !(
@@ -3179,12 +4956,67 @@ export default function CrudDemo({
                                 </td>
                               );
                             }
-                            if (entity?.key === 'membresia' && c === 'EME_ID') {
+                            if (entity?.key === 'registro-mantenimiento' && c === 'REM_DESCRIPCION') {
+                              const desc = String(v ?? '').trim();
+                              return (
+                                <td key={c} className="crudx-cell-maint-desc">
+                                  {desc || '—'}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'registro-mantenimiento' && c === 'REM_TIPO_MOVIMIENTO') {
+                              const movement = String(v ?? '').trim().toUpperCase();
                               return (
                                 <td key={c} className="crudx-cell-ellipsis">
-                                  {row?.EME_ESTADO == null || String(row.EME_ESTADO).trim() === ''
-                                    ? (v == null ? '—' : String(v))
-                                    : String(row.EME_ESTADO)}
+                                  {movement === 'FINALIZACION' ? 'Finalización' : movement === 'INICIO' ? 'Inicio' : (v == null ? '—' : String(v))}
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'registro-mantenimiento' && c === 'REM_ESTADO_RESULTANTE') {
+                              const movement = String(row?.REM_TIPO_MOVIMIENTO ?? '').trim().toUpperCase();
+                              const statusLabel = movement === 'INICIO'
+                                ? 'Mantenimiento'
+                                : String(v ?? '').trim();
+                              const machineStatusBadge = getMachineStatusBadge(statusLabel || '—');
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  <span className={`crudx-status-pill crudx-status-pill--${machineStatusBadge.tone}`}>
+                                    {machineStatusBadge.label}
+                                  </span>
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'membresia' && c === 'EME_ID') {
+                              const membershipBadge = getMembershipStatusBadge(
+                                row?.EME_ESTADO == null || String(row.EME_ESTADO).trim() === ''
+                                  ? (v == null ? '—' : String(v))
+                                  : String(row.EME_ESTADO),
+                              );
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  <span className={`crudx-status-pill crudx-status-pill--${membershipBadge.tone}`}>
+                                    {membershipBadge.label}
+                                  </span>
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'estado-membresia' && c === 'EME_ESTADO') {
+                              const membershipBadge = getMembershipStatusBadge(v == null ? '—' : String(v));
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  <span className={`crudx-status-pill crudx-status-pill--${membershipBadge.tone}`}>
+                                    {membershipBadge.label}
+                                  </span>
+                                </td>
+                              );
+                            }
+                            if (entity?.key === 'estado-maquina' && c === 'EMA_ESTADO') {
+                              const machineStatusBadge = getMachineStatusBadge(v == null ? '—' : String(v));
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  <span className={`crudx-status-pill crudx-status-pill--${machineStatusBadge.tone}`}>
+                                    {machineStatusBadge.label}
+                                  </span>
                                 </td>
                               );
                             }
@@ -3222,6 +5054,27 @@ export default function CrudDemo({
                                 </td>
                               );
                             }
+                            if (entity?.key === 'cliente' && c === 'CLI_ACTIVO') {
+                              const isActiveClient = Number(v ?? row?.CLI_ACTIVO ?? 0) === 1;
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  <span className={`crudx-status-pill crudx-status-pill--${isActiveClient ? 'success' : 'danger'}`}>
+                                    {isActiveClient ? 'Activo' : 'Inactivo'}
+                                  </span>
+                                </td>
+                              );
+                            }
+                            if (isMonthlyClientVehicleView && entity?.key === 'vehiculo' && c === 'EME_ESTADO') {
+                              return (
+                                <td key={c} className="crudx-cell-ellipsis">
+                                  <span
+                                    className={`crudx-status-pill crudx-status-pill--${vehicleMembershipStatus?.tone || 'neutral'}`}
+                                  >
+                                    {vehicleMembershipStatus?.label || 'Sin membresía'}
+                                  </span>
+                                </td>
+                              );
+                            }
                             if (entity?.key === 'detalle-pago-membresia' && c === 'MEM_ID') {
                               const nombreCliente = [
                                 row?.CLI_PRIMER_NOMBRE,
@@ -3249,7 +5102,7 @@ export default function CrudDemo({
                           })}
                           {(entity.ops.u || entity.ops.d || entity.key === 'membresia' || entity.key === 'ticket' || entity.key === 'detalle-saldo') && (
                             <td className="crudx-actions-cell">
-                              {entity.ops.u && (
+                              {entity.ops.u && entity.key !== 'maquina' && (
                                 <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">
                                   {entity.key === 'alerta'
                                     ? (labelEstadoAlerta(row?.EAL_ID, catalogOptions).trim().toLowerCase() === 'atendida'
@@ -3263,6 +5116,26 @@ export default function CrudDemo({
                                 </button>
                               )}
                               {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
+                              {isMonthlyWorkspace && monthlyWorkspaceView === 'entity' && entity.key === 'cliente' && (
+                                <button
+                                  type="button"
+                                  onClick={() => openMonthlyClientVehicles(row)}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  Vehículos
+                                </button>
+                              )}
+                              {isMonthlyCompactClientTable && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedClientRowId((current) => (
+                                    String(current ?? '') === String(row?.CLI_ID ?? '') ? null : row?.CLI_ID
+                                  ))}
+                                  className="crudx-btn-secondary crudx-btn-xs"
+                                >
+                                  {isExpandedClientDetail ? 'Ocultar ficha' : 'Ver ficha'}
+                                </button>
+                              )}
                               {entity.key === 'ticket' && (
                                 <>
                                   <button
@@ -3283,14 +5156,37 @@ export default function CrudDemo({
                                   ) : null}
                                 </>
                               )}
-                              {entity.key === 'cliente' && Number(row.CLI_ACTIVO ?? 1) === 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => deactivateCliente(row)}
-                                  className="crudx-btn-danger crudx-btn-xs"
-                                >
-                                  Desactivar
-                                </button>
+                              {isMonthlyClientVehicleView && entity.key === 'vehiculo' && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openMonthlyVehicleMemberships(row, {
+                                      startNew: false,
+                                    })}
+                                    className="crudx-btn-secondary crudx-btn-xs"
+                                  >
+                                    Ver membresía
+                                  </button>
+                                </>
+                              )}
+                              {entity.key === 'cliente' && (
+                                Number(row.CLI_ACTIVO ?? 1) === 1 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => deactivateCliente(row)}
+                                    className="crudx-btn-danger crudx-btn-xs"
+                                  >
+                                    Desactivar
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => activateCliente(row)}
+                                    className="crudx-btn-success crudx-btn-xs"
+                                  >
+                                    Activar
+                                  </button>
+                                )
                               )}
                               {entity.key === 'usuario' && Number(row.USU_ACTIVO ?? 1) === 1 && !isCurrentSessionUser(row.USU_ID, sessionUserId) && (
                                 <button
@@ -3321,27 +5217,27 @@ export default function CrudDemo({
                               {entity.key === 'maquina' && (
                                 <>
                                   <button
-                                    onClick={() => showMachineData(row.MAQ_ID, `/maquina/${row.MAQ_ID}/transacciones`, `Transacciones (MAQ_ID ${row.MAQ_ID})`)}
+                                    onClick={() => openMachineTransactions(row)}
                                     className="crudx-btn-secondary crudx-btn-xs"
                                   >
                                     Transacciones
                                   </button>
                                   <button
-                                    onClick={() => showMachineData(row.MAQ_ID, `/registro-mantenimiento/maquina/${row.MAQ_ID}`, `Mantenimientos (MAQ_ID ${row.MAQ_ID})`)}
+                                    onClick={() => openMachineMaintenance(row)}
                                     className="crudx-btn-secondary crudx-btn-xs"
                                   >
-                                    Mantenimientos
+                                    Mantenimiento
                                   </button>
                                   {isMaquinaCobroRow(row, catalogOptions) && (
                                     <>
                                       <button
-                                        onClick={() => showMachineData(row.MAQ_ID, `/recargo-maquina/maquina/${row.MAQ_ID}`, `Recargas (MAQ_ID ${row.MAQ_ID})`)}
+                                        onClick={() => openMachineRecharges(row)}
                                         className="crudx-btn-secondary crudx-btn-xs"
                                       >
                                         Recargas
                                       </button>
                                       <button
-                                        onClick={() => showMachineData(row.MAQ_ID, `/detalle-saldo/maquina/${row.MAQ_ID}`, `Saldo y umbral (MAQ_ID ${row.MAQ_ID})`)}
+                                        onClick={() => openMachineBalance(row)}
                                         className="crudx-btn-secondary crudx-btn-xs"
                                       >
                                         Saldo
@@ -3352,46 +5248,28 @@ export default function CrudDemo({
                               )}
                             </td>
                           )}
-                        </tr>
-                      ))}
+                          </tr>
+                          {isExpandedClientDetail ? (
+                            <tr className="crudx-client-detail-row">
+                              <td colSpan={displayColumns.length + (showTableActions ? 1 : 0)}>
+                                <div className="crudx-client-detail-card">
+                                  <div className="crudx-client-detail-card__grid">
+                                    {clienteCompactDetailItems(row).map((item) => (
+                                      <div key={item.label} className="crudx-client-detail-card__item">
+                                        <span>{item.label}</span>
+                                        <strong>{item.value}</strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
-                </div>
-              )}
-              {entity?.key === 'maquina' && machineView.maqId != null && (
-                <div style={{ marginTop: 12 }} className="crudx-machine-box">
-                  <div className="crudx-machine-head">
-                    <strong>{machineView.title}</strong>
-                    <button className="crudx-btn-secondary crudx-btn-xs" onClick={() => setMachineView({ maqId: null, title: '', rows: [] })}>Cerrar</button>
-                  </div>
-                  {machineView.rows.length === 0 ? (
-                    <p className="crudx-empty">Sin registros para esta máquina.</p>
-                  ) : (
-                    <div className="crudx-table-scroll">
-                      <table className="crudx-table">
-                        <thead>
-                          <tr>
-                            {Object.keys(machineView.rows[0]).map((c) => (
-                              <th key={c}>{getDbColumnLabel(c, CRUD_COLUMN_LABELS)}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {machineView.rows.map((r, i) => (
-                            <tr key={i}>
-                              {Object.entries(r).map(([c, v]) => (
-                                <td key={c} className="crudx-cell-ellipsis">
-                                  {v == null ? '—'
-                                    : typeof v === 'string' && /\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('es-GT')
-                                    : String(v)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
                 </div>
               )}
             </>
@@ -3445,5 +5323,3 @@ export default function CrudDemo({
     </div>
   );
 }
-
-

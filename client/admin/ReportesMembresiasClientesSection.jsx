@@ -12,6 +12,14 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
+import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
+
+import { useReportFilter } from './ReportFilterContext.jsx';
+const MEMBERSHIP_REPORT_CARDS = [
+  { id: 'mora', badge: 'MOR', eyebrow: 'Riesgo', label: 'Clientes con mora', summary: 'Clientes atrasados, dias de mora y filtros por tipo de vehiculo o rango.', traits: ['Mora', 'Cliente', 'Tipo'], icon: 'alert', tone: 'sunset' },
+  { id: 'estado', badge: 'EST', eyebrow: 'Vigencia', label: 'Estado membresias', summary: 'Distribucion de membresias activas, suspendidas y vencidas por periodo.', traits: ['Estado', 'Fecha', 'Grafica'], icon: 'calendar', tone: 'mint' },
+  { id: 'historial', badge: 'HIS', eyebrow: 'Pagos', label: 'Historial pagos', summary: 'Consulta pagos de un cliente por mes, metodo y detalle de membresia.', traits: ['Cliente', 'Mes', 'Metodo'], icon: 'money', tone: 'ocean' },
+];
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -20,12 +28,6 @@ function ymd(d) {
   return `${y}-${m}-${day}`;
 }
 
-function defaultRange() {
-  const hasta = new Date();
-  const desde = new Date(hasta);
-  desde.setDate(desde.getDate() - 29);
-  return { desde: ymd(desde), hasta: ymd(hasta) };
-}
 
 async function parseJsonSafe(res) {
   const text = await res.text();
@@ -49,11 +51,11 @@ function moraBucket(days) {
   return '8+ dias';
 }
 
-export default function ReportesMembresiasClientesSection() {
-  const initial = useMemo(() => defaultRange(), []);
+export default function ReportesMembresiasClientesSection({ onBackToReports = null }) {
+  const { filtros, setFiltro } = useReportFilter();
+  const desde = filtros.desde;
+  const hasta = filtros.hasta;
   const [tab, setTab] = useState('mora');
-  const [desde, setDesde] = useState(initial.desde);
-  const [hasta, setHasta] = useState(initial.hasta);
   const [estadoFiltro, setEstadoFiltro] = useState('');
   const [queryCliente, setQueryCliente] = useState('');
   const [candidatos, setCandidatos] = useState([]);
@@ -63,6 +65,7 @@ export default function ReportesMembresiasClientesSection() {
   const [data, setData] = useState(null);
   const [filtroBusquedaMora, setFiltroBusquedaMora] = useState('');
   const [filtroMoraBucket, setFiltroMoraBucket] = useState('');
+  const [filtroTipoVehiculoMora, setFiltroTipoVehiculoMora] = useState('Todos');
   const [filtroMesHistorial, setFiltroMesHistorial] = useState('');
   const [filtroMetodoHistorial, setFiltroMetodoHistorial] = useState('');
 
@@ -195,6 +198,10 @@ export default function ReportesMembresiasClientesSection() {
     ],
   };
 
+  const tiposVehiculoMora = useMemo(() => {
+    const s = new Set((data?.detalle ?? []).map((r) => r.tipoVehiculo).filter((t) => t && t !== '—'));
+    return [...s].sort();
+  }, [data]);
   const moraFiltrada = moraDetalle.filter((row) => {
     const s = filtroBusquedaMora.toLowerCase();
     const matchText =
@@ -202,7 +209,8 @@ export default function ReportesMembresiasClientesSection() {
       row.nombreCompleto?.toLowerCase().includes(s) ||
       row.placa?.toLowerCase().includes(s);
     const matchBucket = !filtroMoraBucket || moraBucket(row.diasMora) === filtroMoraBucket;
-    return matchText && matchBucket;
+    const matchTipoV = filtroTipoVehiculoMora === 'Todos' || row.tipoVehiculo === filtroTipoVehiculoMora;
+    return matchText && matchBucket && matchTipoV;
   });
 
   const historial = useMemo(() => (Array.isArray(data?.historial) ? data.historial : []), [data]);
@@ -266,17 +274,17 @@ export default function ReportesMembresiasClientesSection() {
 
   return (
     <>
-      <div className="reporte-tabs" role="tablist" aria-label="Subreportes membresias y clientes">
-        <button type="button" role="tab" aria-selected={tab === 'mora'} className={`reporte-tab-btn${tab === 'mora' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('mora')}>
-          Clientes con mora
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'estado'} className={`reporte-tab-btn${tab === 'estado' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('estado')}>
-          Estado de membresias
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'historial'} className={`reporte-tab-btn${tab === 'historial' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('historial')}>
-          Historial pagos cliente
-        </button>
-      </div>
+      <ReportDetailNav
+        eyebrow="Reportes"
+        title="Membresias y clientes"
+        backLabel="Volver a reportes"
+        onBack={onBackToReports}
+      />
+      <ReportCardMenu
+        ariaLabel="Subreportes membresias y clientes"
+        items={MEMBERSHIP_REPORT_CARDS}
+        onSelect={setTab}
+      />
 
       <section className="reporte-inc-card">
         <h2 className="reporte-inc-card__title">
@@ -295,8 +303,6 @@ export default function ReportesMembresiasClientesSection() {
         >
           {tab === 'estado' ? (
             <>
-              <label className="reporte-inc-field"><span>Fecha inicio</span><input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required /></label>
-              <label className="reporte-inc-field"><span>Fecha fin</span><input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required /></label>
             </>
           ) : null}
           {tab === 'historial' ? (
@@ -409,11 +415,15 @@ export default function ReportesMembresiasClientesSection() {
                           onChange={(e) => setFiltroBusquedaMora(e.target.value)}
                           className="admin-input reporte-table-input"
                         />
+                        <select value={filtroTipoVehiculoMora} onChange={(e) => setFiltroTipoVehiculoMora(e.target.value)} className="reporte-table-input">
+                          <option value="Todos">Todos los tipos</option>
+                          {tiposVehiculoMora.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
                       </div>
                     </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Cliente</th><th>Correo</th><th>Telefono</th><th>Placa</th><th>Vencimiento</th><th>Dias mora</th></tr></thead>
+                        <thead><tr><th>Cliente</th><th>Correo</th><th>Telefono</th><th>Placa</th><th>Tipo vehículo</th><th>Vencimiento</th><th>Dias mora</th></tr></thead>
                         <tbody>
                           {moraFiltrada.map((row) => (
                             <tr key={String(row.memId)}>
@@ -421,6 +431,7 @@ export default function ReportesMembresiasClientesSection() {
                               <td>{row.correo}</td>
                               <td>{row.telefono}</td>
                               <td>{row.placa}</td>
+                              <td>{row.tipoVehiculo ?? '—'}</td>
                               <td>{row.fechaVencimiento || '—'}</td>
                               <td>{row.diasMora}</td>
                             </tr>
@@ -637,3 +648,4 @@ export default function ReportesMembresiasClientesSection() {
     </>
   );
 }
+

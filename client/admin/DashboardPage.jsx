@@ -104,6 +104,10 @@ export default function DashboardPage() {
               <span className="admin-kpi-num">{stats.membresiasActivas ?? (loading ? '—' : 0)}</span>
             </div>
             <div>
+              <span className="admin-kpi-sub">Vencidas</span>
+              <span className="admin-kpi-num">{stats.membresiasVencidas ?? (loading ? '—' : 0)}</span>
+            </div>
+            <div>
               <span className="admin-kpi-sub">Suspendidas</span>
               <span className="admin-kpi-num">{stats.membresiasSuspendidas ?? (loading ? '—' : 0)}</span>
             </div>
