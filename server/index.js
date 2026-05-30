@@ -12,6 +12,9 @@ import usuarioRoutes from './routes/usuario.js';
 import espacioRoutes from './routes/espacio.js';
 import vehiculoRoutes from './routes/vehiculo.js';
 import tipoVehiculoRoutes from './routes/tipoVehiculo.js';
+import marcaVehiculoRoutes from './routes/marcaVehiculo.js';
+import modeloVehiculoRoutes from './routes/modeloVehiculo.js';
+import colorVehiculoRoutes from './routes/colorVehiculo.js';
 import registroMovimientoMembresiaRoutes from './routes/registroMovimientoMembresia.js';
 import tipoMembresiaRoutes from './routes/tipoMembresia.js';
 import estadoMembresiaRoutes from './routes/estadoMembresia.js';
@@ -73,6 +76,9 @@ app.use('/api/usuario', usuarioRoutes);
 app.use('/api/espacio', espacioRoutes);
 app.use('/api/vehiculo', vehiculoRoutes);
 app.use('/api/tipo-vehiculo', tipoVehiculoRoutes);
+app.use('/api/marca-vehiculo', marcaVehiculoRoutes);
+app.use('/api/modelo-vehiculo', modeloVehiculoRoutes);
+app.use('/api/color-vehiculo', colorVehiculoRoutes);
 app.use('/api/registro-movimiento-membresia', registroMovimientoMembresiaRoutes);
 app.use('/api/tipo-membresia', tipoMembresiaRoutes);
 app.use('/api/estado-membresia', estadoMembresiaRoutes);
@@ -101,7 +107,27 @@ app.use('/api/notificacion', notificacionRoutes);
 app.use('/api/cobro-politica', cobroPoliticaRoutes);
 app.use('/api/reportes', reportesRoutes);
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Servidor en http://localhost:${PORT}`);
   startDailyJobs();
 });
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[server] El puerto ${PORT} ya está en uso (otra instancia del backend sigue activa).`);
+    console.error('[server] En PowerShell, libera el puerto con:');
+    console.error(`  netstat -ano | findstr :${PORT}`);
+    console.error('  taskkill /PID <número_de_pid> /F\n');
+    process.exit(1);
+  }
+  throw err;
+});
+
+function shutdown(signal) {
+  console.log(`[server] ${signal}: cerrando servidor…`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 2000).unref();
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

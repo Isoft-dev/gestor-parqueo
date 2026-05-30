@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { API_BASE } from '../config.js';
 import HelpHint from '../components/HelpHint.jsx';
+import { getFieldPlaceholder } from '../utils/fieldValidation.js';
+import { normalizePlateInput } from '../utils/plate.js';
 
 export default function LostTicketPanel() {
   const [placa, setPlaca] = useState('');
@@ -49,9 +51,9 @@ export default function LostTicketPanel() {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="Placa del vehiculo"
+          placeholder={getFieldPlaceholder('VEH_PLACA')}
           value={placa}
-          onChange={(e) => setPlaca(e.target.value.toUpperCase())}
+          onChange={(e) => setPlaca(normalizePlateInput(e.target.value))}
           style={{ padding: '8px 10px', minWidth: 160 }}
         />
         <button type="button" className="admin-btn-primary" onClick={preparar} disabled={loading || !placa.trim()}>

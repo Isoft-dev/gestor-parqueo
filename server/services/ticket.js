@@ -13,6 +13,7 @@ import {
 } from '../utils/tipoMaquinaRules.js';
 import { assertMachineIsOperative, getMachineWithStatusTx } from '../utils/machineStatus.js';
 import { assertValidPlate } from '../utils/plate.js';
+import { vehiculoCatalogJoin, vehiculoCatalogSelect } from '../utils/vehiculoCatalogSql.js';
 
 /** Recargo fijo (GTQ) por ticket en estado extraviado al momento del cobro. */
 const RECARGO_TICKET_EXTRAVIADO_Q = 100;
@@ -37,23 +38,49 @@ function aplicarMinimoSub1h(montoBruto, minsFacturables) {
 }
 
 export async function getAll() {
-  return executeCursor(`BEGIN SP_TICKET_GET_ALL(:cursor); END;`);
+  return executeSql(
+    `SELECT t.TIC_ID, t.TIC_CODIGO,
+            t.VEH_ID, v.VEH_PLACA, ${vehiculoCatalogSelect('v')},
+            t.TIC_FECHA_HORA_ENTRADA, t.TIC_FECHA_HORA_SALIDA,
+            t.ETI_ID, e.ETI_ESTADO,
+            c.COB_ID AS COB_ID
+       FROM PAR_TICKET t
+       JOIN PAR_VEHICULO v ON t.VEH_ID = v.VEH_ID
+       ${vehiculoCatalogJoin('v')}
+       JOIN PAR_ESTADO_TICKET e ON t.ETI_ID = e.ETI_ID
+       LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
+      ORDER BY t.TIC_FECHA_HORA_ENTRADA DESC`
+  );
 }
 
 export async function getById(id) {
-  const rows = await executeCursor(`BEGIN SP_TICKET_GET_BY_ID(:id, :cursor); END;`, { id });
+  const rows = await executeSql(
+    `SELECT t.TIC_ID, t.TIC_CODIGO,
+            t.VEH_ID, v.VEH_PLACA, ${vehiculoCatalogSelect('v')},
+            t.TIC_FECHA_HORA_ENTRADA, t.TIC_FECHA_HORA_SALIDA,
+            t.ETI_ID, e.ETI_ESTADO,
+            c.COB_ID AS COB_ID
+       FROM PAR_TICKET t
+       JOIN PAR_VEHICULO v ON t.VEH_ID = v.VEH_ID
+       ${vehiculoCatalogJoin('v')}
+       JOIN PAR_ESTADO_TICKET e ON t.ETI_ID = e.ETI_ID
+       LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
+      WHERE t.TIC_ID = :id`,
+    { id }
+  );
   return rows[0] || null;
 }
 
 export async function getByCodigo(codigo) {
   const rows = await executeSql(
     `SELECT t.TIC_ID, t.TIC_CODIGO,
-            t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+            t.VEH_ID, v.VEH_PLACA, ${vehiculoCatalogSelect('v')},
             t.TIC_FECHA_HORA_ENTRADA, t.TIC_FECHA_HORA_SALIDA,
             t.ETI_ID, e.ETI_ESTADO,
             c.COB_ID AS COB_ID, c.COB_MONTO_TOTAL AS COB_MONTO_TOTAL
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON t.VEH_ID = v.VEH_ID
+       ${vehiculoCatalogJoin('v')}
        JOIN PAR_ESTADO_TICKET e ON t.ETI_ID = e.ETI_ID
        LEFT JOIN PAR_COBRO c ON c.TIC_ID = t.TIC_ID
       WHERE UPPER(TRIM(t.TIC_CODIGO)) = UPPER(TRIM(:codigo))
@@ -603,6 +630,27 @@ async function ticketIdentityAlwaysTx(conn) {
   return String(r.rows?.[0]?.GENERATION_TYPE || '').toUpperCase() === 'ALWAYS';
 }
 
+async function ensureModeloExistsTx(conn, modId) {
+  const r = await conn.execute(
+    `SELECT MOD_ID
+       FROM PAR_MODELO_VEHICULO
+      WHERE MOD_ID = :id`,
+    { id: modId }
+  );
+  if (!r.rows?.length) throw new Error('MOD_ID no valido');
+}
+
+async function ensureColorExistsTx(conn, colId) {
+  if (colId == null || String(colId).trim() === '') return;
+  const r = await conn.execute(
+    `SELECT COL_ID
+       FROM PAR_COLOR_VEHICULO
+      WHERE COL_ID = :id`,
+    { id: colId }
+  );
+  if (!r.rows?.length) throw new Error('COL_ID no valido');
+}
+
 async function findEstadoActivoIdTx(conn, fallback) {
   const r = await conn.execute(
     `SELECT ETI_ID
@@ -737,10 +785,10 @@ async function buildEntryTicketPdfBuffer({ ticket, maquinaEntradaLabel }) {
 }
 
 export async function generateEntryTicket({
-  VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, MAQ_ID,
+  VEH_PLACA, MOD_ID, COL_ID, MAQ_ID,
 }) {
   const placa = assertValidPlate(VEH_PLACA);
-  if (!TVE_ID) throw new Error('TVE_ID es requerido');
+  if (!MOD_ID) throw new Error('MOD_ID es requerido');
   if (!MAQ_ID) throw new Error('MAQ_ID es requerido');
 
   let conn;
@@ -754,11 +802,8 @@ export async function generateEntryTicket({
       throw new Error('Ya existe un vehículo con la misma placa.');
     }
 
-    const tipoVehiculo = await conn.execute(
-      `SELECT TVE_ID FROM PAR_TIPO_VEHICULO WHERE TVE_ID = :id`,
-      { id: TVE_ID }
-    );
-    if (!tipoVehiculo.rows?.length) throw new Error('TVE_ID no válido');
+    await ensureModeloExistsTx(conn, MOD_ID);
+    await ensureColorExistsTx(conn, COL_ID);
 
     const maquinaEntrada = await getMachineWithStatusTx(conn, MAQ_ID);
     if (!maquinaEntrada) throw new Error('MAQ_ID no válido');
@@ -774,14 +819,13 @@ export async function generateEntryTicket({
     let vehId;
     if (await vehiculoIdentityAlwaysTx(conn)) {
       const insVeh = await conn.execute(
-        `INSERT INTO PAR_VEHICULO (VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, CLI_ID)
-         VALUES (:placa, :modelo, :color, :tveId, NULL)
+        `INSERT INTO PAR_VEHICULO (VEH_PLACA, MOD_ID, COL_ID, CLI_ID)
+         VALUES (:placa, :modId, :colId, NULL)
          RETURNING VEH_ID INTO :vehIdOut`,
         {
           placa,
-          modelo: VEH_MODELO ?? null,
-          color: VEH_COLOR ?? null,
-          tveId: TVE_ID,
+          modId: MOD_ID,
+          colId: COL_ID ?? null,
           vehIdOut: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
         }
       );
@@ -790,14 +834,13 @@ export async function generateEntryTicket({
       const nextVeh = await conn.execute(`SELECT NVL(MAX(VEH_ID), 0) + 1 AS NEXT_ID FROM PAR_VEHICULO`);
       vehId = Number(nextVeh.rows?.[0]?.NEXT_ID || 1);
       await conn.execute(
-        `INSERT INTO PAR_VEHICULO (VEH_ID, VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, CLI_ID)
-         VALUES (:vehId, :placa, :modelo, :color, :tveId, NULL)`,
+        `INSERT INTO PAR_VEHICULO (VEH_ID, VEH_PLACA, MOD_ID, COL_ID, CLI_ID)
+         VALUES (:vehId, :placa, :modId, :colId, NULL)`,
         {
           vehId,
           placa,
-          modelo: VEH_MODELO ?? null,
-          color: VEH_COLOR ?? null,
-          tveId: TVE_ID,
+          modId: MOD_ID,
+          colId: COL_ID ?? null,
         }
       );
     }
@@ -894,10 +937,11 @@ export async function generateEntryTicket({
 export async function generateEntryTicketPdfByTicketId(ticketId) {
   const rows = await executeSql(
     `SELECT t.TIC_ID, t.TIC_CODIGO, t.TIC_FECHA_HORA_ENTRADA,
-            v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR,
+            v.VEH_PLACA, ${vehiculoCatalogSelect('v')},
             m.MAQ_CODIGO AS MAQ_ENTRADA_CODIGO
        FROM PAR_TICKET t
        JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
+       ${vehiculoCatalogJoin('v')}
        LEFT JOIN PAR_DETALLE_MAQUINA_TICKET d
          ON d.TIC_ID = t.TIC_ID
         AND d.DMT_TRANSACCION = 'GENERACION_TICKET'
@@ -1640,3 +1684,4 @@ export async function prepararTicketExtraviadoPorPlaca(vehPlaca) {
     if (conn) await conn.close();
   }
 }
+

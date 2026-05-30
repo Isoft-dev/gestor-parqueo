@@ -39,6 +39,7 @@ export default function AdminLayout() {
               key={r.path || 'home'}
               to={adminPath(r.path)}
               end={!!r.isDashboard}
+              replace
               className={({ isActive }) =>
                 `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
               }
@@ -53,6 +54,7 @@ export default function AdminLayout() {
             <>
               <NavLink
                 to="/admin/maquina-entrada"
+                replace
                 className={({ isActive }) =>
                   `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
                 }
@@ -64,6 +66,7 @@ export default function AdminLayout() {
               </NavLink>
               <NavLink
                 to="/admin/maquina-salida"
+                replace
                 className={({ isActive }) =>
                   `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
                 }
@@ -75,6 +78,7 @@ export default function AdminLayout() {
               </NavLink>
               <NavLink
                 to="/admin/maquina-cobro"
+                replace
                 className={({ isActive }) =>
                   `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
                 }
@@ -90,6 +94,7 @@ export default function AdminLayout() {
             <NavLink
               key={r.path}
               to={adminPath(r.path)}
+              replace
               className={({ isActive }) =>
                 `admin-nav-link${isActive ? ' admin-nav-link--active' : ''}`
               }

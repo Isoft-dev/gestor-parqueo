@@ -3,6 +3,7 @@ import * as ctrl from '../controllers/membresia.js';
 const router = Router();
 router.get('/', ctrl.getAll);
 router.get('/payment-candidates/search', ctrl.searchPaymentCandidates);
+router.get('/payment-candidates/tag/:memCodigo', ctrl.getPaymentCandidateByTag);
 router.post('/validate-tag', ctrl.validateTag);
 router.post('/validate-tag-exit', ctrl.validateTagExit);
 router.get('/:id/history', ctrl.getHistory);

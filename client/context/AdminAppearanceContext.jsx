@@ -3,7 +3,6 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { ADMIN_APPEARANCE_KEY, THEME_KEY } from '../config.js';
 import {
   buildAdminAppearanceVars,
-  DEFAULT_ADMIN_APPEARANCE,
   loadAdminAppearance,
   sanitizeAdminAppearance,
 } from '../utils/adminAppearance.js';
@@ -32,11 +31,17 @@ export function AdminAppearanceProvider({ children }) {
   }, [appearance]);
 
   function updateAppearance(patch) {
-    setAppearance((current) => sanitizeAdminAppearance({ ...current, ...patch }));
+    setAppearance((current) => {
+      const next = { ...current, ...patch };
+      if (patch.moduleColors && typeof patch.moduleColors === 'object') {
+        next.moduleColors = { ...current.moduleColors, ...patch.moduleColors };
+      }
+      return sanitizeAdminAppearance(next);
+    });
   }
 
   function resetAppearance() {
-    setAppearance(DEFAULT_ADMIN_APPEARANCE);
+    setAppearance(sanitizeAdminAppearance({}));
   }
 
   return (

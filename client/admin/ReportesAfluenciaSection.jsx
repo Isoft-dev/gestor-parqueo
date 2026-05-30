@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import { API_BASE } from '../config.js';
 import {
@@ -11,6 +11,24 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
+import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
+
+import { useReportFilter } from './ReportFilterContext.jsx';
+import { useDrillDown, drillRange, nextAgrupacion } from './useDrillDown.js';
+import DrillBreadcrumb from './DrillBreadcrumb.jsx';
+const AFLUENCIA_REPORT_CARDS = [
+  { id: 'detallado', badge: 'DET', eyebrow: 'Detalle', label: 'Afluencia detallada', summary: 'Agrupa entradas por hora, dia, semana o mes dentro del rango elegido.', traits: ['Hora', 'Dia', 'Mes'], icon: 'calendar', tone: 'ocean' },
+  { id: 'anual', badge: 'ANU', eyebrow: 'Resumen', label: 'Afluencia anual', summary: 'Compara anios completos y muestra el resumen ejecutivo de visitas.', traits: ['Anio', 'Resumen', 'PDF'], icon: 'chart', tone: 'mint' },
+];
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -19,12 +37,6 @@ function ymd(d) {
   return `${y}-${m}-${day}`;
 }
 
-function defaultRange() {
-  const hasta = new Date();
-  const desde = new Date(hasta);
-  desde.setDate(desde.getDate() - 29);
-  return { desde: ymd(desde), hasta: ymd(hasta) };
-}
 
 async function parseJsonSafe(res) {
   const text = await res.text();
@@ -41,37 +53,58 @@ function clickedLabel(elements, chart) {
   return String(chart.data.labels[elements[0].index] || '');
 }
 
-export default function ReportesAfluenciaSection() {
-  const initial = useMemo(() => defaultRange(), []);
+export default function ReportesAfluenciaSection({ onBackToReports = null }) {
+  const { filtros, setFiltro } = useReportFilter();
+  const desde = filtros.desde;
+  const hasta = filtros.hasta;
   const [tab, setTab] = useState('detallado');
-  const [desde, setDesde] = useState(initial.desde);
-  const [hasta, setHasta] = useState(initial.hasta);
-  const [agrupacion, setAgrupacion] = useState('hora');
+  const [agrupacion, setAgrupacion] = useState('mes');
+
+  const {
+    drillDesde,
+    drillHasta,
+    drillAgrupacion,
+    isDrilling,
+    breadcrumbs,
+    drillInto,
+    drillBack,
+    drillReset,
+    drillDepth,
+    drillStack,
+  } = useDrillDown(desde, hasta, agrupacion);
   const [anioInicio, setAnioInicio] = useState(String(new Date().getFullYear() - 1));
   const [anioFin, setAnioFin] = useState(String(new Date().getFullYear()));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [filtroPeriodo, setFiltroPeriodo] = useState('');
+  const generateRef = useReportGenerateScroll(tab);
+  const activeCard = AFLUENCIA_REPORT_CARDS.find((item) => item.id === tab);
+  const reportTitle = tab === 'detallado' ? 'Reporte de afluencia detallado' : 'Reporte de afluencia anual y resumen ejecutivo';
 
   useEffect(() => {
     setError('');
     setData(null);
     setFiltroPeriodo('');
+    drillReset();
   }, [tab]);
 
-  const generate = async () => {
+
+  /** Carga datos con parámetros explícitos (para drill) o usa los efectivos actuales */
+  const generateWith = async (pDesde, pHasta, pAgr, pTab = null) => {
+    const efectivoTab = pTab ?? tab;
     setError('');
     setData(null);
+    setFiltroPeriodo('');
     setLoading(true);
     try {
       const q = new URLSearchParams(
-        tab === 'detallado'
-          ? { desde, hasta, agrupacion }
+        efectivoTab === 'detallado'
+          ? { desde: pDesde ?? drillDesde, hasta: pHasta ?? drillHasta, agrupacion: pAgr ?? drillAgrupacion }
           : { anio_inicio: anioInicio, anio_fin: anioFin }
       );
-      const path = tab === 'detallado' ? '/reportes/afluencia/detallado' : '/reportes/afluencia/anual';
-      const res = await fetch(`${API_BASE}${path}?${q}`, { cache: 'no-store' });
+      const apiPath = efectivoTab === 'detallado' ? '/reportes/afluencia/detallado' : '/reportes/afluencia/anual';
+      const res = await fetch(`${API_BASE}${apiPath}?${q}`, { cache: 'no-store' });
       const json = await parseJsonSafe(res);
       if (!res.ok) throw new Error(json.error || json.message || res.statusText);
       setData(json);
@@ -82,14 +115,65 @@ export default function ReportesAfluenciaSection() {
     }
   };
 
+  /** Genera usando los valores actuales del drill (llamado desde el botón) */
+  const generate = () => generateWith();
+
   const exportPdf = () => {
     const q = new URLSearchParams(
       tab === 'detallado'
-        ? { desde, hasta, agrupacion }
+        ? { desde: drillDesde, hasta: drillHasta, agrupacion: drillAgrupacion }
         : { anio_inicio: anioInicio, anio_fin: anioFin }
     );
     const path = tab === 'detallado' ? '/reportes/afluencia/detallado/pdf' : '/reportes/afluencia/anual/pdf';
     window.open(`${API_BASE}${path}?${q}`, '_blank', 'noopener,noreferrer');
+  };
+
+  /**
+   * Maneja el drill-down al hacer clic en una barra de la gráfica.
+   * Solo aplica en el tab 'detallado' con agrupaciones que tienen sub-niveles.
+   */
+  /** Drill-down: baja un nivel y auto-genera el reporte con los nuevos params */
+  const handleBarDrill = async (periodoClave, periodoLabel) => {
+    const next = nextAgrupacion(drillAgrupacion);
+    if (!next) return;
+    const range = drillRange(periodoClave, drillAgrupacion);
+    if (!range) return;
+    drillInto(periodoLabel, range.desde, range.hasta, next);
+    // Auto-genera con los params calculados (no espera la actualización de estado del hook)
+    await generateWith(range.desde, range.hasta, next);
+  };
+
+  /** Sube un nivel y regenera con los params del nivel anterior */
+  const handleDrillBack = async () => {
+    const prevStack = drillStack.slice(0, -1);
+    const prev = prevStack[prevStack.length - 1];
+    const pDesde = prev?.desde ?? desde;
+    const pHasta = prev?.hasta ?? hasta;
+    const pAgr   = prev?.agrupacion ?? agrupacion;
+    drillBack();
+    await generateWith(pDesde, pHasta, pAgr);
+  };
+
+  /** Vuelve al nivel raíz y regenera con los params globales */
+  const handleDrillReset = async () => {
+    drillReset();
+    await generateWith(desde, hasta, agrupacion);
+  };
+
+  /** Drill-down desde el tab anual: click en año → abre detallado filtrado */
+  const handleAnnualBarDrill = async (year) => {
+    const pDesde = `${year}-01-01`;
+    const pHasta = `${year}-12-31`;
+    const pAgr   = 'mes';
+    // Cambiar tab primero (lo que triggerea drillReset via useEffect)
+    // Luego drillInto + generate con los nuevos params
+    setTab('detallado');
+    setAgrupacion(pAgr);
+    // Usamos timeout cero para que el useEffect([tab]) se ejecute antes
+    setTimeout(async () => {
+      drillInto(String(year), pDesde, pHasta, pAgr);
+      await generateWith(pDesde, pHasta, pAgr);
+    }, 0);
   };
 
   const chartRows = tab === 'detallado' ? (data?.detalle || []) : (data?.detalleAnual || []);
@@ -134,25 +218,27 @@ export default function ReportesAfluenciaSection() {
   };
 
   return (
-    <>
-      <div className="reporte-tabs" role="tablist" aria-label="Subreportes de afluencia">
-        <button type="button" role="tab" aria-selected={tab === 'detallado'} className={`reporte-tab-btn${tab === 'detallado' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('detallado')}>
-          Afluencia detallada
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'anual'} className={`reporte-tab-btn${tab === 'anual' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('anual')}>
-          Afluencia anual y resumen
-        </button>
-      </div>
+    <ReportWorkspace>
+      <ReportDetailNav
+        eyebrow="Reportes"
+        title="Afluencia"
+        backLabel="Volver a reportes"
+        onBack={onBackToReports}
+      />
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={data ? 4 : 3} />
+      <ReportSubreportTabs
+        ariaLabel="Subreportes de afluencia"
+        items={AFLUENCIA_REPORT_CARDS}
+        activeId={tab}
+        onSelect={setTab}
+      />
 
-      <section className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">{tab === 'detallado' ? 'Reporte de afluencia detallado' : 'Reporte de afluencia anual y resumen ejecutivo'}</h2>
+      <ReportGeneratePanel panelRef={generateRef} title={reportTitle} tone={activeCard?.tone}>
         <form className="reporte-inc-form" onSubmit={(e) => { e.preventDefault(); generate(); }}>
           {tab === 'detallado' ? (
             <>
-              <label className="reporte-inc-field"><span>Fecha inicio</span><input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required /></label>
-              <label className="reporte-inc-field"><span>Fecha fin</span><input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required /></label>
               <label className="reporte-inc-field"><span>Agrupacion</span>
-                <select value={agrupacion} onChange={(e) => setAgrupacion(e.target.value)}>
+                <select value={drillAgrupacion} onChange={(e) => { setAgrupacion(e.target.value); drillReset(); }} disabled={isDrilling} title={isDrilling ? "Salir del drill-down para cambiar la agrupación" : ""}>
                   <option value="hora">Por hora del dia</option>
                   <option value="dia_semana">Por dia de la semana</option>
                   <option value="semana">Por semana</option>
@@ -162,8 +248,8 @@ export default function ReportesAfluenciaSection() {
             </>
           ) : (
             <>
-              <label className="reporte-inc-field"><span>Anio inicio</span><input type="number" min="2000" max="2100" value={anioInicio} onChange={(e) => setAnioInicio(e.target.value)} required /></label>
-              <label className="reporte-inc-field"><span>Anio fin</span><input type="number" min="2000" max="2100" value={anioFin} onChange={(e) => setAnioFin(e.target.value)} required /></label>
+              <label className="reporte-inc-field"><span>Anio inicio</span><input type="number" min="2000" max={new Date().getFullYear()} value={anioInicio} onChange={(e) => setAnioInicio(String(Math.min(Number(e.target.value) || 2000, new Date().getFullYear())))} required /></label>
+              <label className="reporte-inc-field"><span>Anio fin</span><input type="number" min="2000" max={new Date().getFullYear()} value={anioFin} onChange={(e) => setAnioFin(String(Math.min(Number(e.target.value) || 2000, new Date().getFullYear())))} required /></label>
             </>
           )}
           <div className="reporte-inc-form__actions">
@@ -171,10 +257,10 @@ export default function ReportesAfluenciaSection() {
             <button type="button" className="admin-btn-ghost" onClick={exportPdf} disabled={loading}>Exportar PDF</button>
           </div>
         </form>
-      </section>
+      </ReportGeneratePanel>
 
       {error ? <div className="admin-banner admin-banner--error">{error}</div> : null}
-      {data == null ? null : (
+      <ReportResultsSection visible={data != null} render={() => (
         <>
           {!chartRows.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
           {chartRows.length ? (
@@ -184,16 +270,50 @@ export default function ReportesAfluenciaSection() {
                 <article className="admin-kpi admin-kpi--alerts"><div className="admin-kpi-label">Mayor afluencia</div><div className="admin-kpi-value" style={{ fontSize: '1rem' }}>{tab === 'detallado' ? (data.periodoMayorAfluencia?.periodo || '—') : (data.anioMayorAfluencia?.anio || '—')}</div></article>
               </div>
 
+              <DrillBreadcrumb
+                breadcrumbs={breadcrumbs}
+                onBack={handleDrillBack}
+                onReset={handleDrillReset}
+                isDrilling={isDrilling}
+              />
               <div className="reporte-chart-grid">
-                <ReportChartCard title="Afluencia por periodo" description="Haz clic en una barra para filtrar la tabla.">
+                <ReportChartCard title={
+                    tab === 'anual'
+                      ? 'Afluencia anual'
+                      : isDrilling
+                        ? ('Afluencia por periodo — ' + (breadcrumbs[breadcrumbs.length - 1]?.label ?? ''))
+                        : 'Afluencia por periodo'
+                  }
+                  description={
+                    tab === 'anual'
+                      ? 'Haz clic en un año para ver el detalle mensual.'
+                      : nextAgrupacion(drillAgrupacion)
+                        ? 'Haz clic en una barra para profundizar (drill-down).'
+                        : 'Haz clic en una barra para filtrar la tabla.'
+                  }>
                   <div className="reporte-chart-canvas reporte-chart-canvas--wide">
                     <Bar
                       data={chartData}
                       options={buildCartesianOptions({
                         onClick: (_, elements, chart) => {
-                          const label = clickedLabel(elements, chart);
-                          if (label) setFiltroPeriodo(label);
-                        },
+                          if (!elements?.length) return;
+                          const idx = elements[0].index;
+                          const row = chartRows[idx];
+                          if (!row) return;
+                          // Tab anual: drill hacia detallado por año
+                          if (tab === 'anual') {
+                            if (row.anio) handleAnnualBarDrill(row.anio);
+                            return;
+                          }
+                          // Tab detallado: drill jerárquico o filtro de tabla
+                          const next = nextAgrupacion(drillAgrupacion);
+                          if (next) {
+                            handleBarDrill(row.periodoClave ?? String(row.anio ?? ''), row.periodoLabel ?? String(row.anio ?? ''));
+                          } else {
+                            const label = clickedLabel(elements, chart);
+                            if (label) setFiltroPeriodo(label);
+                          }
+                        }
                       })}
                     />
                   </div>
@@ -292,7 +412,8 @@ export default function ReportesAfluenciaSection() {
             </>
           ) : null}
         </>
-      )}
-    </>
+      )} />
+    </ReportWorkspace>
   );
 }
+

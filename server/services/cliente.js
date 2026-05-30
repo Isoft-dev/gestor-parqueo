@@ -97,8 +97,10 @@ export async function hasActiveMemberships(clientId) {
      JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
      LEFT JOIN PAR_ESTADO_MEMBRESIA em ON em.EME_ID = m.EME_ID
      WHERE v.CLI_ID = :clientId
+       AND (m.MEM_FECHA_VENCIMIENTO IS NULL OR TRUNC(m.MEM_FECHA_VENCIMIENTO) >= TRUNC(SYSDATE))
        AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%suspend%'
-       AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%inactiv%'`,
+       AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%inactiv%'
+       AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%venc%'`,
     { clientId }
   );
   return Number(rows[0]?.TOTAL || 0) > 0;
@@ -256,7 +258,7 @@ function slugCorreoParte(texto) {
  * DPI sintético para factura con NIT: mismos dígitos del NIT + 2 dígitos departamento + 2 municipio (GT).
  * Si el NIT aporta muchos dígitos, se trunca la base para caber en CLI_DPI y conservar siempre los 4 finales.
  */
-function buildDpiDesdeNit(nitRegistro, dpiMaxLen = 20) {
+function buildDpiDesdeNit(nitRegistro, dpiMaxLen = 13) {
   const soloDigitos = String(nitRegistro || '').replace(/\D/g, '');
   const sufijoLen = 4;
   const maxBase = Math.max(1, dpiMaxLen - sufijoLen);

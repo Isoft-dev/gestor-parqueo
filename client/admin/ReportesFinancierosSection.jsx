@@ -12,6 +12,25 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
+import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
+import { clampMonthYm, currentMonthYm } from '../utils/dateLimits.js';
+
+import { useReportFilter } from './ReportFilterContext.jsx';
+const FINANCIAL_REPORT_CARDS = [
+  { id: 'cobros_maquina', badge: 'COB', eyebrow: 'Maquinas', label: 'Cobros por maquina', summary: 'Monto cobrado, vuelto y transacciones procesadas por cada maquina de cobro.', traits: ['Maquina', 'Monto', 'Metodo'], icon: 'machine', tone: 'mint' },
+  { id: 'pagos_membresia', badge: 'MEM', eyebrow: 'Mensualidades', label: 'Pagos membresias', summary: 'Pagos de membresia agrupados por mes, metodo y tipo de vehiculo.', traits: ['Mes', 'Metodo', 'Placa'], icon: 'money', tone: 'sunset' },
+  { id: 'ingresos_tipo', badge: 'TIP', eyebrow: 'Cliente', label: 'Ingresos por tipo', summary: 'Comparativo de ingresos entre clientes esporadicos y membresias.', traits: ['Tipo', 'Ingreso', 'Mix'], icon: 'users', tone: 'ocean' },
+  { id: 'ingresos_totales', badge: 'TOT', eyebrow: 'Resumen', label: 'Ingresos totales', summary: 'Vista consolidada de ingresos por rango de fechas y referencia.', traits: ['Rango', 'Referencia', 'PDF'], icon: 'chart', tone: 'steel' },
+];
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -20,12 +39,6 @@ function ymd(d) {
   return `${y}-${m}-${day}`;
 }
 
-function defaultRange() {
-  const hasta = new Date();
-  const desde = new Date(hasta);
-  desde.setDate(desde.getDate() - 29);
-  return { desde: ymd(desde), hasta: ymd(hasta) };
-}
 
 async function parseJsonSafe(res) {
   const text = await res.text();
@@ -42,23 +55,35 @@ function clickedLabel(elements, chart) {
   return String(chart.data.labels[elements[0].index] || '');
 }
 
-export default function ReportesFinancierosSection() {
-  const initial = useMemo(() => defaultRange(), []);
+export default function ReportesFinancierosSection({ onBackToReports = null }) {
+  const { filtros, setFiltro } = useReportFilter();
+  const desde = filtros.desde;
+  const hasta = filtros.hasta;
   const [tab, setTab] = useState('cobros_maquina');
-  const [desde, setDesde] = useState(initial.desde);
-  const [hasta, setHasta] = useState(initial.hasta);
-  const [mesInicio, setMesInicio] = useState(initial.desde.slice(0, 7));
-  const [mesFin, setMesFin] = useState(initial.hasta.slice(0, 7));
+  const [mesInicio, setMesInicio] = useState(filtros.desde.slice(0, 7));
+  const [mesFin, setMesFin] = useState(filtros.hasta.slice(0, 7));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const maxMonth = currentMonthYm();
 
   const [filtroFecha, setFiltroFecha] = useState('');
   const [filtroReferencia, setFiltroReferencia] = useState('');
   const [filtroMes, setFiltroMes] = useState('');
+  const [filtroTipoVehiculoPagos, setFiltroTipoVehiculoPagos] = useState('Todos');
   const [filtroPlaca, setFiltroPlaca] = useState('');
   const [filtroMaquina, setFiltroMaquina] = useState('');
   const [filtroMetodoPago, setFiltroMetodoPago] = useState('');
+  const generateRef = useReportGenerateScroll(tab);
+  const activeCard = FINANCIAL_REPORT_CARDS.find((item) => item.id === tab);
+  const reportTitle =
+    tab === 'cobros_maquina'
+      ? 'Reporte de cobros procesados por maquina'
+      : tab === 'pagos_membresia'
+        ? 'Reporte de pagos de membresias por mes'
+        : tab === 'ingresos_tipo'
+          ? 'Reporte de ingresos por tipo de cliente'
+          : 'Reporte de ingresos totales por rango de fechas';
 
   useEffect(() => {
     setError('');
@@ -241,11 +266,16 @@ export default function ReportesFinancierosSection() {
     ],
   };
 
+  const tiposVehiculoPagos = useMemo(() => {
+    const s = new Set(pagosDetalle.map((r) => r.tipoVehiculo).filter((t) => t && t !== '—'));
+    return [...s].sort();
+  }, [pagosDetalle]);
   const pagosDetalleFiltrado = pagosDetalle.filter((row) => {
     const matchPlaca = row.placa?.toLowerCase().includes(filtroPlaca.toLowerCase());
     const matchMes = filtroMes ? String(row.fechaPago || '').startsWith(filtroMes) : true;
     const matchMetodo = filtroMetodoPago ? row.metodoPago === filtroMetodoPago : true;
-    return matchPlaca && matchMes && matchMetodo;
+    const matchTipoV = filtroTipoVehiculoPagos === 'Todos' || row.tipoVehiculo === filtroTipoVehiculoPagos;
+    return matchPlaca && matchMes && matchMetodo && matchTipoV;
   });
 
   const cobrosDetalleFiltrado = cobrosDetalle.filter((row) =>
@@ -259,32 +289,22 @@ export default function ReportesFinancierosSection() {
   });
 
   return (
-    <>
-      <div className="reporte-tabs" role="tablist" aria-label="Subreportes financieros">
-        <button type="button" role="tab" aria-selected={tab === 'cobros_maquina'} className={`reporte-tab-btn${tab === 'cobros_maquina' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('cobros_maquina')}>
-          Cobros por maquina
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'pagos_membresia'} className={`reporte-tab-btn${tab === 'pagos_membresia' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('pagos_membresia')}>
-          Pagos membresias por mes
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'ingresos_tipo'} className={`reporte-tab-btn${tab === 'ingresos_tipo' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('ingresos_tipo')}>
-          Ingresos por tipo cliente
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'ingresos_totales'} className={`reporte-tab-btn${tab === 'ingresos_totales' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('ingresos_totales')}>
-          Ingresos totales
-        </button>
-      </div>
+    <ReportWorkspace>
+      <ReportDetailNav
+        eyebrow="Reportes"
+        title="Reportes financieros"
+        backLabel="Volver a reportes"
+        onBack={onBackToReports}
+      />
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={data ? 4 : 3} />
+      <ReportSubreportTabs
+        ariaLabel="Subreportes financieros"
+        items={FINANCIAL_REPORT_CARDS}
+        activeId={tab}
+        onSelect={setTab}
+      />
 
-      <section className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">
-          {tab === 'cobros_maquina'
-            ? 'Reporte de cobros procesados por maquina'
-            : tab === 'pagos_membresia'
-              ? 'Reporte de pagos de membresias por mes'
-              : tab === 'ingresos_tipo'
-                ? 'Reporte de ingresos por tipo de cliente'
-                : 'Reporte de ingresos totales por rango de fechas'}
-        </h2>
+      <ReportGeneratePanel panelRef={generateRef} title={reportTitle} tone={activeCard?.tone}>
         <form
           className="reporte-inc-form"
           onSubmit={(e) => {
@@ -296,25 +316,14 @@ export default function ReportesFinancierosSection() {
             <>
               <label className="reporte-inc-field">
                 <span>Mes inicio</span>
-                <input type="month" value={mesInicio} onChange={(e) => setMesInicio(e.target.value)} required />
+                <input type="month" value={mesInicio} max={maxMonth} onChange={(e) => setMesInicio(clampMonthYm(e.target.value))} required />
               </label>
               <label className="reporte-inc-field">
                 <span>Mes fin</span>
-                <input type="month" value={mesFin} onChange={(e) => setMesFin(e.target.value)} required />
+                <input type="month" value={mesFin} max={maxMonth} onChange={(e) => setMesFin(clampMonthYm(e.target.value))} required />
               </label>
             </>
-          ) : (
-            <>
-              <label className="reporte-inc-field">
-                <span>Fecha inicio</span>
-                <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
-              </label>
-              <label className="reporte-inc-field">
-                <span>Fecha fin</span>
-                <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required />
-              </label>
-            </>
-          )}
+          ) : null}
           <div className="reporte-inc-form__actions">
             <button type="submit" className="admin-btn-primary" disabled={loading}>
               {loading ? 'Generando...' : 'Generar reporte'}
@@ -324,10 +333,10 @@ export default function ReportesFinancierosSection() {
             </button>
           </div>
         </form>
-      </section>
+      </ReportGeneratePanel>
 
       {error ? <div className="admin-banner admin-banner--error">{error}</div> : null}
-      {data == null ? null : (
+      <ReportResultsSection visible={data != null} render={() => (
         <>
           {tab === 'cobros_maquina' ? (
             <>
@@ -523,16 +532,21 @@ export default function ReportesFinancierosSection() {
                           onChange={(e) => setFiltroPlaca(e.target.value)}
                           className="admin-input reporte-table-input"
                         />
+                        <select value={filtroTipoVehiculoPagos} onChange={(e) => setFiltroTipoVehiculoPagos(e.target.value)} className="reporte-table-input">
+                          <option value="Todos">Todos los tipos</option>
+                          {tiposVehiculoPagos.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
                       </div>
                     </div>
                     <div className="crudx-table-scroll">
                       <table className="crudx-table reporte-inc-table">
-                        <thead><tr><th>Cliente</th><th>Placa</th><th>Fecha pago</th><th>Monto</th><th>Metodo pago</th></tr></thead>
+                        <thead><tr><th>Cliente</th><th>Placa</th><th>Tipo vehículo</th><th>Fecha pago</th><th>Monto</th><th>Metodo pago</th></tr></thead>
                         <tbody>
                           {pagosDetalleFiltrado.map((row) => (
                             <tr key={String(row.id)}>
                               <td>{row.cliente}</td>
                               <td>{row.placa}</td>
+                              <td>{row.tipoVehiculo ?? '—'}</td>
                               <td>{row.fechaPago ? new Date(row.fechaPago).toLocaleString('es-GT') : '—'}</td>
                               <td>{formatCurrency(row.monto)}</td>
                               <td>{row.metodoPago}</td>
@@ -663,7 +677,8 @@ export default function ReportesFinancierosSection() {
             </>
           ) : null}
         </>
-      )}
-    </>
+      )} />
+    </ReportWorkspace>
   );
 }
+

@@ -440,6 +440,7 @@ export default function ReportesIncidentesPage() {
   const [tab, setTab] = useState('fechas');
   const [desde, setDesde] = useState(initial.desde);
   const [hasta, setHasta] = useState(initial.hasta);
+  const TODAY = new Date().toISOString().slice(0, 10);
   const [filtroTipoId, setFiltroTipoId] = useState('');
   const [tiposIncidente, setTiposIncidente] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -707,11 +708,11 @@ export default function ReportesIncidentesPage() {
             >
               <label className="reporte-inc-field">
                 <span>Fecha inicio</span>
-                <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
+                <input type="date" value={desde} max={TODAY} onChange={(e) => setDesde(e.target.value)} required />
               </label>
               <label className="reporte-inc-field">
                 <span>Fecha fin</span>
-                <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required />
+                <input type="date" value={hasta} max={TODAY} onChange={(e) => setHasta(e.target.value)} required />
               </label>
               <label className="reporte-inc-field reporte-inc-field--grow">
                 <span>Tipo de incidente (tabla)</span>
@@ -758,11 +759,11 @@ export default function ReportesIncidentesPage() {
           >
             <label className="reporte-inc-field">
               <span>Fecha inicio</span>
-              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
+              <input type="date" value={desde} max={TODAY} onChange={(e) => setDesde(e.target.value)} required />
             </label>
             <label className="reporte-inc-field">
               <span>Fecha fin</span>
-              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required />
+              <input type="date" value={hasta} max={TODAY} onChange={(e) => setHasta(e.target.value)} required />
             </label>
             <div className="reporte-inc-form__actions">
               <button type="submit" className="admin-btn-primary" disabled={loadingTipo}>
@@ -793,11 +794,11 @@ export default function ReportesIncidentesPage() {
           >
             <label className="reporte-inc-field">
               <span>Fecha inicio</span>
-              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
+              <input type="date" value={desde} max={TODAY} onChange={(e) => setDesde(e.target.value)} required />
             </label>
             <label className="reporte-inc-field">
               <span>Fecha fin</span>
-              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required />
+              <input type="date" value={hasta} max={TODAY} onChange={(e) => setHasta(e.target.value)} required />
             </label>
             <div className="reporte-inc-form__actions">
               <button type="submit" className="admin-btn-primary" disabled={loadingResolucion}>
@@ -828,11 +829,11 @@ export default function ReportesIncidentesPage() {
           >
             <label className="reporte-inc-field">
               <span>Fecha inicio</span>
-              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
+              <input type="date" value={desde} max={TODAY} onChange={(e) => setDesde(e.target.value)} required />
             </label>
             <label className="reporte-inc-field">
               <span>Fecha fin</span>
-              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required />
+              <input type="date" value={hasta} max={TODAY} onChange={(e) => setHasta(e.target.value)} required />
             </label>
             <div className="reporte-inc-form__actions">
               <button type="submit" className="admin-btn-primary" disabled={loadingMembresias}>

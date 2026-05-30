@@ -99,6 +99,18 @@ export async function searchPaymentCandidates(req, res) {
   }
 }
 
+export async function getPaymentCandidateByTag(req, res) {
+  try {
+    const memCodigo = req.params.memCodigo || req.query.MEM_CODIGO || '';
+    if (!String(memCodigo || '').trim()) {
+      return res.status(400).json({ error: 'MEM_CODIGO es requerido' });
+    }
+    res.json(await service.getPaymentCandidateByMemCodigo(memCodigo));
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
 export async function registerPayment(req, res) {
   try {
     const payload = req.body || {};

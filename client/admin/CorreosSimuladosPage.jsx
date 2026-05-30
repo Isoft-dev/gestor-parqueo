@@ -17,6 +17,7 @@ const ETAPA_TONO = {
   '1 día antes': { bg: '#fefce8', border: '#fde68a', text: '#92400e' },
   'día del vencimiento': { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c' },
   'día siguiente al vencimiento': { bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' },
+  'aviso de vencimiento': { bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' },
   'aviso de suspensión': { bg: '#f5f3ff', border: '#ddd6fe', text: '#6d28d9' },
 };
 
@@ -45,9 +46,10 @@ function fmtDate(value) {
 
 export default function CorreosSimuladosPage() {
   const [items, setItems] = useState([]);
+  const [preview, setPreview] = useState(null);
   const [mailMode, setMailMode] = useState('simulate');
   const [loading, setLoading] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [filtroEtapa, setFiltroEtapa] = useState('Todas');
@@ -59,11 +61,17 @@ export default function CorreosSimuladosPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/notificacion/inbox`, { cache: 'no-store' });
-      const json = await parseJsonSafe(res);
-      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
-      setItems(Array.isArray(json?.items) ? json.items : []);
-      setMailMode(json?.mailMode || 'simulate');
+      const [inboxRes, previewRes] = await Promise.all([
+        fetch(`${API_BASE}/notificacion/inbox`, { cache: 'no-store' }),
+        fetch(`${API_BASE}/notificacion/jobs/preview`, { cache: 'no-store' }),
+      ]);
+      const inboxJson = await parseJsonSafe(inboxRes);
+      const previewJson = await parseJsonSafe(previewRes);
+      if (!inboxRes.ok) throw new Error(inboxJson.error || inboxJson.message || inboxRes.statusText);
+      if (!previewRes.ok) throw new Error(previewJson.error || previewJson.message || previewRes.statusText);
+      setItems(Array.isArray(inboxJson?.items) ? inboxJson.items : []);
+      setMailMode(inboxJson?.mailMode || 'simulate');
+      setPreview(previewJson);
     } catch (e) {
       setError(e.message || 'No se pudo cargar la bandeja');
     } finally {
@@ -75,27 +83,46 @@ export default function CorreosSimuladosPage() {
     cargar();
   }, [cargar]);
 
-  const ejecutarAhora = async () => {
+  const ejecutarJob = async ({ force = false, demoOnly = false } = {}) => {
     setError('');
     setInfo('');
-    setRunning(true);
+    setRunning(demoOnly ? 'demo' : force ? 'force' : 'daily');
     try {
       const res = await fetch(`${API_BASE}/notificacion/jobs/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force, demoOnly }),
       });
       const json = await parseJsonSafe(res);
-      if (!res.ok) throw new Error(json.error || json.message || res.statusText);
+      if (!res.ok) {
+        throw new Error(json.error || json.message || 'El servidor no pudo completar el proceso');
+      }
       const recordatorios = json?.result?.reminders?.sent ?? 0;
-      const suspendidas = json?.result?.suspension?.suspendidas ?? 0;
-      setInfo(
-        `Proceso ejecutado. Recordatorios procesados: ${recordatorios}. Membresías suspendidas: ${suspendidas}.`,
-      );
+      const omitidos = json?.result?.reminders?.skipped ?? 0;
+      const vencidas = json?.result?.suspension?.vencidas ?? 0;
+      if (recordatorios === 0 && !demoOnly) {
+        setInfo(
+          omitidos > 0
+            ? `No se generaron correos nuevos: ${omitidos} membresía(s) ya tenían aviso de hoy o no aplicaban. Usa «Generar demo» o «Forzar reenvío».`
+            : 'No hay membresías activas en ventana de recordatorio (3, 2, 1, 0 o −1 día). Prueba «Generar demo de clientes seed».',
+        );
+      } else {
+        setInfo(
+          demoOnly
+            ? `Demo generado: ${recordatorios} correo(s) simulado(s) para clientes demo.vencer*.`
+            : `Job completado: ${recordatorios} recordatorio(s) nuevo(s), ${vencidas} membresía(s) marcada(s) vencida(s).`,
+        );
+      }
       await cargar();
     } catch (e) {
-      setError(e.message || 'No se pudo ejecutar el job');
+      const msg = e.message || 'No se pudo ejecutar el job';
+      setError(
+        /fetch|network|ECONNRESET|Failed to fetch/i.test(msg)
+          ? 'No se pudo contactar al servidor. Verifica que el backend (pnpm dev en server/) esté en ejecución.'
+          : msg,
+      );
     } finally {
-      setRunning(false);
+      setRunning('');
     }
   };
 
@@ -132,57 +159,127 @@ export default function CorreosSimuladosPage() {
     return { total, enviados, fallidos };
   }, [items]);
 
+  const elegiblesHoy = preview?.elegiblesHoy ?? 0;
+  const enviadosHoy = preview?.enviadosHoy ?? 0;
+
   return (
     <div className="admin-page">
       <header className="admin-page-header">
         <h1 className="admin-page-title">Correos simulados</h1>
         <p className="admin-page-desc">
-          Bandeja de los recordatorios de vencimiento de membresía que el sistema envía
-          a los clientes. Aquí puedes ver el correo que recibió cada cliente, en qué etapa
-          (3 días, 2 días, 1 día antes, día del vencimiento o día siguiente) y si el envío
-          fue exitoso.
+          Aquí ves los avisos de vencimiento de membresía que el sistema enviaría a los clientes.
+          En modo simulado no sale correo real: se guarda en la bandeja de abajo.
         </p>
       </header>
 
-      <section className="reporte-inc-card">
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 12,
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontWeight: 600 }}>
-              Modo de envío actual:{' '}
-              <span
-                style={badgeStyle(
-                  mailMode === 'simulate'
-                    ? { bg: '#ecfeff', border: '#a5f3fc', text: '#0e7490' }
-                    : { bg: '#ecfdf5', border: '#a7f3d0', text: '#047857' },
-                )}
-              >
-                {mailMode === 'simulate' ? 'Simulado' : 'Envío real'}
-              </span>
+      <nav className="correo-flow-bar" aria-label="Pasos del flujo de correos">
+        <div className="correo-flow-bar__item correo-flow-bar__item--done">
+          <span className="correo-flow-bar__dot">1</span>
+          <span>Revisar quién recibiría aviso hoy</span>
+        </div>
+        <div className="correo-flow-bar__item correo-flow-bar__item--current">
+          <span className="correo-flow-bar__dot">2</span>
+          <span>Ejecutar el job (simulado)</span>
+        </div>
+        <div className="correo-flow-bar__item">
+          <span className="correo-flow-bar__dot">3</span>
+          <span>Leer la bandeja y abrir cada correo</span>
+        </div>
+      </nav>
+
+      <div className="correo-workspace">
+        <section className="correo-panel correo-panel--info">
+          <div className="correo-panel__head">
+            <span className="correo-panel__step">Paso 1 · Vista previa</span>
+            <span
+              style={badgeStyle(
+                mailMode === 'simulate'
+                  ? { bg: '#ecfeff', border: '#a5f3fc', text: '#0e7490' }
+                  : { bg: '#ecfdf5', border: '#a7f3d0', text: '#047857' },
+              )}
+            >
+              Modo {mailMode === 'simulate' ? 'simulado' : 'SMTP real'}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" className="admin-btn-ghost" onClick={cargar} disabled={loading}>
-              {loading ? 'Recargando…' : 'Recargar'}
-            </button>
+          <p className="correo-panel__hint">
+            El job diario solo procesa membresías <strong>activas</strong> cuyo vencimiento cae
+            exactamente en 3, 2, 1, 0 o −1 día(s) respecto a hoy. Si ya se envió el mismo aviso
+            hoy, no se repite.
+          </p>
+          <div className="correo-preview-stats">
+            <div className="correo-preview-stat">
+              <span className="correo-preview-stat__value">{elegiblesHoy}</span>
+              <span className="correo-preview-stat__label">Elegibles hoy</span>
+            </div>
+            <div className="correo-preview-stat">
+              <span className="correo-preview-stat__value">{enviadosHoy}</span>
+              <span className="correo-preview-stat__label">Ya enviados hoy</span>
+            </div>
+            <div className="correo-preview-stat">
+              <span className="correo-preview-stat__value">{totales.total}</span>
+              <span className="correo-preview-stat__label">En bandeja</span>
+            </div>
+          </div>
+          {(preview?.items?.length > 0) ? (
+            <ul className="correo-preview-list">
+              {preview.items.slice(0, 6).map((row) => (
+                <li key={row.memId}>
+                  <span style={badgeStyle(ETAPA_TONO[row.etapa] || ETAPA_TONO['3 días antes'])}>
+                    {row.etapa}
+                  </span>
+                  {' '}
+                  {row.nombre || row.correo} · {row.placa} · MEM {row.memId}
+                </li>
+              ))}
+              {preview.items.length > 6 ? (
+                <li className="correo-preview-list__more">+ {preview.items.length - 6} más…</li>
+              ) : null}
+            </ul>
+          ) : (
+            <p className="correo-panel__empty">
+              Hoy no hay membresías en la ventana automática. Usa el botón demo para poblar la bandeja con clientes seed.
+            </p>
+          )}
+        </section>
+
+        <section className="correo-panel correo-panel--action">
+          <div className="correo-panel__head">
+            <span className="correo-panel__step">Paso 2 · Ejecutar</span>
+          </div>
+          <p className="correo-panel__hint">
+            Elige cómo disparar el proceso. En demo solo se usan clientes <code>demo.vencer*</code> del seed de membresías.
+          </p>
+          <div className="correo-action-grid">
             <button
               type="button"
               className="admin-btn-primary"
-              onClick={ejecutarAhora}
-              disabled={running}
+              onClick={() => ejecutarJob({ demoOnly: true, force: true })}
+              disabled={!!running}
             >
-              {running ? 'Ejecutando…' : 'Ejecutar ahora'}
+              {running === 'demo' ? 'Generando…' : 'Generar demo (clientes seed)'}
+            </button>
+            <button
+              type="button"
+              className="admin-btn-ghost"
+              onClick={() => ejecutarJob({ force: false })}
+              disabled={!!running}
+            >
+              {running === 'daily' ? 'Ejecutando…' : 'Job del día (como cron)'}
+            </button>
+            <button
+              type="button"
+              className="admin-btn-ghost"
+              onClick={() => ejecutarJob({ force: true })}
+              disabled={!!running}
+            >
+              {running === 'force' ? 'Reenviando…' : 'Forzar reenvío hoy'}
+            </button>
+            <button type="button" className="admin-btn-ghost" onClick={cargar} disabled={loading}>
+              {loading ? 'Recargando…' : 'Actualizar vista'}
             </button>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       {error ? (
         <div className="admin-banner admin-banner--error" role="alert" style={{ marginTop: 8 }}>
@@ -210,7 +307,10 @@ export default function CorreosSimuladosPage() {
         </article>
       </div>
 
-      <section className="reporte-inc-card" style={{ marginTop: '0.75rem' }}>
+      <section className="correo-panel correo-panel--inbox" style={{ marginTop: '0.85rem' }}>
+        <div className="correo-panel__head">
+          <span className="correo-panel__step">Paso 3 · Bandeja</span>
+        </div>
         <form className="reporte-inc-form" onSubmit={(e) => e.preventDefault()}>
           <label className="reporte-inc-field" style={{ minWidth: 220 }}>
             <span>Buscar</span>
@@ -261,8 +361,10 @@ export default function CorreosSimuladosPage() {
             <tbody>
               {!filtrados.length ? (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', color: '#64748b', padding: '1.25rem' }}>
-                    {loading ? 'Cargando…' : 'Sin notificaciones para los filtros actuales.'}
+                  <td colSpan={9} className="correo-inbox-empty">
+                    {loading
+                      ? 'Cargando…'
+                      : 'Sin correos en la bandeja. Pulsa «Generar demo (clientes seed)» para ver ejemplos.'}
                   </td>
                 </tr>
               ) : null}
@@ -320,47 +422,16 @@ export default function CorreosSimuladosPage() {
         <div
           role="dialog"
           aria-modal="true"
+          className="correo-modal-backdrop"
           onClick={() => setSeleccion(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.55)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 999,
-            padding: '1rem',
-          }}
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              backgroundColor: '#fff',
-              maxWidth: 720,
-              width: '100%',
-              maxHeight: '90vh',
-              overflow: 'auto',
-              borderRadius: 12,
-              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-            }}
-          >
-            <header
-              style={{
-                padding: '1rem 1.25rem',
-                borderBottom: '1px solid #e2e8f0',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: 12,
-              }}
-            >
+          <div className="correo-modal" onClick={(e) => e.stopPropagation()}>
+            <header className="correo-modal__header">
               <div>
-                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                <div className="correo-modal__eyebrow">
                   Notificación #{seleccion.notId} · {seleccion.etapa}
                 </div>
-                <h2 style={{ margin: '4px 0 0', fontSize: '1.1rem' }}>
-                  {seleccion.asunto || '(sin asunto)'}
-                </h2>
+                <h2 className="correo-modal__title">{seleccion.asunto || '(sin asunto)'}</h2>
               </div>
               <button
                 type="button"
@@ -371,7 +442,7 @@ export default function CorreosSimuladosPage() {
                 ×
               </button>
             </header>
-            <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: 8, fontSize: '0.9rem' }}>
+            <div className="correo-modal__meta">
               <div>
                 <strong>Para:</strong> {seleccion.destinatarioNombre || '—'}{' '}
                 {seleccion.destinatarioCorreo ? `<${seleccion.destinatarioCorreo}>` : ''}
@@ -382,34 +453,12 @@ export default function CorreosSimuladosPage() {
               </div>
               <div>
                 <strong>Enviado:</strong> {fmtDate(seleccion.ultimaFechaEnvio)} ·{' '}
-                <strong>Próximo programado:</strong> {fmtDate(seleccion.proximaFechaEnvio)}
-              </div>
-              <div>
-                <strong>Estado:</strong>{' '}
-                {seleccion.exito ? 'Enviado correctamente' : 'El envío no se concretó'}
+                <strong>Próximo:</strong> {fmtDate(seleccion.proximaFechaEnvio)}
               </div>
             </div>
-            <div
-              style={{
-                padding: '0 1.25rem 1.25rem',
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Cuerpo del correo</div>
-              <pre
-                style={{
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  backgroundColor: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 8,
-                  padding: '0.75rem 1rem',
-                  fontFamily: 'inherit',
-                  fontSize: '0.92rem',
-                  margin: 0,
-                }}
-              >
-                {seleccion.cuerpo || '(sin cuerpo registrado)'}
-              </pre>
+            <div className="correo-modal__body">
+              <div className="correo-modal__body-label">Cuerpo del correo</div>
+              <pre className="correo-modal__pre">{seleccion.cuerpo || '(sin cuerpo registrado)'}</pre>
             </div>
           </div>
         </div>

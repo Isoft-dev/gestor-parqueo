@@ -1,4 +1,6 @@
 import { useAdminAppearance } from '../context/AdminAppearanceContext.jsx';
+import { ADMIN_NAV_ROUTES } from './adminNavConfig.js';
+import { getModuleAccentStyle } from '../utils/adminAppearance.js';
 
 const PRESETS = [
   {
@@ -20,6 +22,13 @@ const PRESETS = [
       kpiReservedEnd: '#2563EB',
       kpiMembersStart: '#10B981',
       kpiMembersEnd: '#047857',
+      machineStatusSuccess: '#22C55E',
+      machineStatusCaution: '#F97316',
+      machineStatusDanger: '#EF4444',
+      machineStatusNeutral: '#94A3B8',
+      machineEntryAccent: '#2563EB',
+      machineCashAccent: '#059669',
+      machineExitAccent: '#DC2626',
     },
   },
   {
@@ -41,6 +50,13 @@ const PRESETS = [
       kpiReservedEnd: '#0F766E',
       kpiMembersStart: '#16A34A',
       kpiMembersEnd: '#166534',
+      machineStatusSuccess: '#16A34A',
+      machineStatusCaution: '#D97706',
+      machineStatusDanger: '#DC2626',
+      machineStatusNeutral: '#64748B',
+      machineEntryAccent: '#0F766E',
+      machineCashAccent: '#059669',
+      machineExitAccent: '#B45309',
     },
   },
   {
@@ -62,6 +78,13 @@ const PRESETS = [
       kpiReservedEnd: '#4338CA',
       kpiMembersStart: '#14B8A6',
       kpiMembersEnd: '#0F766E',
+      machineStatusSuccess: '#14B8A6',
+      machineStatusCaution: '#F97316',
+      machineStatusDanger: '#E11D48',
+      machineStatusNeutral: '#A78BFA',
+      machineEntryAccent: '#4338CA',
+      machineCashAccent: '#14B8A6',
+      machineExitAccent: '#BE123C',
     },
   },
 ];
@@ -92,7 +115,28 @@ const COLOR_SECTIONS = [
       { key: 'kpiMembersEnd', label: 'Membresías - fin' },
     ],
   },
+  {
+    title: 'Estados de máquina',
+    description: 'Colores del indicador de estado (operativa, mantenimiento, fuera de servicio, etc.).',
+    fields: [
+      { key: 'machineStatusSuccess', label: 'Operativa / éxito' },
+      { key: 'machineStatusCaution', label: 'Advertencia / mantenimiento' },
+      { key: 'machineStatusDanger', label: 'Fuera de servicio / error' },
+      { key: 'machineStatusNeutral', label: 'Neutro / sin estado' },
+    ],
+  },
+  {
+    title: 'Filas de máquinas',
+    description: 'Acento por tipo de fila en la vista de gestión de máquinas.',
+    fields: [
+      { key: 'machineEntryAccent', label: 'Entrada' },
+      { key: 'machineCashAccent', label: 'Cobro' },
+      { key: 'machineExitAccent', label: 'Salida' },
+    ],
+  },
 ];
+
+const MODULE_ROUTES = ADMIN_NAV_ROUTES.filter((route) => !route.isDashboard && route.path !== 'personalizacion');
 
 function ColorField({ id, label, value, onChange }) {
   return (
@@ -194,6 +238,28 @@ export default function PersonalizacionPage() {
               </div>
             </div>
           ))}
+
+          <div className="admin-theme-section">
+            <div className="admin-panel-head">
+              <h2>Módulos del dashboard</h2>
+              <p className="admin-panel-sub">
+                Color de acento de cada tarjeta de acceso rápido en el panel principal.
+              </p>
+            </div>
+            <div className="admin-color-grid">
+              {MODULE_ROUTES.map((route) => (
+                <ColorField
+                  key={route.path}
+                  id={`module-${route.path}`}
+                  label={`${route.icon} ${route.shortLabel || route.label}`}
+                  value={appearance.moduleColors?.[route.path] || route.accentColor}
+                  onChange={(value) =>
+                    updateAppearance({ moduleColors: { [route.path]: value } })
+                  }
+                />
+              ))}
+            </div>
+          </div>
         </section>
 
         <aside className="admin-panel-block admin-theme-preview-panel">
@@ -266,8 +332,39 @@ export default function PersonalizacionPage() {
               </div>
 
               <div className="admin-theme-preview-note">
-                Los cambios se aplican al menú lateral, botones principales/secundarios y tarjetas
-                del dashboard.
+                Los cambios se aplican al menú lateral, botones (hover con cambio de color), tarjetas del dashboard, gestión de cobro, kioscos de máquina y accesos rápidos.
+              </div>
+
+              <div className="admin-theme-preview-extras">
+                <div className="admin-theme-preview-extras__title">Estados de máquina</div>
+                <div className="admin-theme-preview-statuses">
+                  <span className="crudx-machine-status-trigger crudx-machine-status-trigger--success">
+                    Operativa
+                  </span>
+                  <span className="crudx-machine-status-trigger crudx-machine-status-trigger--caution">
+                    Mantenimiento
+                  </span>
+                  <span className="crudx-machine-status-trigger crudx-machine-status-trigger--danger">
+                    Fuera de servicio
+                  </span>
+                  <span className="crudx-machine-status-trigger crudx-machine-status-trigger--neutral">
+                    Neutro
+                  </span>
+                </div>
+              </div>
+
+              <div className="admin-theme-preview-extras">
+                <div className="admin-theme-preview-extras__title">Acceso rápido de módulo</div>
+                <div
+                  className="admin-quick-card admin-theme-preview-quick-card"
+                  style={getModuleAccentStyle(appearance, 'maquinas', '#0D9488')}
+                >
+                  <span className="admin-quick-icon" aria-hidden="true">
+                    🚧
+                  </span>
+                  <span className="admin-quick-title">Gestión de máquinas</span>
+                  <span className="admin-quick-desc">Vista previa del color del módulo.</span>
+                </div>
               </div>
             </div>
           </div>

@@ -239,6 +239,8 @@ export async function getPagosMembresiasPorMes({ anioInicio, anioFin }) {
       id: r.DPM_ID ?? r.dpm_id,
       cliente: nombreCliente(r),
       placa: r.VEH_PLACA ?? r.veh_placa ?? '—',
+      modelo: r.VEH_MODELO ?? r.veh_modelo ?? '—',
+      tipoVehiculo: r.TVE_TIPO ?? r.tve_tipo ?? '—',
       fechaPago: r.PAG_FECHA_HORA ?? r.pag_fecha_hora,
       monto: num(r.PAG_MONTO_TOTAL ?? r.pag_monto_total),
       metodoPago: r.TPA_TIPO ?? r.tpa_tipo ?? '—',
