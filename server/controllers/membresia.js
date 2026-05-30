@@ -10,6 +10,7 @@ function businessStatus(err) {
     )
   )
     return 400;
+  if (/capacidad de membres|conservar al menos .* espor[aá]dicos|no hay espacios disponibles para asignar/i.test(msg)) return 409;
   if (/no se encontro un ingreso activo asociado/i.test(msg)) return 409;
   if (/acceso denegado|suspendida|vencida|no activa/i.test(msg)) return 403;
   if (/duplicad|ya existe|conflict|placa|dpi/i.test(msg)) return 409;
@@ -34,9 +35,9 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
   try {
-    const { TME_ID, MEM_FECHA_INICIO, VEH_ID, ESP_ID } = req.body;
-    if (!TME_ID || !MEM_FECHA_INICIO || !VEH_ID || !ESP_ID) {
-      return res.status(400).json({ error: 'TME_ID, MEM_FECHA_INICIO, VEH_ID y ESP_ID son requeridos' });
+    const { TME_ID, MEM_FECHA_INICIO, VEH_ID } = req.body;
+    if (!TME_ID || !MEM_FECHA_INICIO || !VEH_ID) {
+      return res.status(400).json({ error: 'TME_ID, MEM_FECHA_INICIO y VEH_ID son requeridos' });
     }
     const created = await service.create(req.body);
     let warning = null;
@@ -90,9 +91,21 @@ export async function searchPaymentCandidates(req, res) {
   try {
     const q = req.query.q || req.query.query || '';
     if (!q || String(q).trim().length < 2) {
-      return res.status(400).json({ error: 'Debes enviar al menos 2 caracteres en q' });
+      return res.status(400).json({ error: 'Debes enviar al menos 2 caracteres de la placa en q' });
     }
     res.json(await service.searchPaymentCandidates(q));
+  } catch (err) {
+    res.status(businessStatus(err)).json({ error: err.message });
+  }
+}
+
+export async function getPaymentCandidateByTag(req, res) {
+  try {
+    const memCodigo = req.params.memCodigo || req.query.MEM_CODIGO || '';
+    if (!String(memCodigo || '').trim()) {
+      return res.status(400).json({ error: 'MEM_CODIGO es requerido' });
+    }
+    res.json(await service.getPaymentCandidateByMemCodigo(memCodigo));
   } catch (err) {
     res.status(businessStatus(err)).json({ error: err.message });
   }
@@ -122,7 +135,8 @@ export async function validateTag(req, res) {
     if (!String(memCodigo || '').trim()) {
       return res.status(400).json({ error: 'MEM_CODIGO es requerido' });
     }
-    const result = await service.validateTagAndRegisterEntry(memCodigo);
+    const maqId = req.body?.MAQ_ID;
+    const result = await service.validateTagAndRegisterEntry(memCodigo, { MAQ_ID: maqId });
     res.status(201).json(result);
   } catch (err) {
     res.status(businessStatus(err)).json({ error: err.message });

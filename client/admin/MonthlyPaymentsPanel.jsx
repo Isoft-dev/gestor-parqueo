@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../config.js';
 import { getDbColumnLabel } from '../utils/dbColumnLabel.js';
+import { getFieldPlaceholder, sanitizeFieldValue } from '../utils/fieldValidation.js';
 
 export default function MonthlyPaymentsPanel() {
-  const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -13,7 +13,6 @@ export default function MonthlyPaymentsPanel() {
   const [montoRecibido, setMontoRecibido] = useState('');
   const [reactivar, setReactivar] = useState(true);
   const [msg, setMsg] = useState('');
-  const [searchNoHits, setSearchNoHits] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -26,29 +25,21 @@ export default function MonthlyPaymentsPanel() {
         setTiposPago([]);
       }
     })();
+    loadCandidates();
   }, []);
 
-  async function search() {
+  async function loadCandidates() {
     setLoading(true);
     setMsg('');
-    setSearchNoHits(false);
     try {
-      const res = await fetch(
-        `${API_BASE}/membresia/payment-candidates/search?q=${encodeURIComponent(query)}`
-      );
+      const res = await fetch(`${API_BASE}/membresia/payment-candidates/search?q=`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
       const list = Array.isArray(data) ? data : [];
       setResults(list);
-      if (list.length === 0) {
-        setSearchNoHits(true);
-        setSelected(null);
-        setHistory(null);
-      }
     } catch (e) {
       setMsg(`Error de busqueda: ${e.message}`);
       setResults([]);
-      setSearchNoHits(false);
     } finally {
       setLoading(false);
     }
@@ -75,7 +66,7 @@ export default function MonthlyPaymentsPanel() {
       if (!res.ok) throw new Error(data.error || res.statusText);
       setMsg(`Pago registrado. ${getDbColumnLabel('PAG_ID')}: ${data.PAG_ID}`);
       setSelected(null);
-      setResults([]);
+      await loadCandidates();
       setHistory(null);
     } catch (e) {
       setMsg(`Error al registrar pago: ${e.message}`);
@@ -106,24 +97,12 @@ export default function MonthlyPaymentsPanel() {
     setReactivar(true);
   }
 
-  function clearSearchFilter() {
-    setQuery('');
-    setResults([]);
-    setSearchNoHits(false);
-    setSelected(null);
-    setHistory(null);
-    setMsg('');
-    setTipoPagoId('');
-    setMontoRecibido('');
-    setReactivar(true);
-  }
-
   return (
     <div className="admin-panel-block">
       <div className="admin-panel-head admin-panel-head--row">
         <div className="admin-panel-head-text">
           <h2>Registro de pagos de membresia</h2>
-          <p className="admin-panel-sub">Busca por nombre del cliente o placa del vehiculo.</p>
+          <p className="admin-panel-sub">Listado de membresias candidatas para registrar pago.</p>
         </div>
         {selected ? (
           <button
@@ -137,50 +116,6 @@ export default function MonthlyPaymentsPanel() {
           </button>
         ) : null}
       </div>
-      <form
-        className="admin-search-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!loading && query.trim().length >= 2) search();
-        }}
-      >
-        <div className="admin-search-input-wrap">
-          <input
-            className="admin-search-input"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setSearchNoHits(false);
-            }}
-            placeholder="🔍 Nombre o placa"
-            aria-label="Buscar cliente por nombre o placa"
-          />
-        </div>
-        <div className="admin-search-actions">
-          <button
-            type="submit"
-            className="admin-btn-search"
-            disabled={loading || query.trim().length < 2}
-          >
-            Buscar
-          </button>
-          <button
-            type="button"
-            className="admin-btn-search-clear"
-            onClick={clearSearchFilter}
-            disabled={loading}
-            title="Vaciar búsqueda y ocultar resultados"
-          >
-            Limpiar
-          </button>
-        </div>
-      </form>
-
-      {searchNoHits && !loading && (
-        <p className="admin-muted" role="status" style={{ margin: '0.5rem 0' }}>
-          No se encontraron clientes o membresías con ese criterio. Prueba con otro nombre o placa.
-        </p>
-      )}
 
       {results.length > 0 && (
         <div className="admin-table-wrap admin-table-scroll" style={{ marginBottom: 10 }}>
@@ -238,9 +173,9 @@ export default function MonthlyPaymentsPanel() {
             ))}
           </select>
           <input
-            placeholder="Monto recibido"
+            placeholder={getFieldPlaceholder('PAG_MONTO_RECIBIDO')}
             value={montoRecibido}
-            onChange={(e) => setMontoRecibido(e.target.value)}
+            onChange={(e) => setMontoRecibido(sanitizeFieldValue('PAG_MONTO_RECIBIDO', e.target.value.replace(/,/g, '.'), { fieldType: 'number' }))}
             style={{ padding: '8px 10px', width: 150 }}
           />
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -249,7 +184,7 @@ export default function MonthlyPaymentsPanel() {
               checked={reactivar}
               onChange={(e) => setReactivar(e.target.checked)}
             />
-            Reactivar si esta suspendida
+            Reactivar si está suspendida, cancelada o vencida
           </label>
           <button onClick={registerPayment} disabled={loading}>
             Registrar pago

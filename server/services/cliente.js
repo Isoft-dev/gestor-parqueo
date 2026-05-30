@@ -1,10 +1,73 @@
 import oracledb from 'oracledb';
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
-export async function getAll() {
-  return executeCursor(
-    `BEGIN SP_CLIENTE_GET_ALL(:cursor); END;`
-  );
+const EXISTS_TICKET_CLIENT = `EXISTS (
+  SELECT 1
+    FROM PAR_VEHICULO v
+    JOIN PAR_TICKET t ON t.VEH_ID = v.VEH_ID
+   WHERE v.CLI_ID = c.CLI_ID
+)`;
+
+const EXISTS_MEMBERSHIP_CLIENT = `EXISTS (
+  SELECT 1
+    FROM PAR_VEHICULO v
+    JOIN PAR_MEMBRESIA m ON m.VEH_ID = v.VEH_ID
+   WHERE v.CLI_ID = c.CLI_ID
+)`;
+
+const IS_CLIENTE_ESPORADICO = `(${EXISTS_TICKET_CLIENT} AND NOT ${EXISTS_MEMBERSHIP_CLIENT})`;
+
+export async function getAll(opts = {}) {
+  const mode = String(opts.mode || '').trim().toLowerCase(); // mensual | esporadico | ''
+  const qRaw = String(opts.q || '').trim();
+  const binds = {};
+  const where = [];
+
+  if (mode === 'mensual') {
+    // Clientes mensuales/admin: se excluyen únicamente las fichas puramente esporádicas
+    // capturadas desde tickets con NIT y sin ninguna membresía asociada.
+    where.push(`NOT ${IS_CLIENTE_ESPORADICO}`);
+  } else if (mode === 'esporadico') {
+    where.push(IS_CLIENTE_ESPORADICO);
+  }
+
+  if (qRaw) {
+    const q = `%${qRaw.toUpperCase().replace(/\s+/g, ' ')}%`;
+    binds.q = q;
+    where.push(
+      `(
+        UPPER(NVL(c.CLI_PRIMER_NOMBRE, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_SEGUNDO_NOMBRE, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_PRIMER_APELLIDO, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_SEGUNDO_APELLIDO, '')) LIKE :q
+        OR UPPER(NVL(c.CLI_DPI, '')) LIKE :q
+        OR UPPER(
+          REGEXP_REPLACE(
+            TRIM(
+              NVL(c.CLI_PRIMER_NOMBRE, '') || ' ' ||
+              NVL(c.CLI_SEGUNDO_NOMBRE, '') || ' ' ||
+              NVL(c.CLI_PRIMER_APELLIDO, '') || ' ' ||
+              NVL(c.CLI_SEGUNDO_APELLIDO, '')
+            ),
+            '\\s+',
+            ' '
+          )
+        ) LIKE :q
+      )`
+    );
+  }
+
+  const sql = `SELECT
+      c.CLI_ID, c.CLI_PRIMER_NOMBRE, c.CLI_SEGUNDO_NOMBRE,
+      c.CLI_PRIMER_APELLIDO, c.CLI_SEGUNDO_APELLIDO,
+      c.CLI_DPI, c.CLI_NIT, c.CLI_CORREO, c.CLI_TELEFONO,
+      c.CLI_ZONA, c.CLI_CALLE, c.CLI_NUMERO, c.CLI_COLONIA,
+      c.CLI_CIUDAD, c.CLI_CODIGO_POSTAL, c.CLI_ACTIVO
+    FROM PAR_CLIENTE c
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY c.CLI_ID DESC`;
+
+  return executeSql(sql, binds);
 }
 
 export async function getById(id) {
@@ -34,8 +97,10 @@ export async function hasActiveMemberships(clientId) {
      JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
      LEFT JOIN PAR_ESTADO_MEMBRESIA em ON em.EME_ID = m.EME_ID
      WHERE v.CLI_ID = :clientId
+       AND (m.MEM_FECHA_VENCIMIENTO IS NULL OR TRUNC(m.MEM_FECHA_VENCIMIENTO) >= TRUNC(SYSDATE))
        AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%suspend%'
-       AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%inactiv%'`,
+       AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%inactiv%'
+       AND NVL(LOWER(em.EME_ESTADO), 'activa') NOT LIKE '%venc%'`,
     { clientId }
   );
   return Number(rows[0]?.TOTAL || 0) > 0;
@@ -193,7 +258,7 @@ function slugCorreoParte(texto) {
  * DPI sintético para factura con NIT: mismos dígitos del NIT + 2 dígitos departamento + 2 municipio (GT).
  * Si el NIT aporta muchos dígitos, se trunca la base para caber en CLI_DPI y conservar siempre los 4 finales.
  */
-function buildDpiDesdeNit(nitRegistro, dpiMaxLen = 20) {
+function buildDpiDesdeNit(nitRegistro, dpiMaxLen = 13) {
   const soloDigitos = String(nitRegistro || '').replace(/\D/g, '');
   const sufijoLen = 4;
   const maxBase = Math.max(1, dpiMaxLen - sufijoLen);

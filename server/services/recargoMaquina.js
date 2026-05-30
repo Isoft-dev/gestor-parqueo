@@ -69,22 +69,42 @@ export async function create(data) {
   try {
     conn = await getConnection();
     const useIdentity = (await isIdentityAlways()) || !data.RMA_ID;
-    const rmaId = useIdentity
-      ? await getNextIdTx(conn, 'PAR_RECARGO_MAQUINA', 'RMA_ID')
-      : Number(data.RMA_ID);
-
-    await conn.execute(
-      `INSERT INTO PAR_RECARGO_MAQUINA (RMA_ID, MAQ_ID, RMA_MANTENIMIENTO_FECHA, RMA_DESCRIPCION)
-       VALUES (:RMA_ID, :MAQ_ID, :RMA_MANTENIMIENTO_FECHA, :RMA_DESCRIPCION)`,
-      {
-        RMA_ID: rmaId,
-        MAQ_ID: data.MAQ_ID ?? null,
-        RMA_MANTENIMIENTO_FECHA: data.RMA_MANTENIMIENTO_FECHA
-          ? new Date(data.RMA_MANTENIMIENTO_FECHA)
-          : new Date(),
-        RMA_DESCRIPCION: data.RMA_DESCRIPCION ?? null,
-      }
-    );
+    let rmaId = Number(data.RMA_ID ?? 0);
+    if (useIdentity) {
+      await conn.execute(
+        `INSERT INTO PAR_RECARGO_MAQUINA (MAQ_ID, RMA_MANTENIMIENTO_FECHA, RMA_DESCRIPCION)
+         VALUES (:MAQ_ID, :RMA_MANTENIMIENTO_FECHA, :RMA_DESCRIPCION)`,
+        {
+          MAQ_ID: data.MAQ_ID ?? null,
+          RMA_MANTENIMIENTO_FECHA: data.RMA_MANTENIMIENTO_FECHA
+            ? new Date(data.RMA_MANTENIMIENTO_FECHA)
+            : new Date(),
+          RMA_DESCRIPCION: data.RMA_DESCRIPCION ?? null,
+        }
+      );
+      const createdRes = await conn.execute(
+        `SELECT RMA_ID
+           FROM PAR_RECARGO_MAQUINA
+          WHERE MAQ_ID = :maqId
+          ORDER BY RMA_ID DESC`,
+        { maqId: data.MAQ_ID ?? null }
+      );
+      rmaId = Number(createdRes.rows?.[0]?.RMA_ID || 0);
+    } else {
+      rmaId = Number(data.RMA_ID);
+      await conn.execute(
+        `INSERT INTO PAR_RECARGO_MAQUINA (RMA_ID, MAQ_ID, RMA_MANTENIMIENTO_FECHA, RMA_DESCRIPCION)
+         VALUES (:RMA_ID, :MAQ_ID, :RMA_MANTENIMIENTO_FECHA, :RMA_DESCRIPCION)`,
+        {
+          RMA_ID: rmaId,
+          MAQ_ID: data.MAQ_ID ?? null,
+          RMA_MANTENIMIENTO_FECHA: data.RMA_MANTENIMIENTO_FECHA
+            ? new Date(data.RMA_MANTENIMIENTO_FECHA)
+            : new Date(),
+          RMA_DESCRIPCION: data.RMA_DESCRIPCION ?? null,
+        }
+      );
+    }
 
     for (const d of detalles) {
       const sdiId = Number(d.SDI_ID);
@@ -141,7 +161,7 @@ export async function create(data) {
       { maqId: data.MAQ_ID ?? null }
     );
     await conn.commit();
-    return getById(rmaId);
+    return rmaId ? getById(rmaId) : null;
   } catch (err) {
     if (conn) {
       try { await conn.rollback(); } catch { /* ignore */ }

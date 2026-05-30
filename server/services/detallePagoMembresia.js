@@ -1,7 +1,35 @@
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
-export async function getAll() {
-  return executeCursor(`BEGIN SP_DET_PAGO_MEM_GET_ALL(:cursor); END;`);
+const DPM_LIST_SQL = `SELECT d.DPM_ID,
+            d.MEM_ID,
+            d.PAG_ID,
+            p.PAG_FECHA_HORA,
+            v.VEH_PLACA,
+            c.CLI_PRIMER_NOMBRE,
+            c.CLI_SEGUNDO_NOMBRE,
+            c.CLI_PRIMER_APELLIDO,
+            c.CLI_SEGUNDO_APELLIDO
+       FROM PAR_DETALLE_PAGO_MEMBRESIA d
+       JOIN PAR_PAGO p ON p.PAG_ID = d.PAG_ID
+       JOIN PAR_MEMBRESIA m ON m.MEM_ID = d.MEM_ID
+       JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
+       LEFT JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID`;
+
+/**
+ * Lista detalles pago–membresía (con placa). Si `placa` viene informada, filtra por coincidencia parcial (sin espacios).
+ */
+export async function getAll(opts = {}) {
+  const raw = String(opts.placa ?? '').trim();
+  if (!raw) {
+    return executeSql(`${DPM_LIST_SQL} ORDER BY d.DPM_ID DESC`);
+  }
+  const needle = `%${raw.toUpperCase().replace(/\s+/g, '')}%`;
+  return executeSql(
+    `${DPM_LIST_SQL}
+      WHERE UPPER(REPLACE(TRIM(NVL(v.VEH_PLACA, ' ')), ' ', '')) LIKE :placa
+      ORDER BY d.DPM_ID DESC`,
+    { placa: needle },
+  );
 }
 
 export async function getById(id) {

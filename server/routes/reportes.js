@@ -1,0 +1,55 @@
+import { Router } from 'express';
+import * as ctrl from '../controllers/reportes.js';
+
+const router = Router();
+
+router.get('/incidentes/pdf', ctrl.incidentesPorRangoPdf);
+router.get('/incidentes', ctrl.incidentesPorRango);
+router.get('/incidentes-por-tipo/pdf', ctrl.incidentesPorTipoPdf);
+router.get('/incidentes-por-tipo', ctrl.incidentesPorTipo);
+router.get('/incidentes-por-resolucion/pdf', ctrl.incidentesPorResolucionPdf);
+router.get('/incidentes-por-resolucion', ctrl.incidentesPorResolucion);
+router.get('/membresias-estado/pdf', ctrl.membresiasEstadoPdf);
+router.get('/membresias-estado', ctrl.membresiasEstado);
+router.get('/clientes-mora/pdf', ctrl.clientesMoraPdf);
+router.get('/clientes-mora', ctrl.clientesMora);
+router.get('/movimiento-vehicular/frecuencia/pdf', ctrl.vehiculosFrecuentesPdf);
+router.get('/movimiento-vehicular/frecuencia', ctrl.vehiculosFrecuentes);
+router.get('/movimiento-vehicular/entradas-salidas/pdf', ctrl.entradasSalidasPdf);
+router.get('/movimiento-vehicular/entradas-salidas', ctrl.entradasSalidas);
+router.get('/movimiento-vehicular/tiempo-estadia/pdf', ctrl.tiempoPromedioEstadiaPdf);
+router.get('/movimiento-vehicular/tiempo-estadia', ctrl.tiempoPromedioEstadia);
+router.get('/operativos/alertas/pdf', ctrl.alertasOperativasPdf);
+router.get('/operativos/alertas', ctrl.alertasOperativas);
+router.get('/operativos/mantenimientos/pdf', ctrl.mantenimientosOperativosPdf);
+router.get('/operativos/mantenimientos', ctrl.mantenimientosOperativos);
+router.get('/operativos/recargas/pdf', ctrl.recargasOperativasPdf);
+router.get('/operativos/recargas', ctrl.recargasOperativas);
+router.get('/financieros/cobros-maquina/pdf', ctrl.cobrosMaquinaFinancierosPdf);
+router.get('/financieros/cobros-maquina', ctrl.cobrosMaquinaFinancieros);
+router.get('/financieros/pagos-membresia-mes/pdf', ctrl.pagosMembresiaMesFinancierosPdf);
+router.get('/financieros/pagos-membresia-mes', ctrl.pagosMembresiaMesFinancieros);
+router.get('/financieros/ingresos-tipo-cliente/pdf', ctrl.ingresosTipoClienteFinancierosPdf);
+router.get('/financieros/ingresos-tipo-cliente', ctrl.ingresosTipoClienteFinancieros);
+router.get('/financieros/ingresos-totales/pdf', ctrl.ingresosTotalesFinancierosPdf);
+router.get('/financieros/ingresos-totales', ctrl.ingresosTotalesFinancieros);
+router.get('/membresias-clientes/buscar', ctrl.buscarClientesMembresia);
+router.get('/membresias-clientes/historial-pagos/pdf', ctrl.historialPagosClientePdf);
+router.get('/membresias-clientes/historial-pagos', ctrl.historialPagosCliente);
+router.get('/afluencia/detallado/pdf', ctrl.afluenciaDetalladaPdf);
+router.get('/afluencia/detallado', ctrl.afluenciaDetallada);
+router.get('/afluencia/anual/pdf', ctrl.afluenciaAnualPdf);
+router.get('/afluencia/anual', ctrl.afluenciaAnual);
+
+router.get('/perfil-flota/modelo', ctrl.perfilPorModelo);
+router.get('/perfil-flota/color', ctrl.perfilPorColor);
+router.get('/perfil-flota/heatmap', ctrl.heatmapAfluencia);
+router.get('/perfil-flota/geo-clientes', ctrl.perfilGeoClientes);
+
+router.get('/analisis-flota/pdf', ctrl.analisisFlotaPdf);
+router.get('/analisis-flota', ctrl.analisisFlota);
+
+
+router.get('/dashboard', ctrl.dashboardKpis);
+
+export default router;

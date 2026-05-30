@@ -10,7 +10,9 @@ function businessStatus(err) {
 
 export async function getAll(_req, res) {
   try {
-    res.json(await service.getAll());
+    const mode = _req.query?.mode ?? _req.query?.tipo ?? '';
+    const q = _req.query?.q ?? '';
+    res.json(await service.getAll({ mode, q }));
   } catch (err) {
     const code = /mismo CLI_DPI|desactivar/i.test(err.message) ? 400 : 500;
     res.status(code).json({ error: err.message });

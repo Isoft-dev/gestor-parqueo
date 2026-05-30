@@ -8,12 +8,18 @@ BEGIN
            m.MEM_FECHA_INICIO, m.MEM_FECHA_VENCIMIENTO,
            m.MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
            m.EME_ID, em.EME_ESTADO,
-           m.VEH_ID, v.VEH_PLACA, v.VEH_MODELO,
+           m.VEH_ID, v.VEH_PLACA, mod.MOD_NOMBRE AS VEH_MODELO,
+           mod.MAR_ID, mar.MAR_NOMBRE, mod.TVE_ID, tv.TVE_TIPO,
+           v.COL_ID, col.COL_NOMBRE AS VEH_COLOR,
            m.ESP_ID, e.ESP_CODIGO, e.ESP_UBICACION
     FROM PAR_MEMBRESIA m
-    JOIN PAR_TIPO_MEMBRESIA  tm ON m.TME_ID = tm.TME_ID
-    JOIN PAR_VEHICULO         v ON m.VEH_ID = v.VEH_ID
-    JOIN PAR_ESPACIO          e ON m.ESP_ID = e.ESP_ID
+    JOIN PAR_TIPO_MEMBRESIA tm ON m.TME_ID = tm.TME_ID
+    JOIN PAR_VEHICULO v ON m.VEH_ID = v.VEH_ID
+    LEFT JOIN PAR_MODELO_VEHICULO mod ON v.MOD_ID = mod.MOD_ID
+    LEFT JOIN PAR_MARCA_VEHICULO mar ON mod.MAR_ID = mar.MAR_ID
+    LEFT JOIN PAR_TIPO_VEHICULO tv ON mod.TVE_ID = tv.TVE_ID
+    LEFT JOIN PAR_COLOR_VEHICULO col ON v.COL_ID = col.COL_ID
+    JOIN PAR_ESPACIO e ON m.ESP_ID = e.ESP_ID
     LEFT JOIN PAR_ESTADO_MEMBRESIA em ON m.EME_ID = em.EME_ID
     ORDER BY m.MEM_ID;
 END SP_MEMBRESIA_GET_ALL;
@@ -30,26 +36,32 @@ BEGIN
            m.MEM_FECHA_INICIO, m.MEM_FECHA_VENCIMIENTO,
            m.MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
            m.EME_ID, em.EME_ESTADO,
-           m.VEH_ID, v.VEH_PLACA, v.VEH_MODELO,
+           m.VEH_ID, v.VEH_PLACA, mod.MOD_NOMBRE AS VEH_MODELO,
+           mod.MAR_ID, mar.MAR_NOMBRE, mod.TVE_ID, tv.TVE_TIPO,
+           v.COL_ID, col.COL_NOMBRE AS VEH_COLOR,
            m.ESP_ID, e.ESP_CODIGO, e.ESP_UBICACION
     FROM PAR_MEMBRESIA m
-    JOIN PAR_TIPO_MEMBRESIA  tm ON m.TME_ID = tm.TME_ID
-    JOIN PAR_VEHICULO         v ON m.VEH_ID = v.VEH_ID
-    JOIN PAR_ESPACIO          e ON m.ESP_ID = e.ESP_ID
+    JOIN PAR_TIPO_MEMBRESIA tm ON m.TME_ID = tm.TME_ID
+    JOIN PAR_VEHICULO v ON m.VEH_ID = v.VEH_ID
+    LEFT JOIN PAR_MODELO_VEHICULO mod ON v.MOD_ID = mod.MOD_ID
+    LEFT JOIN PAR_MARCA_VEHICULO mar ON mod.MAR_ID = mar.MAR_ID
+    LEFT JOIN PAR_TIPO_VEHICULO tv ON mod.TVE_ID = tv.TVE_ID
+    LEFT JOIN PAR_COLOR_VEHICULO col ON v.COL_ID = col.COL_ID
+    JOIN PAR_ESPACIO e ON m.ESP_ID = e.ESP_ID
     LEFT JOIN PAR_ESTADO_MEMBRESIA em ON m.EME_ID = em.EME_ID
     WHERE m.MEM_ID = p_id;
 END SP_MEMBRESIA_GET_BY_ID;
 /
 
 CREATE OR REPLACE PROCEDURE SP_MEMBRESIA_CREATE (
-    p_MEM_ID                        IN VARCHAR2,
-    p_TME_ID                        IN VARCHAR2,
-    p_MEM_FECHA_INICIO              IN DATE,
-    p_EME_ID                        IN VARCHAR2,
-    p_MEM_FECHA_VENCIMIENTO         IN DATE,
+    p_MEM_ID                         IN VARCHAR2,
+    p_TME_ID                         IN VARCHAR2,
+    p_MEM_FECHA_INICIO               IN DATE,
+    p_EME_ID                         IN VARCHAR2,
+    p_MEM_FECHA_VENCIMIENTO          IN DATE,
     p_MEM_FECHA_ULTIMO_CAMBIO_ESTADO IN DATE,
-    p_VEH_ID                        IN VARCHAR2,
-    p_ESP_ID                        IN VARCHAR2
+    p_VEH_ID                         IN VARCHAR2,
+    p_ESP_ID                         IN VARCHAR2
 ) AS
 BEGIN
     INSERT INTO PAR_MEMBRESIA (
@@ -67,22 +79,22 @@ END SP_MEMBRESIA_CREATE;
 /
 
 CREATE OR REPLACE PROCEDURE SP_MEMBRESIA_UPDATE (
-    p_id                            IN VARCHAR2,
-    p_TME_ID                        IN VARCHAR2,
-    p_EME_ID                        IN VARCHAR2,
-    p_MEM_FECHA_VENCIMIENTO         IN DATE,
+    p_id                             IN VARCHAR2,
+    p_TME_ID                         IN VARCHAR2,
+    p_EME_ID                         IN VARCHAR2,
+    p_MEM_FECHA_VENCIMIENTO          IN DATE,
     p_MEM_FECHA_ULTIMO_CAMBIO_ESTADO IN DATE,
-    p_VEH_ID                        IN VARCHAR2,
-    p_ESP_ID                        IN VARCHAR2
+    p_VEH_ID                         IN VARCHAR2,
+    p_ESP_ID                         IN VARCHAR2
 ) AS
 BEGIN
     UPDATE PAR_MEMBRESIA
-    SET TME_ID                        = p_TME_ID,
-        EME_ID                        = p_EME_ID,
-        MEM_FECHA_VENCIMIENTO         = p_MEM_FECHA_VENCIMIENTO,
+    SET TME_ID = p_TME_ID,
+        EME_ID = p_EME_ID,
+        MEM_FECHA_VENCIMIENTO = p_MEM_FECHA_VENCIMIENTO,
         MEM_FECHA_ULTIMO_CAMBIO_ESTADO = p_MEM_FECHA_ULTIMO_CAMBIO_ESTADO,
-        VEH_ID                        = p_VEH_ID,
-        ESP_ID                        = p_ESP_ID
+        VEH_ID = p_VEH_ID,
+        ESP_ID = p_ESP_ID
     WHERE MEM_ID = p_id;
     COMMIT;
 END SP_MEMBRESIA_UPDATE;

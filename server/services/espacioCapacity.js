@@ -13,6 +13,41 @@ function norm(s) {
     .replace(/\p{M}/gu, '');
 }
 
+function intEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+function optIntEnv(name) {
+  const raw = process.env[name];
+  if (raw == null || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+/**
+ * Política dinámica para espacios de membresía (no rígida):
+ * - minReserved: piso sugerido de espacios reservados para mensual
+ * - maxReserved: techo opcional (null = sin techo explícito)
+ * - sporadicBuffer: mínimo de espacios a conservar para esporádicos
+ */
+export function getDynamicMembershipSpacePolicy(totalSpaces = 0) {
+  const minEnv = optIntEnv('MEMBERSHIP_RESERVED_MIN');
+  const maxEnv = optIntEnv('MEMBERSHIP_RESERVED_MAX');
+  const bufferEnv = optIntEnv('SPORADIC_BUFFER_MIN');
+  const total = Math.max(0, Number(totalSpaces) || 0);
+  const minDefault = total > 0 ? Math.floor(total * 0.25) : 0;
+  const maxDefault = total > 0 ? Math.floor(total * 0.75) : null;
+  const bufferDefault = total > 0 ? Math.max(1, Math.floor(total * 0.15)) : 0;
+
+  const minReserved = Math.max(0, minEnv ?? minDefault);
+  const maxReserved = maxEnv != null ? Math.max(0, maxEnv) : maxDefault;
+  const sporadicBuffer = Math.max(0, bufferEnv ?? bufferDefault);
+  return { minReserved, maxReserved, sporadicBuffer };
+}
+
 /**
  * @param {import('oracledb').Connection} conn
  */
@@ -152,6 +187,65 @@ export async function setEspacioReservadoLibreAfterMembresiaTx(conn, espId) {
     `UPDATE PAR_ESPACIO SET EES_ID = :ees WHERE ESP_ID = :espId`,
     { ees: reservadoLibre, espId },
   );
+}
+
+/**
+ * Selecciona automáticamente un espacio para nueva membresía desde el pool
+ * esporádico disponible, aplicando política dinámica de rangos.
+ */
+export async function assignDynamicMembershipSpaceTx(conn) {
+  const { sporadicDisponible } = await resolveParkingStateIdsTx(conn);
+  if (sporadicDisponible == null) {
+    throw new Error(
+      'Configuracion incompleta: falta estado disponible/libre para espacios esporádicos.',
+    );
+  }
+
+  const [totals] = (
+    await conn.execute(
+      `SELECT
+          (SELECT COUNT(*) FROM PAR_ESPACIO) AS TOTAL,
+          (SELECT COUNT(*)
+             FROM PAR_ESPACIO e
+            WHERE EXISTS (SELECT 1 FROM PAR_MEMBRESIA m WHERE m.ESP_ID = e.ESP_ID)
+          ) AS RESERVED
+       FROM DUAL`
+    )
+  ).rows || [];
+  const total = Number(totals?.TOTAL || 0);
+  const reserved = Number(totals?.RESERVED || 0);
+  const { minReserved, maxReserved, sporadicBuffer } = getDynamicMembershipSpacePolicy(total);
+  const nextReserved = reserved + 1;
+  const nextSporadic = Math.max(0, total - nextReserved);
+
+  const breaksMax = maxReserved != null && nextReserved > maxReserved;
+  const breaksBuffer = reserved >= minReserved && nextSporadic < sporadicBuffer;
+  if (breaksMax || breaksBuffer) {
+    if (breaksMax) {
+      throw new Error(
+        `Capacidad de membresías alcanzada por política dinámica (máximo ${maxReserved}).`,
+      );
+    }
+    throw new Error(
+      `No se puede crear membresía: se debe conservar al menos ${sporadicBuffer} espacios para esporádicos.`,
+    );
+  }
+
+  const pick = await conn.execute(
+    `SELECT e.ESP_ID
+       FROM PAR_ESPACIO e
+       LEFT JOIN PAR_MEMBRESIA m ON m.ESP_ID = e.ESP_ID
+      WHERE m.MEM_ID IS NULL
+        AND e.EES_ID = :ees
+      ORDER BY e.ESP_ID
+      FETCH FIRST 1 ROW ONLY`,
+    { ees: sporadicDisponible },
+  );
+  const espId = pick.rows?.[0]?.ESP_ID ?? pick.rows?.[0]?.esp_id;
+  if (espId == null) {
+    throw new Error('No hay espacios disponibles para asignar una nueva membresía.');
+  }
+  return espId;
 }
 
 /** Transacción propia tras INSERT membresía (create ya hizo commit). */

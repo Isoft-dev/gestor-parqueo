@@ -1,6 +1,10 @@
 import { Link } from 'react-router-dom';
 import { useAdminDashboard } from '../hooks/useAdminDashboard.js';
 import { ADMIN_NAV_ROUTES, adminPath } from './adminNavConfig.js';
+import HelpHint from '../components/HelpHint.jsx';
+import { BtnContent, IconRefresh } from '../components/UiIcons.jsx';
+import { useAdminAppearance } from '../context/AdminAppearanceContext.jsx';
+import { getModuleAccentStyle } from '../utils/adminAppearance.js';
 
 function pick(row, ...names) {
   if (!row) return undefined;
@@ -14,18 +18,25 @@ function pick(row, ...names) {
 
 export default function DashboardPage() {
   const { stats, loading, error, sectionErrors, reload, updatedAt, pollMs } = useAdminDashboard();
+  const { appearance } = useAdminAppearance();
 
   const navSections = ADMIN_NAV_ROUTES.filter((r) => !r.isDashboard && !r.isPlaceholder);
 
   return (
     <div className="admin-page admin-dashboard">
       <header className="admin-page-header admin-dashboard-intro">
-        <div>
+        <div className="admin-page-header__title-main">
           <h1 className="admin-page-title">Dashboard</h1>
-          <p className="admin-page-desc">
-            Resumen operativo del parqueo. Los datos se actualizan solos cada pocos segundos mientras
-            mantengas esta vista abierta.
-          </p>
+          <HelpHint label="Mostrar ayuda del dashboard" title="Guia del dashboard">
+            <p>
+              Resumen operativo del parqueo con actualizacion automatica mientras mantengas esta
+              vista abierta.
+            </p>
+            <p>
+              Usa los accesos rapidos y las tarjetas para detectar alertas, ocupacion y estado
+              general sin entrar todavia a cada modulo.
+            </p>
+          </HelpHint>
         </div>
         <div className="admin-dashboard-meta">
           {loading ? (
@@ -35,7 +46,7 @@ export default function DashboardPage() {
             </span>
           ) : null}
           <button type="button" className="admin-btn-ghost" onClick={() => reload()}>
-            Actualizar ahora
+            <BtnContent icon={IconRefresh}>Actualizar ahora</BtnContent>
           </button>
           {updatedAt && (
             <span className="admin-muted">
@@ -72,13 +83,6 @@ export default function DashboardPage() {
           <div className="admin-kpi-hint">Sin fecha de atención registrada</div>
         </article>
         <article className="admin-kpi admin-kpi--alerts2">
-          <div className="admin-kpi-label">Alertas en estado «activo»</div>
-          <div className="admin-kpi-value">
-            {loading && stats.alertasActivasCatalogo == null ? '—' : stats.alertasActivasCatalogo}
-          </div>
-          <div className="admin-kpi-hint">Según catálogo PAR_ESTADO_ALERTA</div>
-        </article>
-        <article className="admin-kpi admin-kpi--spaces">
           <div className="admin-kpi-label">Espacios reservados (mensuales)</div>
           <div className="admin-kpi-split">
             <div>
@@ -104,6 +108,10 @@ export default function DashboardPage() {
               <span className="admin-kpi-num">{stats.membresiasActivas ?? (loading ? '—' : 0)}</span>
             </div>
             <div>
+              <span className="admin-kpi-sub">Vencidas</span>
+              <span className="admin-kpi-num">{stats.membresiasVencidas ?? (loading ? '—' : 0)}</span>
+            </div>
+            <div>
               <span className="admin-kpi-sub">Suspendidas</span>
               <span className="admin-kpi-num">{stats.membresiasSuspendidas ?? (loading ? '—' : 0)}</span>
             </div>
@@ -113,7 +121,7 @@ export default function DashboardPage() {
 
       <section className="admin-panel-block" aria-label="Alertas recientes">
         <div className="admin-panel-head">
-          <h2>Alertas recientes</h2>
+          <h2>🚨 Alertas recientes</h2>
           <Link className="admin-link" to={adminPath('alertas')}>
             Ir a gestión de alertas →
           </Link>
@@ -165,7 +173,12 @@ export default function DashboardPage() {
         </div>
         <div className="admin-quick-grid">
           {navSections.map((r) => (
-            <Link key={r.path} className="admin-quick-card" to={adminPath(r.path)}>
+            <Link
+              key={r.path}
+              className="admin-quick-card"
+              to={adminPath(r.path)}
+              style={getModuleAccentStyle(appearance, r.path, r.accentColor)}
+            >
               <span className="admin-quick-icon" aria-hidden="true">
                 {r.icon}
               </span>
@@ -173,16 +186,6 @@ export default function DashboardPage() {
               <span className="admin-quick-desc">{r.description}</span>
             </Link>
           ))}
-          <Link
-            className="admin-quick-card admin-quick-card--muted"
-            to={adminPath('reportes')}
-          >
-            <span className="admin-quick-icon" aria-hidden="true">
-              📘
-            </span>
-            <span className="admin-quick-title">Reportes</span>
-            <span className="admin-quick-desc">Disponible en un sprint posterior</span>
-          </Link>
         </div>
       </section>
     </div>

@@ -1,7 +1,30 @@
 import { executeCursor, executeProcedure, executeSql } from '../db/oracle.js';
 
-export async function getAll() {
-  return executeCursor(`BEGIN SP_REGISTRO_MOV_MEM_GET_ALL(:cursor); END;`);
+const RMM_LIST_SQL = `SELECT r.RMM_ID,
+            r.RMM_FECHA_HORA_ENTRADA,
+            r.RMM_FECHA_HORA_SALIDA,
+            r.MEM_ID,
+            v.VEH_PLACA
+       FROM PAR_REGISTRO_MOVIMIENTO_MEMBRESIA r
+       JOIN PAR_MEMBRESIA m ON m.MEM_ID = r.MEM_ID
+       JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID`;
+
+/**
+ * Lista movimientos de membresía (con placa del vehículo). Si `placa` viene informada,
+ * filtra por coincidencia parcial (sin espacios).
+ */
+export async function getAll(opts = {}) {
+  const raw = String(opts.placa ?? '').trim();
+  if (!raw) {
+    return executeSql(`${RMM_LIST_SQL} ORDER BY r.RMM_ID DESC`);
+  }
+  const needle = `%${raw.toUpperCase().replace(/\s+/g, '')}%`;
+  return executeSql(
+    `${RMM_LIST_SQL}
+      WHERE UPPER(REPLACE(TRIM(NVL(v.VEH_PLACA, ' ')), ' ', '')) LIKE :placa
+      ORDER BY r.RMM_ID DESC`,
+    { placa: needle },
+  );
 }
 
 export async function getById(id) {

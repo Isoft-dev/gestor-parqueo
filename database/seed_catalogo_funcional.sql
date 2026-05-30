@@ -1,0 +1,514 @@
+-- =============================================================================
+-- SEED: Catálogo funcional (presentación / carga inicial)
+-- =============================================================================
+-- Ejecutar contra el esquema Oracle donde existan las tablas PAR_* (p. ej.
+-- tras PAR_ENTIDADES / migraciones). Cada bloque es idempotente (IF c = 0 …).
+--
+-- Contrato con el backend (validaciones por subcadena en texto):
+--   - Estados de ticket: deben contener palabras clave (activ, pagad, venc,
+--     volver+cobr, extrav, valid) según ticket.js.
+--   - Incidente «Ticket extraviado»: INC_TIPO o INC_DESCRIPCION debe contener
+--     «extrav» (ticket.js → findIncidenteTicketExtraviadoIdTx).
+--   - Alertas nuevas: estado Pendiente (LIKE %pend%); atendida resuelve con
+--     LIKE %atendid% / %resuelt% (ticket.js).
+--   - Tipo alerta «Sistema»: LIKE %sistem% (systemAlert.js).
+--   - Tipo alerta asistencia: LIKE %asist% (alerta.js).
+--   - Tipo alerta «Saldo bajo máquina»: nombre o descripción con «saldo»+«baj»
+--     (o «bajo»+«saldo») — cashMachine.js al evaluar umbral en máquina de cobro.
+--   - PAR_TIPO_NOTIFICACION: recordatorios de membresía y «Suspensión mora»
+--     (jobMembershipTasks.js — cron / jobs de membresía).
+--
+-- Usuarios demo por rol:
+--   administrador@gmail.com
+--   gerente@gmail.com
+--   guardia@gmail.com
+--   supervisordecamaras@gmail.com
+--   jefedegrupo@gmail.com
+-- Contraseña para todos: 1234.
+-- El API acepta contraseña en texto plano si USU_PASSWORD no empieza por
+-- «scrypt$» (server/services/usuario.js → verifyPassword).
+--
+-- Umbrales Q5/Q10/Q20/Q50: se cargan PAR_SALDO_DISPONIBLE y el detalle base
+-- de saldo para Cobro_1.
+-- =============================================================================
+
+DECLARE
+  c              NUMBER;
+  n              NUMBER;
+  total_espacios NUMBER;
+  ees_disp       NUMBER;
+  tma_entrada    NUMBER;
+  tma_cobro      NUMBER;
+  tma_salida     NUMBER;
+  ema_operativa  NUMBER;
+  maq_cobro      NUMBER;
+BEGIN
+  ---------------------------------------------------------------------------
+  -- PAR_ESTADO_ESPACIO (requerido antes de PAR_ESPACIO)
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_ESPACIO WHERE EES_ESTADO = 'Disponible';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_ESPACIO (EES_ID, EES_ESTADO) VALUES (DEFAULT, 'Disponible'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_ESPACIO WHERE EES_ESTADO = 'Ocupado';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_ESPACIO (EES_ID, EES_ESTADO) VALUES (DEFAULT, 'Ocupado'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_ESPACIO WHERE EES_ESTADO = 'Reservado Libre';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_ESPACIO (EES_ID, EES_ESTADO) VALUES (DEFAULT, 'Reservado Libre'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_ESPACIO WHERE EES_ESTADO = 'Reservado Ocupado';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_ESPACIO (EES_ID, EES_ESTADO) VALUES (DEFAULT, 'Reservado Ocupado'); END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_ESTADO_ALERTA
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_ALERTA WHERE EAL_ESTADO = 'Pendiente';
+  IF c = 0 THEN
+    INSERT INTO PAR_ESTADO_ALERTA (EAL_ID, EAL_ESTADO, EAL_DESCRIPCION) VALUES (DEFAULT, 'Pendiente', 'Sin atender');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_ALERTA WHERE EAL_ESTADO = 'Atendida';
+  IF c = 0 THEN
+    INSERT INTO PAR_ESTADO_ALERTA (EAL_ID, EAL_ESTADO, EAL_DESCRIPCION) VALUES (DEFAULT, 'Atendida', 'Gestionada por operador');
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_TIPO_ALERTA
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_ALERTA WHERE TAL_TIPO = 'Asistencia cabina';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_ALERTA (TAL_ID, TAL_TIPO, TAL_DESCRIPCION)
+    VALUES (DEFAULT, 'Asistencia cabina', 'Solicitud desde cabina de entrada, salida o cobro');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_ALERTA WHERE TAL_TIPO = 'Sistema';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_ALERTA (TAL_ID, TAL_TIPO, TAL_DESCRIPCION)
+    VALUES (DEFAULT, 'Sistema', 'Alertas automáticas o integración');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_ALERTA WHERE TAL_TIPO = 'Saldo bajo máquina';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_ALERTA (TAL_ID, TAL_TIPO, TAL_DESCRIPCION)
+    VALUES (DEFAULT, 'Saldo bajo máquina', 'Efectivo por debajo del umbral en máquina de cobro');
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_TIPO_NOTIFICACION (tipos usados por los jobs de membresía)
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Recordatorio -3d';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
+    VALUES (DEFAULT, 'Recordatorio -3d', 'Tres días antes del vencimiento');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Recordatorio -2d';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
+    VALUES (DEFAULT, 'Recordatorio -2d', 'Dos días antes del vencimiento');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Recordatorio -1d';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
+    VALUES (DEFAULT, 'Recordatorio -1d', 'Un día antes del vencimiento');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Recordatorio venc';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
+    VALUES (DEFAULT, 'Recordatorio venc', 'Día del vencimiento');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Recordatorio +1d';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
+    VALUES (DEFAULT, 'Recordatorio +1d', 'Día siguiente al vencimiento');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_NOTIFICACION WHERE TNO_TIPO = 'Suspensión mora';
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_NOTIFICACION (TNO_ID, TNO_TIPO, TNO_DESCRIPCION)
+    VALUES (DEFAULT, 'Suspensión mora', 'Notificación de suspensión automática por mora');
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_ROL
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Administrador';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Administrador', 'Gestiona el sistema');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Gerente';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Gerente', 'Acceso a reportes');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Guardia';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Guardia', 'Acceso a reportar incidentes');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Supervisor de Cámaras';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Supervisor de Cámaras', 'Reporta incidentes y revisa historial de incidentes y alertas');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ROL WHERE ROL_TIPO = 'Jefe de grupo';
+  IF c = 0 THEN
+    INSERT INTO PAR_ROL (ROL_ID, ROL_TIPO, ROL_DESCRIPCION)
+    VALUES (DEFAULT, 'Jefe de grupo', 'Reporta incidentes y revisa historial de incidentes y alertas');
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_USUARIO (contraseña en plano 1234 — válido con verifyPassword del API)
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'administrador@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Ana', 'Lucía', 'Administrador', 'Parqueo',
+      'administrador@gmail.com', '1234', '5555-1001',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Administrador'), 1, SYSDATE
+    );
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'gerente@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Gloria', 'María', 'Gerente', 'General',
+      'gerente@gmail.com', '1234', '5555-1002',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Gerente'), 1, SYSDATE
+    );
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'guardia@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Gabriel', 'Andrés', 'Guardia', 'Turno A',
+      'guardia@gmail.com', '1234', '5555-1003',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Guardia'), 1, SYSDATE
+    );
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'supervisordecamaras@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Sara', 'Beatriz', 'Supervisor', 'Cámaras',
+      'supervisordecamaras@gmail.com', '1234', '5555-1004',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Supervisor de Cámaras'), 1, SYSDATE
+    );
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_USUARIO WHERE LOWER(TRIM(USU_CORREO)) = 'jefedegrupo@gmail.com';
+  IF c = 0 THEN
+    INSERT INTO PAR_USUARIO (
+      USU_ID, USU_PRIMER_NOMBRE, USU_SEGUNDO_NOMBRE, USU_PRIMER_APELLIDO, USU_SEGUNDO_APELLIDO,
+      USU_CORREO, USU_PASSWORD, USU_TELEFONO, ROL_ID, USU_ACTIVO, USU_FECHA_CREACION
+    ) VALUES (
+      DEFAULT, 'Julia', 'Noemí', 'Jefe', 'Grupo',
+      'jefedegrupo@gmail.com', '1234', '5555-1005',
+      (SELECT MIN(ROL_ID) FROM PAR_ROL WHERE ROL_TIPO = 'Jefe de grupo'), 1, SYSDATE
+    );
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_ESTADO_TICKET (orden alfabético no requerido; nombres fijos HU)
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_TICKET WHERE ETI_ESTADO = 'Activo';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_TICKET (ETI_ID, ETI_ESTADO) VALUES (DEFAULT, 'Activo'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_TICKET WHERE ETI_ESTADO = 'Pagado';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_TICKET (ETI_ID, ETI_ESTADO) VALUES (DEFAULT, 'Pagado'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_TICKET WHERE ETI_ESTADO = 'Vencido';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_TICKET (ETI_ID, ETI_ESTADO) VALUES (DEFAULT, 'Vencido'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_TICKET WHERE ETI_ESTADO = 'Volver a cobrar';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_TICKET (ETI_ID, ETI_ESTADO) VALUES (DEFAULT, 'Volver a cobrar'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_TICKET WHERE ETI_ESTADO = 'Extraviado';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_TICKET (ETI_ID, ETI_ESTADO) VALUES (DEFAULT, 'Extraviado'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_TICKET WHERE ETI_ESTADO = 'Validado';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_TICKET (ETI_ID, ETI_ESTADO) VALUES (DEFAULT, 'Validado'); END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_INCIDENTE (Ticket extraviado primero: único matcheo «extrav» recurrente)
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_INCIDENTE
+   WHERE LOWER(INC_TIPO) LIKE '%extrav%' OR LOWER(NVL(INC_DESCRIPCION, '')) LIKE '%extrav%';
+  IF c = 0 THEN
+    INSERT INTO PAR_INCIDENTE (INC_ID, INC_TIPO, INC_DESCRIPCION)
+    VALUES (DEFAULT, 'Ticket extraviado', 'Bitácora y recargo por ticket extraviado al cobrar');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_INCIDENTE WHERE INC_TIPO = 'Choque';
+  IF c = 0 THEN
+    INSERT INTO PAR_INCIDENTE (INC_ID, INC_TIPO, INC_DESCRIPCION) VALUES (DEFAULT, 'Choque', 'Catálogo sin lógica automática');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_INCIDENTE WHERE INC_TIPO = 'Estacionamiento';
+  IF c = 0 THEN
+    INSERT INTO PAR_INCIDENTE (INC_ID, INC_TIPO, INC_DESCRIPCION) VALUES (DEFAULT, 'Estacionamiento', 'Catálogo sin lógica automática');
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_ESTADO_MEMBRESIA / PAR_TIPO_MEMBRESIA
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MEMBRESIA WHERE EME_ESTADO = 'Activa';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MEMBRESIA (EME_ID, EME_ESTADO) VALUES (DEFAULT, 'Activa'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MEMBRESIA WHERE EME_ESTADO = 'Cancelada';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MEMBRESIA (EME_ID, EME_ESTADO) VALUES (DEFAULT, 'Cancelada'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MEMBRESIA WHERE EME_ESTADO = 'Vencida';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MEMBRESIA (EME_ID, EME_ESTADO) VALUES (DEFAULT, 'Vencida'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MEMBRESIA WHERE EME_ESTADO = 'Suspendida';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MEMBRESIA (EME_ID, EME_ESTADO) VALUES (DEFAULT, 'Suspendida'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_MEMBRESIA WHERE TME_TIPO = 'Mensual' AND NVL(TME_PRECIO, -1) = 350;
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_MEMBRESIA (TME_ID, TME_TIPO, TME_DURACION, TME_PRECIO, TME_DESCRIPCION)
+    VALUES (DEFAULT, 'Mensual', 30, 350, 'Mensual – Q350.00');
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_MEMBRESIA WHERE TME_TIPO = 'Anual' AND NVL(TME_PRECIO, -1) = 3800;
+  IF c = 0 THEN
+    INSERT INTO PAR_TIPO_MEMBRESIA (TME_ID, TME_TIPO, TME_DURACION, TME_PRECIO, TME_DESCRIPCION)
+    VALUES (DEFAULT, 'Anual', 365, 3800, 'Anual – Q3800.00');
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_TIPO_COBRO / PAR_TIPO_PAGO
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_COBRO WHERE TCO_TIPO = 'Efectivo';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_COBRO (TCO_ID, TCO_TIPO, TCO_DESCRIPCION) VALUES (DEFAULT, 'Efectivo', 'Cobro en efectivo'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_COBRO WHERE TCO_TIPO = 'Tarjeta';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_COBRO (TCO_ID, TCO_TIPO, TCO_DESCRIPCION) VALUES (DEFAULT, 'Tarjeta', 'Cobro con tarjeta'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_PAGO WHERE TPA_TIPO = 'Efectivo';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_PAGO (TPA_ID, TPA_TIPO, TPA_DESCRIPCION) VALUES (DEFAULT, 'Efectivo', 'Pago en efectivo'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_PAGO WHERE TPA_TIPO = 'Tarjeta';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_PAGO (TPA_ID, TPA_TIPO, TPA_DESCRIPCION) VALUES (DEFAULT, 'Tarjeta', 'Pago con tarjeta'); END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_TIPO_MAQUINA / PAR_ESTADO_MAQUINA
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_MAQUINA WHERE LOWER(TMA_TIPO) = 'entrada';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_MAQUINA (TMA_ID, TMA_TIPO, TMA_DESCRIPCION) VALUES (DEFAULT, 'Entrada', 'Cabina de entrada'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_MAQUINA WHERE LOWER(TMA_TIPO) = 'salida';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_MAQUINA (TMA_ID, TMA_TIPO, TMA_DESCRIPCION) VALUES (DEFAULT, 'Salida', 'Cabina de salida'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_MAQUINA WHERE LOWER(TMA_TIPO) = 'cobro';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_MAQUINA (TMA_ID, TMA_TIPO, TMA_DESCRIPCION) VALUES (DEFAULT, 'Cobro', 'Máquina de cobro'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Operativa';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MAQUINA (EMA_ID, EMA_ESTADO, EMA_DESCRIPCION) VALUES (DEFAULT, 'Operativa', 'En servicio; flujo principal'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Inoperativa';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MAQUINA (EMA_ID, EMA_ESTADO, EMA_DESCRIPCION) VALUES (DEFAULT, 'Inoperativa', 'Creada pero aún no activada'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Mantenimiento';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MAQUINA (EMA_ID, EMA_ESTADO, EMA_DESCRIPCION) VALUES (DEFAULT, 'Mantenimiento', 'Mantenimiento programado'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_ESTADO_MAQUINA WHERE EMA_ESTADO = 'Fuera de servicio';
+  IF c = 0 THEN INSERT INTO PAR_ESTADO_MAQUINA (EMA_ID, EMA_ESTADO, EMA_DESCRIPCION) VALUES (DEFAULT, 'Fuera de servicio', 'No disponible'); END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_MAQUINA: equipos base de cabina
+  -- Se crean en este orden cuando la tabla esta vacia: Entrada_1, Cobro_1,
+  -- Salida_1. Los reportes y flujos primero buscan por codigo, asi que
+  -- re-ejecutar este seed no duplica registros ni depende de IDs fijos.
+  ---------------------------------------------------------------------------
+  SELECT MIN(TMA_ID) INTO tma_entrada FROM PAR_TIPO_MAQUINA WHERE LOWER(TRIM(TMA_TIPO)) = 'entrada';
+  SELECT MIN(TMA_ID) INTO tma_cobro FROM PAR_TIPO_MAQUINA WHERE LOWER(TRIM(TMA_TIPO)) = 'cobro';
+  SELECT MIN(TMA_ID) INTO tma_salida FROM PAR_TIPO_MAQUINA WHERE LOWER(TRIM(TMA_TIPO)) = 'salida';
+  SELECT MIN(EMA_ID) INTO ema_operativa FROM PAR_ESTADO_MAQUINA WHERE LOWER(TRIM(EMA_ESTADO)) = 'operativa';
+
+  IF tma_entrada IS NULL OR tma_cobro IS NULL OR tma_salida IS NULL OR ema_operativa IS NULL THEN
+    RAISE_APPLICATION_ERROR(-20301, 'No se pudieron resolver tipos/estado base para crear maquinas de cabina.');
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MAQUINA WHERE UPPER(TRIM(MAQ_CODIGO)) = 'ENTRADA_1';
+  IF c = 0 THEN
+    INSERT INTO PAR_MAQUINA (MAQ_ID, MAQ_CODIGO, TMA_ID, EMA_ID, MAQ_FECHA_ULTIMA_RECARGA)
+    VALUES (DEFAULT, 'Entrada_1', tma_entrada, ema_operativa, NULL);
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MAQUINA WHERE UPPER(TRIM(MAQ_CODIGO)) = 'COBRO_1';
+  IF c = 0 THEN
+    INSERT INTO PAR_MAQUINA (MAQ_ID, MAQ_CODIGO, TMA_ID, EMA_ID, MAQ_FECHA_ULTIMA_RECARGA)
+    VALUES (DEFAULT, 'Cobro_1', tma_cobro, ema_operativa, SYSDATE);
+  END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MAQUINA WHERE UPPER(TRIM(MAQ_CODIGO)) = 'SALIDA_1';
+  IF c = 0 THEN
+    INSERT INTO PAR_MAQUINA (MAQ_ID, MAQ_CODIGO, TMA_ID, EMA_ID, MAQ_FECHA_ULTIMA_RECARGA)
+    VALUES (DEFAULT, 'Salida_1', tma_salida, ema_operativa, NULL);
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_SALDO_DISPONIBLE / PAR_DETALLE_SALDO inicial para Cobro_1
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_SALDO_DISPONIBLE WHERE SDI_VALOR = 5;
+  IF c = 0 THEN INSERT INTO PAR_SALDO_DISPONIBLE (SDI_ID, SDI_TIPO, SDI_VALOR) VALUES (DEFAULT, 'Q5', 5); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_SALDO_DISPONIBLE WHERE SDI_VALOR = 10;
+  IF c = 0 THEN INSERT INTO PAR_SALDO_DISPONIBLE (SDI_ID, SDI_TIPO, SDI_VALOR) VALUES (DEFAULT, 'Q10', 10); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_SALDO_DISPONIBLE WHERE SDI_VALOR = 20;
+  IF c = 0 THEN INSERT INTO PAR_SALDO_DISPONIBLE (SDI_ID, SDI_TIPO, SDI_VALOR) VALUES (DEFAULT, 'Q20', 20); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_SALDO_DISPONIBLE WHERE SDI_VALOR = 50;
+  IF c = 0 THEN INSERT INTO PAR_SALDO_DISPONIBLE (SDI_ID, SDI_TIPO, SDI_VALOR) VALUES (DEFAULT, 'Q50', 50); END IF;
+
+  SELECT MIN(MAQ_ID) INTO maq_cobro FROM PAR_MAQUINA WHERE UPPER(TRIM(MAQ_CODIGO)) = 'COBRO_1';
+  IF maq_cobro IS NOT NULL THEN
+    INSERT INTO PAR_DETALLE_SALDO (DSA_CANTIDAD, DSA_SUBTOTAL, DSA_UMBRAL_MINIMO, SDI_ID, MAQ_ID)
+    SELECT 0,
+           0,
+           CASE NVL(sd.SDI_VALOR, 0)
+             WHEN 5 THEN 20
+             WHEN 10 THEN 15
+             WHEN 20 THEN 10
+             WHEN 50 THEN 10
+             WHEN 100 THEN 5
+             ELSE 0
+           END,
+           sd.SDI_ID,
+           maq_cobro
+      FROM PAR_SALDO_DISPONIBLE sd
+     WHERE NOT EXISTS (
+           SELECT 1
+             FROM PAR_DETALLE_SALDO ds
+            WHERE ds.MAQ_ID = maq_cobro
+              AND ds.SDI_ID = sd.SDI_ID
+     );
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_TARIFA
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_TARIFA WHERE TAR_TIPO = 'Esporádico hora' AND NVL(TAR_PRECIO, -1) = 10 AND NVL(TAR_TIEMPO_GRACIA, -1) = 15;
+  IF c = 0 THEN
+    INSERT INTO PAR_TARIFA (TAR_ID, TAR_TIPO, TAR_PRECIO, TAR_TIEMPO_GRACIA)
+    VALUES (DEFAULT, 'Esporádico hora', 10, 15);
+  END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TARIFA WHERE TAR_TIPO = 'Esporádico fin de semana' AND NVL(TAR_PRECIO, -1) = 20 AND NVL(TAR_TIEMPO_GRACIA, -1) = 15;
+  IF c = 0 THEN
+    INSERT INTO PAR_TARIFA (TAR_ID, TAR_TIPO, TAR_PRECIO, TAR_TIEMPO_GRACIA)
+    VALUES (DEFAULT, 'Esporádico fin de semana', 20, 15);
+  END IF;
+
+  ---------------------------------------------------------------------------
+  -- Catálogo de vehículos: tipo -> marca -> modelo + colores
+  ---------------------------------------------------------------------------
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_VEHICULO (TVE_ID, TVE_TIPO, TVE_DESCRIPCION) VALUES (DEFAULT, 'Automovil', 'Sedan, hatchback y compactos'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_VEHICULO (TVE_ID, TVE_TIPO, TVE_DESCRIPCION) VALUES (DEFAULT, 'SUV', 'Vehículo utilitario deportivo'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Pickup';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_VEHICULO (TVE_ID, TVE_TIPO, TVE_DESCRIPCION) VALUES (DEFAULT, 'Pickup', 'Vehículo de carga ligera'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Moto';
+  IF c = 0 THEN INSERT INTO PAR_TIPO_VEHICULO (TVE_ID, TVE_TIPO, TVE_DESCRIPCION) VALUES (DEFAULT, 'Moto', 'Motocicleta'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Toyota';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Toyota', 'Marca japonesa de automóviles'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Honda';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Honda', 'Marca japonesa de automóviles y motocicletas'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Hyundai';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Hyundai', 'Marca coreana'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Kia';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Kia', 'Marca coreana'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Mazda';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Mazda', 'Marca japonesa'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Nissan';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Nissan', 'Marca japonesa'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Suzuki';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Suzuki', 'Marca japonesa'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Yamaha';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Yamaha', 'Marca japonesa de motocicletas'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Isuzu';
+  IF c = 0 THEN INSERT INTO PAR_MARCA_VEHICULO (MAR_ID, MAR_NOMBRE, MAR_DESCRIPCION) VALUES (DEFAULT, 'Isuzu', 'Marca japonesa de pickups y camiones ligeros'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Blanco';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Blanco', 'Color blanco'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Negro';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Negro', 'Color negro'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Gris';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Gris', 'Color gris'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Plata';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Plata', 'Color plata'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Rojo';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Rojo', 'Color rojo'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Azul';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Azul', 'Color azul'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Verde';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Verde', 'Color verde'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Amarillo';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Amarillo', 'Color amarillo'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Cafe';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Cafe', 'Color café'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_COLOR_VEHICULO WHERE COL_NOMBRE = 'Vino';
+  IF c = 0 THEN INSERT INTO PAR_COLOR_VEHICULO (COL_ID, COL_NOMBRE, COL_DESCRIPCION) VALUES (DEFAULT, 'Vino', 'Color vino'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Toyota' AND mod.MOD_NOMBRE = 'Corolla';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Corolla', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Toyota'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Sedan compacto'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Toyota' AND mod.MOD_NOMBRE = 'Yaris';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Yaris', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Toyota'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Subcompacto'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Toyota' AND mod.MOD_NOMBRE = 'RAV4';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'RAV4', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Toyota'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV'), 'SUV mediana'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Toyota' AND mod.MOD_NOMBRE = 'Hilux';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Hilux', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Toyota'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Pickup'), 'Pickup doble cabina'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Honda' AND mod.MOD_NOMBRE = 'Civic';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Civic', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Honda'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Sedan compacto'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Honda' AND mod.MOD_NOMBRE = 'CR-V';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'CR-V', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Honda'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV'), 'SUV familiar'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Hyundai' AND mod.MOD_NOMBRE = 'Accent';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Accent', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Hyundai'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Sedan subcompacto'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Hyundai' AND mod.MOD_NOMBRE = 'Elantra';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Elantra', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Hyundai'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Sedan mediano'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Hyundai' AND mod.MOD_NOMBRE = 'Tucson';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Tucson', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Hyundai'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV'), 'SUV compacta'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Kia' AND mod.MOD_NOMBRE = 'Picanto';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Picanto', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Kia'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Hatchback urbano'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Kia' AND mod.MOD_NOMBRE = 'Rio';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Rio', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Kia'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Sedan compacto'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Kia' AND mod.MOD_NOMBRE = 'Sportage';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Sportage', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Kia'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV'), 'SUV compacta'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Mazda' AND mod.MOD_NOMBRE = 'Mazda3';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Mazda3', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Mazda'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Sedan o hatchback'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Mazda' AND mod.MOD_NOMBRE = 'CX-5';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'CX-5', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Mazda'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV'), 'SUV compacta'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Mazda' AND mod.MOD_NOMBRE = 'BT-50';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'BT-50', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Mazda'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Pickup'), 'Pickup mediana'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Nissan' AND mod.MOD_NOMBRE = 'Sentra';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Sentra', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Nissan'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Sedan compacto'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Nissan' AND mod.MOD_NOMBRE = 'X-Trail';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'X-Trail', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Nissan'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV'), 'SUV mediana'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Nissan' AND mod.MOD_NOMBRE = 'Frontier';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Frontier', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Nissan'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Pickup'), 'Pickup doble cabina'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Suzuki' AND mod.MOD_NOMBRE = 'Swift';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Swift', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Suzuki'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Automovil'), 'Hatchback compacto'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Suzuki' AND mod.MOD_NOMBRE = 'Vitara';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'Vitara', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Suzuki'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'SUV'), 'SUV compacta'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Yamaha' AND mod.MOD_NOMBRE = 'FZ';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'FZ', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Yamaha'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Moto'), 'Motocicleta urbana'); END IF;
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Yamaha' AND mod.MOD_NOMBRE = 'XTZ';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'XTZ', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Yamaha'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Moto'), 'Motocicleta doble propósito'); END IF;
+
+  SELECT COUNT(*) INTO c FROM PAR_MODELO_VEHICULO mod JOIN PAR_MARCA_VEHICULO mar ON mar.MAR_ID = mod.MAR_ID WHERE mar.MAR_NOMBRE = 'Isuzu' AND mod.MOD_NOMBRE = 'D-Max';
+  IF c = 0 THEN INSERT INTO PAR_MODELO_VEHICULO (MOD_ID, MOD_NOMBRE, MAR_ID, TVE_ID, MOD_DESCRIPCION) VALUES (DEFAULT, 'D-Max', (SELECT MIN(MAR_ID) FROM PAR_MARCA_VEHICULO WHERE MAR_NOMBRE = 'Isuzu'), (SELECT MIN(TVE_ID) FROM PAR_TIPO_VEHICULO WHERE TVE_TIPO = 'Pickup'), 'Pickup de trabajo y uso mixto'); END IF;
+
+  ---------------------------------------------------------------------------
+  -- PAR_ESPACIO: capacidad inicial mínima de 500 filas sin alterar ocupación actual
+  ---------------------------------------------------------------------------
+  SELECT MIN(EES_ID) INTO ees_disp FROM PAR_ESTADO_ESPACIO WHERE EES_ESTADO = 'Disponible';
+
+  SELECT COUNT(*) INTO total_espacios FROM PAR_ESPACIO;
+
+  IF total_espacios < 500 THEN
+    SELECT NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(ESP_CODIGO, '[0-9]+$'))), 0)
+      INTO n
+      FROM PAR_ESPACIO
+     WHERE REGEXP_LIKE(ESP_CODIGO, '[0-9]+$');
+    FOR i IN 1 .. (500 - total_espacios) LOOP
+      n := n + 1;
+      INSERT INTO PAR_ESPACIO (ESP_ID, ESP_CODIGO, EES_ID, ESP_UBICACION)
+      VALUES (DEFAULT, 'CAT-' || LPAD(TO_CHAR(n), 5, '0'), ees_disp, 'Capacidad inicial');
+    END LOOP;
+  END IF;
+
+END;
+/

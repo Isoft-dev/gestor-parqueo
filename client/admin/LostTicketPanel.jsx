@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { API_BASE } from '../config.js';
+import HelpHint from '../components/HelpHint.jsx';
+import { getFieldPlaceholder } from '../utils/fieldValidation.js';
+import { normalizePlateInput } from '../utils/plate.js';
 
 export default function LostTicketPanel() {
   const [placa, setPlaca] = useState('');
@@ -21,7 +24,7 @@ export default function LostTicketPanel() {
       if (!res.ok) throw new Error(data.error || res.statusText);
       setQuote(data);
       setMsg(
-        'Estado actualizado a extraviado. Cotización lista para cobro manual (use «Operación cabina» o el API checkout con cobro no procesado por máquina).',
+        'Estado actualizado a extraviado. Cotizacion lista para cobro manual desde Operacion de cabina o checkout sin cobro procesado por maquina.',
       );
     } catch (e) {
       setMsg(String(e?.message || e));
@@ -32,22 +35,29 @@ export default function LostTicketPanel() {
 
   return (
     <div className="admin-panel-block" style={{ marginBottom: 16 }}>
-      <h2 className="admin-page-title" style={{ fontSize: '1.1rem', marginTop: 0 }}>
-        Ticket extraviado (esporádico)
-      </h2>
-      <p className="admin-muted" style={{ marginTop: 0 }}>
-        Busca por placa, marca el ticket como extraviado y obtén la cotización vigente.
-      </p>
+      <div className="admin-page-header__title-main" style={{ marginBottom: 6 }}>
+        <h2 className="admin-page-title" style={{ fontSize: '1.1rem', margin: 0 }}>
+          Ticket extraviado (esporadico)
+        </h2>
+        <HelpHint label="Mostrar guia de ticket extraviado" title="Procedimiento de ticket extraviado">
+          <p>Usa este flujo cuando el cliente ya paso por administracion y el papeleo se resolvio fuera del sistema.</p>
+          <ol>
+            <li>Busca la placa del vehiculo y marca el ticket como extraviado.</li>
+            <li>El sistema genera la bitacora del incidente para dejar el caso rastreable.</li>
+            <li>Cobra el ticket con el recargo extra y luego completa la salida del vehiculo.</li>
+          </ol>
+        </HelpHint>
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="Placa del vehículo"
+          placeholder={getFieldPlaceholder('VEH_PLACA')}
           value={placa}
-          onChange={(e) => setPlaca(e.target.value.toUpperCase())}
+          onChange={(e) => setPlaca(normalizePlateInput(e.target.value))}
           style={{ padding: '8px 10px', minWidth: 160 }}
         />
         <button type="button" className="admin-btn-primary" onClick={preparar} disabled={loading || !placa.trim()}>
-          {loading ? 'Procesando…' : 'Buscar y marcar extraviado'}
+          {loading ? 'Procesando...' : 'Buscar y marcar extraviado'}
         </button>
       </div>
       {msg ? (
