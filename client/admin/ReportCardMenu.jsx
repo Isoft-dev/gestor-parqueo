@@ -1,3 +1,5 @@
+import { BtnContent, IconBack } from '../components/UiIcons.jsx';
+
 function ReportIcon({ type = 'chart' }) {
   const common = {
     viewBox: '0 0 24 24',
@@ -130,12 +132,12 @@ export function ReportDetailNav({ eyebrow, title, onBack, backLabel = 'Volver', 
       <div className="crudx-monthly-nav__actions">
         {onBack ? (
           <button type="button" className="crudx-btn-secondary" onClick={onBack}>
-            {backLabel}
+            <BtnContent icon={IconBack}>{backLabel}</BtnContent>
           </button>
         ) : null}
         {onBackHome ? (
           <button type="button" className="crudx-btn-secondary" onClick={onBackHome}>
-            Volver a reportes
+            <BtnContent icon={IconBack}>Volver a reportes</BtnContent>
           </button>
         ) : null}
       </div>

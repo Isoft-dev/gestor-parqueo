@@ -46,7 +46,7 @@ async function main() {
 
   const conn = await oracledb.getConnection({ user, password, connectString });
   try {
-    await conn.execute(sql);
+    await conn.execute(sql, {}, { autoCommit: false });
     console.log('OK: ejecutado seed_catalogo_funcional.sql (bloque PL/SQL completo)');
     await conn.commit();
     console.log('Hecho: seed_catalogo_funcional.sql aplicado (COMMIT).');

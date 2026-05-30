@@ -8,7 +8,16 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard } from './ReportChartPrimitives.jsx';
-import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
+import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
 
 import { useReportFilter } from './ReportFilterContext.jsx';
 const PROFILE_REPORT_CARDS = [
@@ -170,51 +179,47 @@ export default function ReportesPerfilFlotaSection({ onBackToReports = null }) {
   const ciudadOpts = buildCartesianOptions({ indexAxis: 'y', numericFormatter: formatNumber });
 
   const hasData = dataHeat || dataGeo;
+  const generateRef = useReportGenerateScroll(tab);
+  const activeCard = PROFILE_REPORT_CARDS.find((item) => item.id === tab);
+  const reportTitle = tab === 'heatmap' ? 'Mapa de calor — afluencia por hora y día' : 'Perfil geográfico de clientes';
 
   return (
-    <>
+    <ReportWorkspace>
       <ReportDetailNav
         eyebrow="Reportes"
         title="Perfil de flota"
         backLabel="Volver a reportes"
         onBack={onBackToReports}
       />
-      <ReportCardMenu
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={hasData ? 4 : 3} />
+      <ReportSubreportTabs
         ariaLabel="Subreportes de perfil de flota"
         items={PROFILE_REPORT_CARDS}
+        activeId={tab}
         onSelect={setTab}
       />
 
-      {/* Tabs */}
-
-      <div className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">
-          {tab === 'heatmap' && 'Mapa de calor — afluencia por hora y día'}
-          {tab === 'geo'     && 'Perfil geográfico de clientes'}
-        </h2>
-
+      <ReportGeneratePanel panelRef={generateRef} title={reportTitle} tone={activeCard?.tone}>
         <form className="reporte-inc-form" onSubmit={tab === 'heatmap' ? generate : (e) => { e.preventDefault(); generateGeo(); }}>
-          {tab === 'heatmap' && (
-            <>
-            </>
-          )}
-          {tab === 'geo' && (
+          {tab === 'geo' ? (
             <p className="reporte-inc-field" style={{ color: '#64748b', fontSize: '0.82rem', margin: 0 }}>
               Muestra todos los clientes registrados con zona o ciudad capturada.
             </p>
-          )}
+          ) : null}
           <div className="reporte-inc-form__actions">
             <button type="submit" className="admin-btn-primary" disabled={loading}>
               {loading ? 'Generando…' : tab === 'geo' ? 'Actualizar' : 'Generar reporte'}
             </button>
           </div>
         </form>
+      </ReportGeneratePanel>
 
-        {error && <div className="admin-banner admin-banner--error" style={{ marginTop: '1rem' }}>{error}</div>}
+      {error ? <div className="admin-banner admin-banner--error">{error}</div> : null}
 
-        {/* ── TAB: HEATMAP ────────────────────────────────────── */}
-        {tab === 'heatmap' && dataHeat && (
-          <div style={{ marginTop: '1.5rem' }}>
+      <ReportResultsSection visible={hasData || loading} render={() => (
+        <>
+        {tab === 'heatmap' && dataHeat ? (
+          <div style={{ marginTop: '0.5rem' }}>
             <ReportChartCard
               title="Mapa de calor de afluencia"
               description="Total de entradas (esporádicas + membresías) por franja horaria y día de la semana. Pasa el cursor sobre cada celda para ver el detalle."
@@ -225,12 +230,10 @@ export default function ReportesPerfilFlotaSection({ onBackToReports = null }) {
               <Heatmap data={dataHeat} />
             </ReportChartCard>
           </div>
-        )}
+        ) : null}
 
-        {/* ── TAB: GEOGRAFÍA ──────────────────────────────────── */}
-        {tab === 'geo' && dataGeo && (
-          <div className="reporte-chart-grid" style={{ marginTop: '1.5rem' }}>
-
+        {tab === 'geo' && dataGeo ? (
+          <div className="reporte-chart-grid" style={{ marginTop: '0.5rem' }}>
             <ReportChartCard
               title="Clientes por zona"
               description="Top 15 zonas con más clientes registrados. Verde = activos."
@@ -260,20 +263,19 @@ export default function ReportesPerfilFlotaSection({ onBackToReports = null }) {
                 : <p className="reporte-inc-empty">No hay ciudad registrada en los clientes.</p>
               }
             </ReportChartCard>
-
           </div>
-        )}
+        ) : null}
 
-        {/* Estado vacío */}
-        {!loading && !error && !hasData && (
-          <p className="reporte-inc-empty" style={{ marginTop: '2rem' }}>
+        {!loading && !error && !hasData ? (
+          <p className="reporte-inc-empty" style={{ marginTop: '0.5rem' }}>
             {tab === 'geo'
               ? 'Cargando datos de clientes…'
               : 'Selecciona el rango de fechas y presiona Generar reporte.'}
           </p>
-        )}
-      </div>
-    </>
+        ) : null}
+        </>
+      )} />
+    </ReportWorkspace>
   );
 }
 

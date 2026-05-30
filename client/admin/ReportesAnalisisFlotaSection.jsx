@@ -11,6 +11,14 @@ import {
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
 import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
 
 import { useReportFilter } from './ReportFilterContext.jsx';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -525,17 +533,20 @@ export default function ReportesAnalisisFlotaSection({ onBackToReports = null })
     fEstadiaMin !== '' ||
     fEstadiaMax !== '';
 
+  const generateRef = useReportGenerateScroll('analisis_flota');
+
   return (
-    <>
+    <ReportWorkspace>
       <ReportDetailNav
         eyebrow="Reportes"
         title="Analisis de marcas"
         backLabel="Volver a reportes"
         onBack={onBackToReports}
       />
-      <section className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">Análisis de marcas y franjas</h2>
-        <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '-0.35rem' }}>
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={hayDatos ? 4 : 3} />
+
+      <ReportGeneratePanel panelRef={generateRef} title="Análisis de marcas y franjas" tone="sunset">
+        <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: 0, marginBottom: '0.85rem' }}>
           Descubre qué marca de vehículo ingresa más según la hora, el día de la semana o el mes, y cruza los
           datos con tipo de cliente, tipo de vehículo y color. Todos los filtros se aplican al instante.
         </p>
@@ -554,19 +565,21 @@ export default function ReportesAnalisisFlotaSection({ onBackToReports = null })
             </button>
           </div>
         </form>
-      </section>
+      </ReportGeneratePanel>
 
       {error && (
-        <div className="admin-banner admin-banner--error" role="alert" style={{ marginTop: '1rem' }}>
+        <div className="admin-banner admin-banner--error" role="alert">
           {error}
         </div>
       )}
 
-      {raw && visitas.length === 0 && !error && (
-        <p className="reporte-inc-empty">No hay entradas registradas en el rango seleccionado.</p>
-      )}
+      <ReportResultsSection visible={hayDatos || !!raw} render={() => (
+        <>
+        {raw && visitas.length === 0 && !error ? (
+          <p className="reporte-inc-empty">No hay entradas registradas en el rango seleccionado.</p>
+        ) : null}
 
-      {hayDatos && (
+        {hayDatos ? (
         <>
           <section className="reporte-inc-card" style={{ marginTop: '1rem' }}>
             <div className="reporte-table-toolbar">
@@ -970,14 +983,17 @@ export default function ReportesAnalisisFlotaSection({ onBackToReports = null })
               </div>
             </>
           )}
-        </>
-      )}
 
-      {!raw && !loading && !error && (
-        <p className="reporte-inc-empty">
-          Selecciona un rango de fechas y presiona «Generar reporte» para comenzar el análisis.
-        </p>
-      )}
-    </>
+        </>
+        ) : null}
+
+        {!raw && !loading && !error ? (
+          <p className="reporte-inc-empty">
+            Selecciona un rango de fechas y presiona «Generar reporte» para comenzar el análisis.
+          </p>
+        ) : null}
+        </>
+      )} />
+    </ReportWorkspace>
   );
 }

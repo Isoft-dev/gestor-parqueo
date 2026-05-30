@@ -3,8 +3,23 @@ import { useSearchParams } from 'react-router-dom';
 import { useCallback } from 'react';
 import { API_BASE } from '../config.js';
 import { buildLabelMapFromCrudFields, getDbColumnLabel } from '../utils/dbColumnLabel.js';
-import { sanitizeFieldValue, getInputMode, getMaxLength } from '../utils/fieldValidation.js';
+import { sanitizeFieldValue, getInputMode, getMaxLength, getFieldPlaceholder, getSearchPlaceholder, sanitizeSearchValue } from '../utils/fieldValidation.js';
 import HelpHint from './HelpHint.jsx';
+import {
+  BtnContent,
+  IconBack,
+  IconBalance,
+  IconClear,
+  IconEdit,
+  IconMaintenance,
+  IconPlus,
+  IconRecharge,
+  IconSearch,
+  IconTrash,
+  IconTransaction,
+} from './UiIcons.jsx';
+import { clampDateYmd, nowLocalDatetime, todayYmd } from '../utils/dateLimits.js';
+import { formatUserFacingMessage, isErrorLikeMessage } from '../utils/userMessage.js';
 import {
   filterManualMachineStatuses,
   filterMaintenanceResultMachineStatuses,
@@ -574,12 +589,18 @@ async function parseJsonSafe(res) {
 
 /** Tono de alerta en toolbar: errores de API y restricciones (p. ej. FK al eliminar). */
 function isCrudErrorMessage(text) {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  if (/^Error(:|\s)/i.test(t)) return true;
-  if (/^No se puede\b/i.test(t)) return true;
-  if (/^No existe\b/i.test(t)) return true;
-  return false;
+  return isErrorLikeMessage(text);
+}
+
+function userMsg(text) {
+  return formatUserFacingMessage(text);
+}
+
+function getMachineStatusStripeClass(tone) {
+  if (tone === 'success') return 'crudx-machine-card--status-success';
+  if (tone === 'caution') return 'crudx-machine-card--status-caution';
+  if (tone === 'danger') return 'crudx-machine-card--status-danger';
+  return 'crudx-machine-card--status-neutral';
 }
 
 /** Texto corto y claro bajo el título de cada lista del panel admin (`sectionPath` + entidad). */
@@ -1396,8 +1417,8 @@ export default function CrudDemo({
   sessionIsFullAdmin = false,
   sectionPath = '',
 }) {
-  const TODAY = new Date().toISOString().slice(0, 10);
-  const NOW_LOCAL = (() => { const d = new Date(); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })();
+  const TODAY = todayYmd();
+  const NOW_LOCAL = nowLocalDatetime();
 
   const readOnlyFieldStyle = {
     background: '#e5e7eb',
@@ -1459,6 +1480,7 @@ export default function CrudDemo({
   const [vehiculoFilter, setVehiculoFilter] = useState(emptyVehiculoFilter);
   /** Modal MEM-2: vehículo sin cliente al crear membresía */
   const [vehClienteModal, setVehClienteModal] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   /** Catálogos para campos `t: 'select'` (clave = segmento API, p. ej. tipo-vehiculo). */
   const [catalogOptions, setCatalogOptions] = useState({});
   const [monthlyWorkspaceView, setMonthlyWorkspaceView] = useState('cards');
@@ -1508,7 +1530,7 @@ export default function CrudDemo({
     } catch (err) {
       setMachineCardsRows([]);
       setMachineCardsCatalogs({ tipos: [], estados: [] });
-      setMsg('Error: ' + err.message);
+      setMsg(userMsg(err.message));
       return null;
     } finally {
       if (!silent) setMachineCardsLoading(false);
@@ -2072,7 +2094,7 @@ export default function CrudDemo({
         }
       }
       setRows(list);
-    } catch (e) { setMsg('Error: ' + e.message); setRows([]); }
+    } catch (e) { setMsg(userMsg(e.message)); setRows([]); }
     finally { setLoading(false); }
   }
 
@@ -2584,7 +2606,7 @@ export default function CrudDemo({
       await refreshMachineCards({ silent: true, preserveMessage: true });
       setMsg('Máquina creada.');
     } catch (err) {
-      setMsg('Error: ' + err.message);
+      setMsg(userMsg(err.message));
     } finally {
       setMachineCreateSaving(false);
     }
@@ -2619,7 +2641,7 @@ export default function CrudDemo({
       await refreshMachineCards({ silent: true, preserveMessage: true });
       setMsg('Estado de máquina actualizado.');
     } catch (err) {
-      setMsg('Error: ' + err.message);
+      setMsg(userMsg(err.message));
     } finally {
       setMachineStatusSavingId(null);
     }
@@ -2774,7 +2796,7 @@ export default function CrudDemo({
       setMsg('Recarga aplicada y registrada en Recargo Máquina.');
       await load();
     } catch (e) {
-      setMsg(`Error: ${e.message}`);
+      setMsg(userMsg(e.message));
     }
   }
 
@@ -3058,7 +3080,7 @@ export default function CrudDemo({
       }
       cancelEdit();
       await load();
-    } catch (err) { setMsg('Error: ' + err.message); }
+    } catch (err) { setMsg(userMsg(err.message)); }
   }
 
   async function assignClienteAVehiculoModal() {
@@ -3085,26 +3107,37 @@ export default function CrudDemo({
       setVehClienteModal(null);
       setMsg('Cliente asignado al vehículo. Puede guardar la membresía de nuevo.');
     } catch (e) {
-      setMsg('Error: ' + e.message);
+      setMsg(userMsg(e.message));
     }
   }
 
   async function del(id) {
-    const pkLabel = getDbColumnLabel(entity.id, CRUD_COLUMN_LABELS);
-    if (!confirm(`¿Eliminar ${entity.label} (${pkLabel}: ${id})?`)) return;
     try {
       const res = await fetch(`${API_BASE}/${entity.key}/${id}`, { method: 'DELETE' });
       const json = await parseJsonSafe(res);
       if (!res.ok) throw new Error(json.error || json.message || res.statusText);
-      setMsg('Eliminado.'); load();
+      setMsg('Registro eliminado correctamente.');
+      load();
     } catch (err) {
-      const txt = String(err.message || '');
-      if (/ORA-20001|ORA-02292/i.test(txt)) {
+      const txt = userMsg(err.message || '');
+      if (/ORA-20001|ORA-02292|siendo usado/i.test(String(err.message || ''))) {
         setMsg('No se puede eliminar porque este registro está siendo usado por otro.');
       } else {
-        setMsg('Error: ' + txt);
+        setMsg(txt);
       }
     }
+  }
+
+  function requestDelete(id) {
+    setConfirmDialog({
+      title: `Eliminar ${entity.label}`,
+      message: '¿Estás seguro de que deseas eliminar este registro? Esta acción no se puede deshacer.',
+      confirmLabel: 'Sí, eliminar',
+      onConfirm: () => {
+        setConfirmDialog(null);
+        del(id);
+      },
+    });
   }
 
   async function deactivateCliente(row) {
@@ -3128,7 +3161,7 @@ export default function CrudDemo({
       setMsg(shouldActivate ? 'Cliente activado.' : 'Cliente desactivado.');
       load();
     } catch (err) {
-      setMsg('Error: ' + err.message);
+      setMsg(userMsg(err.message));
     }
   }
 
@@ -3149,7 +3182,7 @@ export default function CrudDemo({
       setMsg('Usuario desactivado.');
       load();
     } catch (err) {
-      setMsg('Error: ' + err.message);
+      setMsg(userMsg(err.message));
     }
   }
 
@@ -3330,16 +3363,16 @@ export default function CrudDemo({
             <div className="crudx-monthly-nav__actions">
               {isMonthlyVehicleMembershipView ? (
                 <button type="button" className="crudx-btn-secondary" onClick={returnToMonthlyClientVehicles}>
-                  Volver a vehículos
+                  <BtnContent icon={IconBack}>Volver a vehículos</BtnContent>
                 </button>
               ) : null}
               {isMonthlyClientVehicleView ? (
                 <button type="button" className="crudx-btn-secondary" onClick={returnToMonthlyClients}>
-                  Volver a clientes
+                  <BtnContent icon={IconBack}>Volver a clientes</BtnContent>
                 </button>
               ) : null}
               <button type="button" className="crudx-btn-secondary" onClick={resetMonthlyWorkspaceToCards}>
-                Volver a modulos
+                <BtnContent icon={IconBack}>Volver a módulos</BtnContent>
               </button>
             </div>
           </div>
@@ -3353,7 +3386,7 @@ export default function CrudDemo({
                 <strong>{machineCardsRows.length} equipos</strong>
               </div>
               <button type="button" className="crudx-entity-card__action crudx-entity-card__action--primary" onClick={openNewMachineForm}>
-                + Nueva máquina
+                <BtnContent icon={IconPlus}>Nueva máquina</BtnContent>
               </button>
             </div>
             {msg ? (
@@ -3363,7 +3396,7 @@ export default function CrudDemo({
                 </span>
                 <div>
                   <strong>{isCrudErrorMessage(msg) ? 'No se pudo completar' : 'Listo'}</strong>
-                  <p>{msg}</p>
+                  <p>{isCrudErrorMessage(msg) ? userMsg(msg) : msg}</p>
                 </div>
               </div>
             ) : null}
@@ -3383,8 +3416,11 @@ export default function CrudDemo({
                     <span>Código</span>
                     <input
                       value={machineCreateForm.MAQ_CODIGO}
-                      onChange={(event) => setMachineCreateForm((prev) => ({ ...prev, MAQ_CODIGO: event.target.value }))}
-                      placeholder="Ej. Entrada_2"
+                      onChange={(event) => setMachineCreateForm((prev) => ({
+                        ...prev,
+                        MAQ_CODIGO: sanitizeFieldValue('MAQ_CODIGO', event.target.value),
+                      }))}
+                      placeholder={getFieldPlaceholder('MAQ_CODIGO')}
                       required
                     />
                   </label>
@@ -3438,16 +3474,20 @@ export default function CrudDemo({
                   { variant: 'cash', label: 'Cobro' },
                   { variant: 'exit', label: 'Salida' },
                 ].map(({ variant, label }) => {
-                  const colRows = machineCardsRows.filter((row) => getMachineCardInfo(row).variant === variant);
+                  const colRows = machineCardsRows
+                    .filter((row) => getMachineCardInfo(row).variant === variant)
+                    .sort((a, b) => String(a.MAQ_CODIGO ?? a.maq_codigo ?? '').localeCompare(String(b.MAQ_CODIGO ?? b.maq_codigo ?? ''), 'es'));
                   return (
-                    <div key={variant} className={`crudx-machine-col crudx-machine-col--${variant}`}>
-                      <div className="crudx-machine-col__header">
-                        <span className={`crudx-machine-col__label crudx-machine-col__label--${variant}`}>{label}</span>
+                    <section key={variant} className={`crudx-machine-row crudx-machine-row--${variant}`}>
+                      <div className="crudx-machine-row__header">
+                        <span className={`crudx-machine-row__title crudx-machine-row__title--${variant}`}>{label}</span>
+                        <span className="crudx-machine-row__count">{colRows.length} máquina{colRows.length === 1 ? '' : 's'}</span>
                       </div>
                       {colRows.length === 0 ? (
-                        <p className="crudx-empty crudx-empty--col">Sin maquinas de este tipo.</p>
-                      ) : null}
-                      {colRows.map((row) => {
+                        <p className="crudx-empty crudx-empty--col">Sin máquinas de este tipo.</p>
+                      ) : (
+                        <div className="crudx-machine-row__track" aria-label={`Máquinas de ${label}`}>
+                          {colRows.map((row) => {
                         const info = getMachineCardInfo(row);
                         const machineStatusBadge = getMachineStatusBadge(info.estado);
                         const maqId = row.MAQ_ID ?? row.maq_id;
@@ -3467,7 +3507,7 @@ export default function CrudDemo({
                         return (
                           <article
                             key={String(maqId)}
-                            className={`crudx-machine-card crudx-machine-card--${info.variant}`}
+                            className={`crudx-machine-card crudx-machine-card--${info.variant} ${getMachineStatusStripeClass(machineStatusBadge.tone)}`}
                           >
                             <div className="crudx-machine-card__head">
                               <span className="crudx-machine-card__eyebrow">{info.role}</span>
@@ -3499,7 +3539,13 @@ export default function CrudDemo({
                                   aria-label={`Cambiar estado de ${codigo}`}
                                   title={statusLocked ? 'Finaliza el mantenimiento desde la acción Mantenimiento' : 'Cambiar estado de la máquina'}
                                 >
-                                  <span>{statusSaving ? 'Actualizando...' : machineStatusBadge.label}</span>
+                                  <span className="crudx-machine-card__status-visual">
+                                    <span
+                                      className={`crudx-machine-card__status-dot${machineStatusBadge.tone === 'success' ? ' crudx-machine-card__status-dot--pulse' : ''}`}
+                                      aria-hidden="true"
+                                    />
+                                    <span>{statusSaving ? 'Actualizando...' : machineStatusBadge.label}</span>
+                                  </span>
                                   <span className="crudx-machine-status-trigger__chevron" aria-hidden="true" />
                                 </button>
                                 {statusMenuOpen ? (
@@ -3507,8 +3553,8 @@ export default function CrudDemo({
                                     {manualStatusOptions.map((estado) => {
                                       const value = String(estado.EMA_ID ?? estado.ema_id ?? '');
                                       if (!value) return null;
-                                      const label = String(estado.EMA_ESTADO ?? estado.ema_estado ?? value);
-                                      const optionBadge = getMachineStatusBadge(label);
+                                      const optionLabel = String(estado.EMA_ESTADO ?? estado.ema_estado ?? value);
+                                      const optionBadge = getMachineStatusBadge(optionLabel);
                                       const isSelected = value === String(currentEmaId ?? '');
                                       return (
                                         <button
@@ -3534,14 +3580,14 @@ export default function CrudDemo({
                                 className="crudx-machine-action"
                                 onClick={() => openMachineTransactions(row)}
                               >
-                                Transacciones
+                                <BtnContent icon={IconTransaction}>Transacciones</BtnContent>
                               </button>
                               <button
                                 type="button"
                                 className="crudx-machine-action"
                                 onClick={() => openMachineMaintenance(row)}
                               >
-                                Mantenimiento
+                                <BtnContent icon={IconMaintenance}>Mantenimiento</BtnContent>
                               </button>
                               {info.isCobro ? (
                                 <>
@@ -3550,22 +3596,24 @@ export default function CrudDemo({
                                     className="crudx-machine-action"
                                     onClick={() => openMachineRecharges(row)}
                                   >
-                                    Recargas
+                                    <BtnContent icon={IconRecharge}>Recargas</BtnContent>
                                   </button>
                                   <button
                                     type="button"
                                     className="crudx-machine-action crudx-machine-action--primary"
                                     onClick={() => openMachineBalance(row)}
                                   >
-                                    Saldo
+                                    <BtnContent icon={IconBalance}>Saldo</BtnContent>
                                   </button>
                                 </>
                               ) : null}
                             </div>
                           </article>
                         );
-                      })}
-                    </div>
+                          })}
+                        </div>
+                      )}
+                    </section>
                   );
                 })
               ) : null}
@@ -3740,7 +3788,7 @@ export default function CrudDemo({
                       isCrudErrorMessage(msg) ? 'crudx-msg crudx-msg--error' : 'crudx-msg crudx-msg--ok'
                     }
                   >
-                    {msg}
+                    {isCrudErrorMessage(msg) ? userMsg(msg) : msg}
                   </span>
                 )}
               </div>
@@ -3788,8 +3836,8 @@ export default function CrudDemo({
                       className="admin-search-input crudx-admin-filter-input-compact"
                       type="search"
                       value={bivFilter.placa}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, placa: e.target.value }))}
-                      placeholder="Placa"
+                      onChange={(e) => setBivFilter((f) => ({ ...f, placa: sanitizeSearchValue('placa', e.target.value) }))}
+                      placeholder={getSearchPlaceholder('placa')}
                       aria-label="Filtrar por placa"
                     />
                   </label>
@@ -3813,7 +3861,7 @@ export default function CrudDemo({
                       type="date"
                       value={bivFilter.desde}
                       max={TODAY}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, desde: e.target.value }))}
+                      onChange={(e) => setBivFilter((f) => ({ ...f, desde: clampDateYmd(e.target.value) }))}
                       aria-label="Fecha desde"
                     />
                   </label>
@@ -3824,13 +3872,13 @@ export default function CrudDemo({
                       type="date"
                       value={bivFilter.hasta}
                       max={TODAY}
-                      onChange={(e) => setBivFilter((f) => ({ ...f, hasta: e.target.value }))}
+                      onChange={(e) => setBivFilter((f) => ({ ...f, hasta: clampDateYmd(e.target.value) }))}
                       aria-label="Fecha hasta"
                     />
                   </label>
                   <div className="admin-search-actions">
                     <button type="submit" className="admin-btn-search" disabled={loading}>
-                      Buscar
+                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
                     </button>
                     <button
                       type="button"
@@ -3838,7 +3886,7 @@ export default function CrudDemo({
                       onClick={clearBivFilters}
                       disabled={loading}
                     >
-                      Limpiar
+                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
                     </button>
                   </div>
                 </form>
@@ -3894,7 +3942,7 @@ export default function CrudDemo({
                   </label>
                   <div className="admin-search-actions">
                     <button type="submit" className="admin-btn-search" disabled={loading}>
-                      Buscar
+                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
                     </button>
                     <button
                       type="button"
@@ -3902,7 +3950,7 @@ export default function CrudDemo({
                       onClick={clearAlertaFilters}
                       disabled={loading}
                     >
-                      Limpiar
+                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
                     </button>
                   </div>
                 </form>
@@ -3930,7 +3978,7 @@ export default function CrudDemo({
                   </label>
                   <div className="admin-search-actions">
                     <button type="submit" className="admin-btn-search" disabled={loading}>
-                      Buscar
+                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
                     </button>
                     <button
                       type="button"
@@ -3938,7 +3986,7 @@ export default function CrudDemo({
                       onClick={clearDetalleSaldoMaqFilter}
                       disabled={loading}
                     >
-                      Limpiar
+                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
                     </button>
                   </div>
                 </form>
@@ -3964,7 +4012,7 @@ export default function CrudDemo({
                   </label>
                   <div className="admin-search-actions">
                     <button type="submit" className="admin-btn-search" disabled={loading}>
-                      Buscar
+                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
                     </button>
                     <button
                       type="button"
@@ -3972,7 +4020,7 @@ export default function CrudDemo({
                       onClick={clearMaquinaFilters}
                       disabled={loading}
                     >
-                      Limpiar
+                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
                     </button>
                   </div>
                 </form>
@@ -4000,7 +4048,7 @@ export default function CrudDemo({
                   </label>
                   <div className="admin-search-actions">
                     <button type="submit" className="admin-btn-search" disabled={loading}>
-                      Buscar
+                      <BtnContent icon={IconSearch}>Buscar</BtnContent>
                     </button>
                     <button
                       type="button"
@@ -4008,7 +4056,7 @@ export default function CrudDemo({
                       onClick={clearRecargoMaqFilter}
                       disabled={loading}
                     >
-                      Limpiar
+                      <BtnContent icon={IconClear}>Limpiar</BtnContent>
                     </button>
                   </div>
                 </form>
@@ -4020,8 +4068,8 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={vehiculoFilter.q}
-                        onChange={(e) => setVehiculoFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="Placa"
+                        onChange={(e) => setVehiculoFilter((f) => ({ ...f, q: sanitizeSearchValue('placa', e.target.value) }))}
+                        placeholder={getSearchPlaceholder('placa')}
                         autoComplete="off"
                         aria-label="Filtrar vehículos por placa"
                       />
@@ -4044,7 +4092,7 @@ export default function CrudDemo({
                     </label>
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4052,7 +4100,7 @@ export default function CrudDemo({
                         onClick={clearVehiculoFilters}
                         disabled={loading}
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4065,8 +4113,8 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={ticketFilter.q}
-                        onChange={(e) => setTicketFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="Código o placa"
+                        onChange={(e) => setTicketFilter((f) => ({ ...f, q: sanitizeSearchValue('ticket', e.target.value) }))}
+                        placeholder={getSearchPlaceholder('ticket')}
                         autoComplete="off"
                         aria-label="Buscar por código de ticket o placa"
                       />
@@ -4092,7 +4140,7 @@ export default function CrudDemo({
                     </label>
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4101,7 +4149,7 @@ export default function CrudDemo({
                         disabled={loading}
                         title="Quitar búsqueda y filtros de la lista"
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4114,15 +4162,15 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={cobroFilter.q}
-                        onChange={(e) => setCobroFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="Ticket ID o NIT / CF"
+                        onChange={(e) => setCobroFilter((f) => ({ ...f, q: sanitizeSearchValue('cobro', e.target.value) }))}
+                        placeholder={getSearchPlaceholder('cobro')}
                         autoComplete="off"
                         aria-label="Buscar cobro por ticket ID o NIT / CF"
                       />
                     </div>
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4131,7 +4179,7 @@ export default function CrudDemo({
                         disabled={loading}
                         title="Quitar búsqueda de cobros"
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4144,15 +4192,15 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={clienteFilter.q}
-                        onChange={(e) => setClienteFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="Nombre o DPI"
+                        onChange={(e) => setClienteFilter((f) => ({ ...f, q: sanitizeSearchValue('cliente', e.target.value) }))}
+                        placeholder={getSearchPlaceholder('cliente')}
                         autoComplete="off"
                         aria-label="Buscar cliente por nombre, apellido, nombre completo o DPI"
                       />
                     </div>
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4161,7 +4209,7 @@ export default function CrudDemo({
                         disabled={loading}
                         title="Quitar búsqueda de clientes"
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4174,8 +4222,8 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={membresiaFilter.q}
-                        onChange={(e) => setMembresiaFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="Buscar cliente o placa"
+                        onChange={(e) => setMembresiaFilter((f) => ({ ...f, q: sanitizeSearchValue('general', e.target.value) }))}
+                        placeholder={getSearchPlaceholder('membresia')}
                         autoComplete="off"
                         aria-label="Filtrar membresía por cliente o placa"
                       />
@@ -4198,7 +4246,7 @@ export default function CrudDemo({
                     </label>
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4207,7 +4255,7 @@ export default function CrudDemo({
                         disabled={loading}
                         title="Quitar filtros de membresías"
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4220,15 +4268,15 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={dpmPlacaFilter.placa}
-                        onChange={(e) => setDpmPlacaFilter((f) => ({ ...f, placa: e.target.value }))}
-                        placeholder="Placa"
+                        onChange={(e) => setDpmPlacaFilter((f) => ({ ...f, placa: sanitizeSearchValue('placa', e.target.value) }))}
+                        placeholder={getSearchPlaceholder('placa')}
                         autoComplete="off"
                         aria-label="Filtrar detalle de pago membresía por placa; deja vacío para ver todos"
                       />
                     </div>
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4237,7 +4285,7 @@ export default function CrudDemo({
                         disabled={loading}
                         title="Quitar filtro de placa"
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4256,8 +4304,8 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={detalleMaqTicketFilter.q}
-                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, q: e.target.value }))}
-                        placeholder="Placa o ticket"
+                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, q: sanitizeSearchValue('ticket', e.target.value) }))}
+                        placeholder={getSearchPlaceholder('detalleMaq')}
                         autoComplete="off"
                         aria-label="Filtrar detalle máquina-ticket por placa o ticket"
                       />
@@ -4269,7 +4317,7 @@ export default function CrudDemo({
                         type="datetime-local"
                         value={detalleMaqTicketFilter.desde}
                         max={NOW_LOCAL}
-                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, desde: e.target.value }))}
+                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, desde: e.target.value > NOW_LOCAL ? NOW_LOCAL : e.target.value }))}
                         autoComplete="off"
                         aria-label="Fecha y hora inicial"
                       />
@@ -4281,7 +4329,7 @@ export default function CrudDemo({
                         type="datetime-local"
                         value={detalleMaqTicketFilter.hasta}
                         max={NOW_LOCAL}
-                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, hasta: e.target.value }))}
+                        onChange={(e) => setDetalleMaqTicketFilter((f) => ({ ...f, hasta: e.target.value > NOW_LOCAL ? NOW_LOCAL : e.target.value }))}
                         autoComplete="off"
                         aria-label="Fecha y hora final"
                       />
@@ -4304,7 +4352,7 @@ export default function CrudDemo({
                     ) : null}
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4313,7 +4361,7 @@ export default function CrudDemo({
                         disabled={loading}
                         title="Quitar filtros de Det. Máq/Ticket"
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4326,15 +4374,15 @@ export default function CrudDemo({
                         className="admin-search-input"
                         type="search"
                         value={rmmPlacaFilter.placa}
-                        onChange={(e) => setRmmPlacaFilter((f) => ({ ...f, placa: e.target.value }))}
-                        placeholder="Placa (opcional, acota la lista)"
+                        onChange={(e) => setRmmPlacaFilter((f) => ({ ...f, placa: sanitizeSearchValue('placa', e.target.value) }))}
+                        placeholder="Ej. P123ABC (opcional)"
                         autoComplete="off"
                         aria-label="Filtrar movimientos de membresía por placa; deja vacío para ver todos"
                       />
                     </div>
                     <div className="admin-search-actions">
                       <button type="submit" className="admin-btn-search" disabled={loading}>
-                        Buscar
+                        <BtnContent icon={IconSearch}>Buscar</BtnContent>
                       </button>
                       <button
                         type="button"
@@ -4343,7 +4391,7 @@ export default function CrudDemo({
                         disabled={loading}
                         title="Quitar filtro de placa"
                       >
-                        Limpiar
+                        <BtnContent icon={IconClear}>Limpiar</BtnContent>
                       </button>
                     </div>
                   </form>
@@ -4419,7 +4467,7 @@ export default function CrudDemo({
                       const lblBase = ticketVehIdAsPlacaLabel
                         ? 'Placa'
                         : getDbColumnLabel(f.k, CRUD_COLUMN_LABELS);
-                      const lbl = `${lblBase}${f.req ? ' *' : ''}`;
+                      const lbl = lblBase;
                       const readOnlyOnUpdate = !isNewRecord && !!entity?.readOnlyOnUpdate?.includes(f.k);
                       const readOnlyOnCreate = isNewRecord && !!(entity?.readOnlyOnCreate || []).includes(f.k);
                       const lockByAlertBusinessRule =
@@ -4509,6 +4557,8 @@ export default function CrudDemo({
                         <div
                           key={f.k}
                           className={`crudx-field${
+                            f.req ? ' crudx-field--required' : ''
+                          }${
                             f.t === 'checkbox'
                               ? ' crudx-field--checkbox'
                               : f.t === 'select'
@@ -4613,10 +4663,16 @@ export default function CrudDemo({
                                 id={fieldId}
                                 className="crudx-textarea"
                                 value={form[f.k] ?? ''}
-                                placeholder="Detalle breve del trabajo realizado o hallazgo encontrado"
+                                placeholder={getFieldPlaceholder(f.k, {
+                                  explicit: entity?.key === 'registro-mantenimiento' && f.k === 'REM_DESCRIPCION'
+                                    ? 'Detalle breve del trabajo realizado o hallazgo encontrado'
+                                    : undefined,
+                                  label: lblBase,
+                                  fieldType: 'textarea',
+                                })}
                                 disabled={fieldDisabled}
                                 style={fieldDisabled ? readOnlyFieldStyle : undefined}
-                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: ev.target.value }))}
+                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: sanitizeFieldValue(f.k, ev.target.value, { fieldType: 'textarea' }) }))}
                                 aria-label={lbl}
                                 title={lbl}
                                 rows={2}
@@ -4629,17 +4685,30 @@ export default function CrudDemo({
                                 id={fieldId}
                                 type={f.t === 'password' && editId !== '__new__' ? 'text' : (f.t || 'text')}
                                 value={form[f.k] ?? ''}
-                                placeholder={
-                                  isNewRecord && f.k === entity?.id
-                                    ? 'Se genera automáticamente al guardar'
-                                    : f.placeholder || undefined
-                                }
+                                placeholder={getFieldPlaceholder(f.k, {
+                                  explicit: f.placeholder,
+                                  label: lblBase,
+                                  fieldType: f.t,
+                                  isAutoId: isNewRecord && f.k === entity?.id,
+                                })}
                                 required={!!f.req && !(isNewRecord && f.k === entity?.id)}
                                 disabled={fieldDisabled}
                                 style={fieldDisabled ? readOnlyFieldStyle : undefined}
                                 inputMode={getInputMode(f.k)}
                                 maxLength={getMaxLength(f.k)}
-                                onChange={(ev) => setForm((p) => ({ ...p, [f.k]: sanitizeFieldValue(f.k, ev.target.value) }))}
+                                max={f.t === 'date' ? TODAY : f.t === 'datetime-local' ? NOW_LOCAL : undefined}
+                                onChange={(ev) => {
+                                  let next = ev.target.value;
+                                  if (f.t === 'date') next = clampDateYmd(next);
+                                  if (f.t === 'datetime-local' && next > NOW_LOCAL) next = NOW_LOCAL;
+                                  setForm((p) => ({
+                                    ...p,
+                                    [f.k]: sanitizeFieldValue(f.k, next, {
+                                      fieldType: f.t,
+                                      asPlate: f.k === 'VEH_ID',
+                                    }),
+                                  }));
+                                }}
                                 aria-label={lbl}
                                 title={lbl}
                               />
@@ -5104,6 +5173,7 @@ export default function CrudDemo({
                             <td className="crudx-actions-cell">
                               {entity.ops.u && entity.key !== 'maquina' && (
                                 <button onClick={() => startEdit(row)} className="crudx-btn-secondary crudx-btn-xs">
+                                  <BtnContent icon={IconEdit}>
                                   {entity.key === 'alerta'
                                     ? (labelEstadoAlerta(row?.EAL_ID, catalogOptions).trim().toLowerCase() === 'atendida'
                                       ? 'Editar'
@@ -5113,9 +5183,14 @@ export default function CrudDemo({
                                         ? 'Editar'
                                         : 'Resolver')
                                     : 'Editar'}
+                                  </BtnContent>
                                 </button>
                               )}
-                              {entity.ops.d && <button onClick={() => del(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">Eliminar</button>}
+                              {entity.ops.d && (
+                                <button onClick={() => requestDelete(row[entity.id])} className="crudx-btn-danger crudx-btn-xs">
+                                  <BtnContent icon={IconTrash}>Eliminar</BtnContent>
+                                </button>
+                              )}
                               {isMonthlyWorkspace && monthlyWorkspaceView === 'entity' && entity.key === 'cliente' && (
                                 <button
                                   type="button"
@@ -5275,6 +5350,29 @@ export default function CrudDemo({
             </>
           )}
       </div>
+
+      {confirmDialog ? (
+        <div
+          className="crudx-modal-backdrop ops-entry-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="crud-confirm-title"
+          onClick={() => setConfirmDialog(null)}
+        >
+          <div className="crudx-confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <h2 id="crud-confirm-title">{confirmDialog.title}</h2>
+            <p>{confirmDialog.message}</p>
+            <div className="crudx-confirm-modal__actions">
+              <button type="button" className="crudx-btn-secondary" onClick={() => setConfirmDialog(null)}>
+                Cancelar
+              </button>
+              <button type="button" className="crudx-btn-danger" onClick={confirmDialog.onConfirm}>
+                <BtnContent icon={IconTrash}>{confirmDialog.confirmLabel || 'Confirmar'}</BtnContent>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {vehClienteModal != null ? (
         <div

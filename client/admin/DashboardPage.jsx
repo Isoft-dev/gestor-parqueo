@@ -2,6 +2,9 @@ import { Link } from 'react-router-dom';
 import { useAdminDashboard } from '../hooks/useAdminDashboard.js';
 import { ADMIN_NAV_ROUTES, adminPath } from './adminNavConfig.js';
 import HelpHint from '../components/HelpHint.jsx';
+import { BtnContent, IconRefresh } from '../components/UiIcons.jsx';
+import { useAdminAppearance } from '../context/AdminAppearanceContext.jsx';
+import { getModuleAccentStyle } from '../utils/adminAppearance.js';
 
 function pick(row, ...names) {
   if (!row) return undefined;
@@ -15,6 +18,7 @@ function pick(row, ...names) {
 
 export default function DashboardPage() {
   const { stats, loading, error, sectionErrors, reload, updatedAt, pollMs } = useAdminDashboard();
+  const { appearance } = useAdminAppearance();
 
   const navSections = ADMIN_NAV_ROUTES.filter((r) => !r.isDashboard && !r.isPlaceholder);
 
@@ -42,7 +46,7 @@ export default function DashboardPage() {
             </span>
           ) : null}
           <button type="button" className="admin-btn-ghost" onClick={() => reload()}>
-            Actualizar ahora
+            <BtnContent icon={IconRefresh}>Actualizar ahora</BtnContent>
           </button>
           {updatedAt && (
             <span className="admin-muted">
@@ -78,7 +82,7 @@ export default function DashboardPage() {
           </div>
           <div className="admin-kpi-hint">Sin fecha de atención registrada</div>
         </article>
-        <article className="admin-kpi admin-kpi--spaces">
+        <article className="admin-kpi admin-kpi--alerts2">
           <div className="admin-kpi-label">Espacios reservados (mensuales)</div>
           <div className="admin-kpi-split">
             <div>
@@ -117,7 +121,7 @@ export default function DashboardPage() {
 
       <section className="admin-panel-block" aria-label="Alertas recientes">
         <div className="admin-panel-head">
-          <h2>Alertas recientes</h2>
+          <h2>🚨 Alertas recientes</h2>
           <Link className="admin-link" to={adminPath('alertas')}>
             Ir a gestión de alertas →
           </Link>
@@ -169,7 +173,12 @@ export default function DashboardPage() {
         </div>
         <div className="admin-quick-grid">
           {navSections.map((r) => (
-            <Link key={r.path} className="admin-quick-card" to={adminPath(r.path)}>
+            <Link
+              key={r.path}
+              className="admin-quick-card"
+              to={adminPath(r.path)}
+              style={getModuleAccentStyle(appearance, r.path, r.accentColor)}
+            >
               <span className="admin-quick-icon" aria-hidden="true">
                 {r.icon}
               </span>

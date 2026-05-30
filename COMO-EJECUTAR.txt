@@ -4,6 +4,8 @@ Necesitas Node.js instalado (versión 18 o superior).
 
 Este proyecto usa pnpm como gestor de paquetes (ya no npm).
 
+instalar globalmente 
+  npm install -g pnpm 2>&1; pnpm -v 2>&1
 Habilitar pnpm (una sola vez por computadora)
 
   corepack enable

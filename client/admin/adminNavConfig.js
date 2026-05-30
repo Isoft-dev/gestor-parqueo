@@ -1,3 +1,5 @@
+import { DEFAULT_MODULE_COLORS } from '../utils/adminAppearance.js';
+
 /**
  * Rutas del panel administrativo (relativas a `/admin`).
  * `entityKeys` alimenta CrudDemo en modo filtrado.
@@ -17,6 +19,7 @@ export const ADMIN_NAV_ROUTES = [
     description:
       'Administración de clientes mensuales o de alta administrativa, sus membresías y vehículos vinculados.',
     icon: '👤',
+    accentColor: DEFAULT_MODULE_COLORS['clientes-mensuales'],
     entityKeys: [
       'cliente',
       'membresia',
@@ -31,6 +34,7 @@ export const ADMIN_NAV_ROUTES = [
     description:
       'Consulta de clientes esporádicos capturados por tickets/NIT, sus vehículos, cobros y detalle en máquina.',
     icon: '🚗',
+    accentColor: DEFAULT_MODULE_COLORS['tickets-vehiculos'],
     entityKeys: [
       'estado-ticket',
       'ticket',
@@ -45,6 +49,7 @@ export const ADMIN_NAV_ROUTES = [
     label: 'Gestión de usuarios',
     description: 'Usuarios del sistema y catálogo de roles.',
     icon: '🧑‍💼',
+    accentColor: DEFAULT_MODULE_COLORS.usuarios,
     entityKeys: ['usuario', 'rol'],
   },
   {
@@ -52,6 +57,7 @@ export const ADMIN_NAV_ROUTES = [
     label: 'Gestión de máquinas',
     description: 'Máquinas de cobro, tipos, estados, saldos y mantenimientos.',
     icon: '🚧',
+    accentColor: DEFAULT_MODULE_COLORS.maquinas,
     entityKeys: [
       'maquina',
       'tipo-maquina',
@@ -67,6 +73,7 @@ export const ADMIN_NAV_ROUTES = [
     label: 'Gestión de cobro',
     description: 'Tarifas del parqueo, tipos de cobro y formas de pago.',
     icon: '💵',
+    accentColor: DEFAULT_MODULE_COLORS.tarifas,
     entityKeys: ['tarifa'],
   },
   {
@@ -74,6 +81,7 @@ export const ADMIN_NAV_ROUTES = [
     label: 'Informativo',
     description: 'Catálogos de consulta para vehículos, membresías, cobros y estados operativos.',
     icon: '📋',
+    accentColor: DEFAULT_MODULE_COLORS.informativo,
     entityKeys: [
       'tipo-vehiculo',
       'marca-vehiculo',
@@ -102,6 +110,7 @@ export const ADMIN_NAV_ROUTES = [
     label: 'Bitácora de incidentes',
     description: 'Registro y seguimiento vinculado a vehículos e incidentes.',
     icon: '📓',
+    accentColor: DEFAULT_MODULE_COLORS['bitacora-incidentes'],
     entityKeys: ['bitacora-incidente-vehiculo', 'incidente'],
   },
   {
@@ -109,6 +118,7 @@ export const ADMIN_NAV_ROUTES = [
     label: 'Alertas',
     description: 'Tipos, estados y registro de alertas operativas.',
     icon: '⚠️',
+    accentColor: DEFAULT_MODULE_COLORS.alertas,
     entityKeys: ['tipo-alerta', 'estado-alerta', 'alerta'],
   },
   {
@@ -116,6 +126,7 @@ export const ADMIN_NAV_ROUTES = [
     label: 'Operación cabina',
     description: 'Escaneo PDF de tickets y tags para entrada, cobro y salida.',
     icon: '🖨️',
+    accentColor: DEFAULT_MODULE_COLORS['operacion-cabina'],
   },
   {
     path: 'correos-simulados',
@@ -123,6 +134,7 @@ export const ADMIN_NAV_ROUTES = [
     description:
       'Bandeja de notificaciones de membresías que el sistema "envió" (modo simulate o SMTP).',
     icon: '✉️',
+    accentColor: DEFAULT_MODULE_COLORS['correos-simulados'],
   },
   {
     path: 'reportes',
@@ -130,6 +142,7 @@ export const ADMIN_NAV_ROUTES = [
     description:
       'Incidentes, membresías por estado, clientes en mora (vista actual) y PDF.',
     icon: '📘',
+    accentColor: DEFAULT_MODULE_COLORS.reportes,
   },
   {
     path: 'personalizacion',

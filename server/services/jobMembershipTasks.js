@@ -274,9 +274,17 @@ export async function suspendMembershipsOverdue() {
  * Recordatorios: 3 días antes, 2, 1, vencimiento, día siguiente.
  * Respeta pago antes del hito, evita duplicado mismo día mismo TNO, NOT_PROXIMA_FECHA_ENVIO al siguiente hito.
  */
-export async function sendMembershipDueReminders() {
+export async function sendMembershipDueReminders(options = {}) {
+  const { force = false, demoOnly = false } = options;
   const tipos = await listTiposNotificacion();
   if (!tipos.length) return { ok: false, reason: 'Sin PAR_TIPO_NOTIFICACION' };
+
+  const demoFilter = demoOnly
+    ? ` AND LOWER(c.CLI_CORREO) LIKE 'demo.vencer%clientes.seed'`
+    : '';
+  const dayFilter = demoOnly
+    ? ''
+    : ` AND TRUNC(m.MEM_FECHA_VENCIMIENTO) - TRUNC(SYSDATE) IN (3, 2, 1, 0, -1)`;
 
   const rows = await executeSql(
     `SELECT m.MEM_ID, m.MEM_FECHA_VENCIMIENTO, c.CLI_CORREO, c.CLI_PRIMER_NOMBRE
@@ -285,10 +293,12 @@ export async function sendMembershipDueReminders() {
        JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
        JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
       WHERE LOWER(em.EME_ESTADO) LIKE '%activ%'
-        AND TRUNC(m.MEM_FECHA_VENCIMIENTO) - TRUNC(SYSDATE) IN (3, 2, 1, 0, -1)`,
+      ${dayFilter}
+      ${demoFilter}`,
   );
 
   let sent = 0;
+  let skipped = 0;
   for (const row of rows) {
     const memId = row.MEM_ID ?? row.mem_id;
     const venc = row.MEM_FECHA_VENCIMIENTO ?? row.mem_fecha_vencimiento;
@@ -296,18 +306,26 @@ export async function sendMembershipDueReminders() {
 
     const daysUntil = daysUntilVencimiento(venc);
     const stageDef = stageDefForDaysUntil(daysUntil);
-    if (!stageDef) continue;
+    if (!stageDef) {
+      skipped += 1;
+      continue;
+    }
 
     const tnoId = tnoIdForStageDef(tipos, stageDef);
     if (tnoId == null) continue;
 
-    const yaHoy = await executeSql(
-      `SELECT 1 FROM PAR_NOTIFICACION n
-        WHERE n.MEM_ID = :memId AND n.TNO_ID = :tnoId
-          AND TRUNC(n.NOT_ULTIMA_FECHA_ENVIO) = TRUNC(SYSDATE)`,
-      { memId, tnoId },
-    );
-    if (yaHoy.length) continue;
+    if (!force) {
+      const yaHoy = await executeSql(
+        `SELECT 1 FROM PAR_NOTIFICACION n
+          WHERE n.MEM_ID = :memId AND n.TNO_ID = :tnoId
+            AND TRUNC(n.NOT_ULTIMA_FECHA_ENVIO) = TRUNC(SYSDATE)`,
+        { memId, tnoId },
+      );
+      if (yaHoy.length) {
+        skipped += 1;
+        continue;
+      }
+    }
 
     const ultimaNotif = await executeSql(
       `SELECT NOT_ID, NOT_ULTIMA_FECHA_ENVIO, NOT_PROXIMA_FECHA_ENVIO
@@ -322,7 +340,7 @@ export async function sendMembershipDueReminders() {
       un?.NOT_PROXIMA_FECHA_ENVIO ?? un?.not_proxima_fecha_envio;
     const ultEnvio =
       un?.NOT_ULTIMA_FECHA_ENVIO ?? un?.not_ultima_fecha_envio;
-    if (proxProgramada && ultEnvio) {
+    if (!force && proxProgramada && ultEnvio) {
       const pagoAntesDeProxima = await executeSql(
         `SELECT 1 FROM PAR_DETALLE_PAGO_MEMBRESIA d
            JOIN PAR_PAGO p ON p.PAG_ID = d.PAG_ID
@@ -335,7 +353,10 @@ export async function sendMembershipDueReminders() {
           proxProgramada: new Date(proxProgramada),
         },
       );
-      if (pagoAntesDeProxima.length) continue;
+      if (pagoAntesDeProxima.length) {
+        skipped += 1;
+        continue;
+      }
     }
 
     const vencT = truncDate(venc);
@@ -346,7 +367,10 @@ export async function sendMembershipDueReminders() {
           AND TRUNC(p.PAG_FECHA_HORA) >= :venc`,
       { memId, venc: vencT },
     );
-    if (pagoCubreVenc.length && daysUntil <= 0) continue;
+    if (pagoCubreVenc.length && daysUntil <= 0) {
+      skipped += 1;
+      continue;
+    }
 
     const to = row.CLI_CORREO ?? row.cli_correo;
     const nombre = row.CLI_PRIMER_NOMBRE ?? row.cli_primer_nombre ?? '';
@@ -406,11 +430,76 @@ export async function sendMembershipDueReminders() {
     sent += 1;
   }
 
-  return { ok: true, sent };
+  return { ok: true, sent, skipped, candidatos: rows.length };
 }
 
-export async function runDailyMembershipJobs() {
-  const a = await suspendMembershipsOverdue();
-  const b = await sendMembershipDueReminders();
+/** Vista previa para el panel: cuántas membresías entrarían hoy al job. */
+export async function previewMembershipJobs() {
+  const elegibles = await executeSql(
+    `SELECT m.MEM_ID,
+            TRUNC(m.MEM_FECHA_VENCIMIENTO) - TRUNC(SYSDATE) AS DIAS,
+            c.CLI_CORREO,
+            c.CLI_PRIMER_NOMBRE,
+            v.VEH_PLACA
+       FROM PAR_MEMBRESIA m
+       JOIN PAR_ESTADO_MEMBRESIA em ON em.EME_ID = m.EME_ID
+       JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
+       JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
+      WHERE LOWER(em.EME_ESTADO) LIKE '%activ%'
+        AND TRUNC(m.MEM_FECHA_VENCIMIENTO) - TRUNC(SYSDATE) IN (3, 2, 1, 0, -1)
+      ORDER BY DIAS, m.MEM_ID`,
+  );
+
+  const demo = await executeSql(
+    `SELECT m.MEM_ID,
+            TRUNC(m.MEM_FECHA_VENCIMIENTO) - TRUNC(SYSDATE) AS DIAS,
+            c.CLI_CORREO,
+            v.VEH_PLACA
+       FROM PAR_MEMBRESIA m
+       JOIN PAR_ESTADO_MEMBRESIA em ON em.EME_ID = m.EME_ID
+       JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
+       JOIN PAR_CLIENTE c ON c.CLI_ID = v.CLI_ID
+      WHERE LOWER(c.CLI_CORREO) LIKE 'demo.vencer%clientes.seed'
+        AND LOWER(em.EME_ESTADO) LIKE '%activ%'
+      ORDER BY DIAS, m.MEM_ID`,
+  );
+
+  const enviadosHoy = await executeSql(
+    `SELECT COUNT(DISTINCT n.MEM_ID) AS C
+       FROM PAR_NOTIFICACION n
+      WHERE TRUNC(n.NOT_ULTIMA_FECHA_ENVIO) = TRUNC(SYSDATE)`,
+  );
+
+  const items = elegibles.map((r) => {
+    const dias = Number(r.DIAS ?? r.dias ?? 0);
+    const stageDef = stageDefForDaysUntil(dias);
+    return {
+      memId: r.MEM_ID ?? r.mem_id,
+      dias,
+      etapa: stageDef?.etapaCorta ?? '—',
+      correo: r.CLI_CORREO ?? r.cli_correo,
+      nombre: r.CLI_PRIMER_NOMBRE ?? r.cli_primer_nombre,
+      placa: r.VEH_PLACA ?? r.veh_placa,
+    };
+  });
+
+  return {
+    elegiblesHoy: items.length,
+    enviadosHoy: Number(enviadosHoy[0]?.C ?? enviadosHoy[0]?.c ?? 0),
+    items,
+    demoClientes: demo.map((r) => ({
+      memId: r.MEM_ID ?? r.mem_id,
+      dias: Number(r.DIAS ?? r.dias ?? 0),
+      correo: r.CLI_CORREO ?? r.cli_correo,
+      placa: r.VEH_PLACA ?? r.veh_placa,
+      etapa: stageDefForDaysUntil(Number(r.DIAS ?? r.dias ?? 0))?.etapaCorta ?? '—',
+    })),
+  };
+}
+
+export async function runDailyMembershipJobs(options = {}) {
+  const { force = false, demoOnly = false } = options;
+  const a = demoOnly ? { ok: true, vencidas: 0, suspendidas: 0 } : await suspendMembershipsOverdue();
+  const b = await sendMembershipDueReminders({ force, demoOnly });
   return { suspension: a, reminders: b };
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../config.js';
 import { getDbColumnLabel } from '../utils/dbColumnLabel.js';
+import { getFieldPlaceholder, sanitizeFieldValue } from '../utils/fieldValidation.js';
 
 export default function MonthlyPaymentsPanel() {
   const [loading, setLoading] = useState(false);
@@ -172,9 +173,9 @@ export default function MonthlyPaymentsPanel() {
             ))}
           </select>
           <input
-            placeholder="Monto recibido"
+            placeholder={getFieldPlaceholder('PAG_MONTO_RECIBIDO')}
             value={montoRecibido}
-            onChange={(e) => setMontoRecibido(e.target.value)}
+            onChange={(e) => setMontoRecibido(sanitizeFieldValue('PAG_MONTO_RECIBIDO', e.target.value.replace(/,/g, '.'), { fieldType: 'number' }))}
             style={{ padding: '8px 10px', width: 150 }}
           />
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>

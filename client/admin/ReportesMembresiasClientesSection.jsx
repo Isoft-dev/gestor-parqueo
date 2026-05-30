@@ -12,7 +12,16 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
-import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
+import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
 
 import { useReportFilter } from './ReportFilterContext.jsx';
 const MEMBERSHIP_REPORT_CARDS = [
@@ -271,29 +280,32 @@ export default function ReportesMembresiasClientesSection({ onBackToReports = nu
     const matchMetodo = !filtroMetodoHistorial || row.metodoPago === filtroMetodoHistorial;
     return matchMes && matchMetodo;
   });
+  const generateRef = useReportGenerateScroll(tab);
+  const activeCard = MEMBERSHIP_REPORT_CARDS.find((item) => item.id === tab);
+  const reportTitle =
+    tab === 'mora'
+      ? 'Reporte de clientes con mora'
+      : tab === 'estado'
+        ? 'Reporte de membresias activas, suspendidas y vencidas'
+        : 'Reporte de historial de pagos por cliente';
 
   return (
-    <>
+    <ReportWorkspace>
       <ReportDetailNav
         eyebrow="Reportes"
         title="Membresias y clientes"
         backLabel="Volver a reportes"
         onBack={onBackToReports}
       />
-      <ReportCardMenu
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={data ? 4 : 3} />
+      <ReportSubreportTabs
         ariaLabel="Subreportes membresias y clientes"
         items={MEMBERSHIP_REPORT_CARDS}
+        activeId={tab}
         onSelect={setTab}
       />
 
-      <section className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">
-          {tab === 'mora'
-            ? 'Reporte de clientes con mora'
-            : tab === 'estado'
-              ? 'Reporte de membresias activas, suspendidas y vencidas'
-              : 'Reporte de historial de pagos por cliente'}
-        </h2>
+      <ReportGeneratePanel panelRef={generateRef} title={reportTitle} tone={activeCard?.tone}>
         <form
           className="reporte-inc-form"
           onSubmit={(e) => {
@@ -338,10 +350,10 @@ export default function ReportesMembresiasClientesSection({ onBackToReports = nu
             </button>
           </div>
         </form>
-      </section>
+      </ReportGeneratePanel>
 
       {error ? <div className="admin-banner admin-banner--error">{error}</div> : null}
-      {data == null ? null : (
+      <ReportResultsSection visible={data != null} render={() => (
         <>
           {tab === 'mora' ? (
             <>
@@ -644,8 +656,8 @@ export default function ReportesMembresiasClientesSection({ onBackToReports = nu
             </>
           ) : null}
         </>
-      )}
-    </>
+      )} />
+    </ReportWorkspace>
   );
 }
 

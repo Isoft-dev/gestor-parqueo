@@ -1,11 +1,12 @@
 ﻿import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { API_BASE } from '../config.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { filterOperativeMachines } from '../utils/machineStatus.js';
 import { getPlateValidationMessage, normalizePlateInput, PLATE_MAX_LENGTH } from '../utils/plate.js';
+import { getFieldPlaceholder, sanitizeFieldValue, sanitizeSearchValue } from '../utils/fieldValidation.js';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
@@ -185,6 +186,10 @@ async function fetchTicketQuoteByCodigo(ticCodigo) {
 
 export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = false, entradaOnly = false, salidaOnly = false }) {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const fromLogin = location.state?.fromLogin === true;
+  const isPublicKiosk = !embeddedInAdmin && (entradaOnly || cobroOnly || salidaOnly);
+  const showBackToLogin = isPublicKiosk && (!user || fromLogin);
   const fileRef = useRef(null);
   const tagFileRef = useRef(null);
   const memPayTagFileRef = useRef(null);
@@ -417,13 +422,9 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     setCobroCardScreenError(null);
   }
 
-  /** Solo dígitos y un punto decimal; nunca negativos (evita que `min` del input sea insuficiente). */
   function onMontoRecibidoChange(raw) {
-    let v = String(raw ?? '').replace(/,/g, '.');
-    v = v.replace(/[^0-9.]/g, '');
-    const i = v.indexOf('.');
-    if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '');
-    setMontoRecibido(v);
+    const normalized = String(raw ?? '').replace(/,/g, '.');
+    setMontoRecibido(sanitizeFieldValue('COB_MONTO_RECIBIDO', normalized, { fieldType: 'number' }));
   }
 
   function isTipoMaquinaCobro(tipo) {
@@ -1458,7 +1459,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
     <div
       className={
         embeddedInAdmin
-          ? `ops-shell ops-shell--embedded${cobroOnly ? ' ops-shell--cobro' : ''}`
+          ? `ops-shell ops-shell--embedded${cobroOnly ? ' ops-shell--cobro' : ''}${entradaOnly ? ' ops-shell--entry' : ''}${salidaOnly ? ' ops-shell--salida' : ''}`
           : `admin-page ops-page-public${entradaOnly ? ' ops-page-public--entry' : cobroOnly ? ' ops-page-public--cobro' : salidaOnly ? ' ops-page-public--salida' : ''}`
       }
       style={{
@@ -1474,6 +1475,12 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             : 16,
       }}
     >
+      {showBackToLogin ? (
+        <Link to="/login" className="ops-kiosk-nav-login">
+          ← Volver al login
+        </Link>
+      ) : null}
+
       {!entradaOnly && !cobroOnly && !salidaOnly ? (
         <>
           <header className={`admin-page-header ${embeddedInAdmin ? 'ops-top-row' : 'ops-page-header'}`}>
@@ -2000,7 +2007,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                       type="text"
                       placeholder="Nombre en tarjeta"
                       value={cardSim.nombre}
-                      onChange={(e) => setCardSim((p) => ({ ...p, nombre: e.target.value }))}
+                      onChange={(e) => setCardSim((p) => ({ ...p, nombre: sanitizeSearchValue('nombre', e.target.value) }))}
                     />
                     <input
                       type="text"
@@ -2121,7 +2128,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                           type="text"
                           placeholder="Nombre en tarjeta"
                           value={memPayCardSim.nombre}
-                          onChange={(e) => setMemPayCardSim((p) => ({ ...p, nombre: e.target.value }))}
+                          onChange={(e) => setMemPayCardSim((p) => ({ ...p, nombre: sanitizeSearchValue('nombre', e.target.value) }))}
                         />
                         <input
                           type="text"
@@ -2564,7 +2571,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             <div className="ops-entry-modal-grid">
               <input
                 type="text"
-                placeholder="Placa"
+                placeholder={getFieldPlaceholder('VEH_PLACA')}
                 value={vehicleForm.VEH_PLACA}
                 maxLength={PLATE_MAX_LENGTH}
                 onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: normalizePlateInput(e.target.value) }))}
@@ -2624,7 +2631,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input
               type="text"
-              placeholder="Placa"
+              placeholder={getFieldPlaceholder('VEH_PLACA')}
               value={vehicleForm.VEH_PLACA}
               maxLength={PLATE_MAX_LENGTH}
               onChange={(e) => setVehicleForm((p) => ({ ...p, VEH_PLACA: normalizePlateInput(e.target.value) }))}
@@ -2817,10 +2824,10 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
             </label>
             <input
               type="text"
-              placeholder="Ingresa NIT"
+              placeholder={getFieldPlaceholder('COB_NIT')}
               value={nit}
               disabled={cf}
-              onChange={(e) => setNit(e.target.value)}
+              onChange={(e) => setNit(sanitizeFieldValue('COB_NIT', e.target.value))}
               style={{ padding: '8px 10px', minWidth: 180 }}
             />
             <input
@@ -2896,7 +2903,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="Monto recibido"
+                  placeholder={getFieldPlaceholder('COB_MONTO_RECIBIDO')}
                   value={montoRecibido}
                   onChange={(e) => onMontoRecibidoChange(e.target.value)}
                   style={{ padding: '8px 10px', minWidth: 190 }}
@@ -2935,7 +2942,7 @@ export default function TicketLoaderPage({ embeddedInAdmin = false, cobroOnly = 
                     placeholder="Nombre en tarjeta"
                     value={cardSim.nombre}
                     onChange={(e) =>
-                      setCardSim((p) => ({ ...p, nombre: e.target.value }))
+                      setCardSim((p) => ({ ...p, nombre: sanitizeSearchValue('nombre', e.target.value) }))
                     }
                     style={{ padding: '8px 10px', minWidth: 180 }}
                   />

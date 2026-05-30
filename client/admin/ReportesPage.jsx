@@ -26,6 +26,15 @@ import { ReportFilterProvider, useReportFilter } from './ReportFilterContext.jsx
 import GlobalSlicerBar from './GlobalSlicerBar.jsx';
 import ReportesDashboard from './ReportesDashboard.jsx';
 import SavedViews from './SavedViews.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -74,6 +83,12 @@ const MOVEMENT_REPORT_CARDS = [
   { id: 'tiempo_estadia', badge: 'TMP', eyebrow: 'Estadia', label: 'Tiempo promedio', summary: 'Revisa permanencia promedio y detecta vehiculos o tipos con mayor estadia.', traits: ['Promedio', 'Placa', 'Dia'], icon: 'chart', tone: 'sunset' },
 ];
 
+const MOVEMENT_REPORT_TITLES = {
+  frecuencia: 'Reporte de vehiculos con mayor frecuencia de visitas',
+  entradas_salidas: 'Reporte de entradas y salidas por rango de fechas',
+  tiempo_estadia: 'Reporte de tiempo promedio de estadia',
+};
+
 function ReportesPageContent() {
   const [seccion, setSeccion] = useState('');
   const { filtros, setFiltro, limpiarDimensiones } = useReportFilter();
@@ -98,6 +113,12 @@ function ReportesPageContent() {
   const [filtroDiaSemana, setFiltroDiaSemana] = useState('Todos');
 
   const data = dataByTab[tabMov];
+  const generateRefMov = useReportGenerateScroll(tabMov);
+  const movCard = MOVEMENT_REPORT_CARDS.find((item) => item.id === tabMov);
+
+  useEffect(() => {
+    if (seccion === 'movimiento' && !tabMov) setTabMov('frecuencia');
+  }, [seccion, tabMov]);
 
   useEffect(() => {
     setError('');
@@ -483,19 +504,29 @@ function ReportesPageContent() {
           <h1 className="admin-page-title">Reportes</h1>
           <HelpHint label="Mostrar ayuda de reportes" title="Guia de reportes">
             <p>
-              Este modulo concentra paneles visuales, filtros cruzados y graficas interactivas para
-              cada seccion activa.
+              Elige fechas arriba, abre una seccion y usa las pestanas de tipo de reporte.
+              El panel <strong>Generar</strong> queda fijo: pulsa el boton y los resultados aparecen justo debajo.
             </p>
-            <p>Usa las pestanas superiores para cambiar entre movimiento, operacion, finanzas y afluencia.</p>
+            <p>El resumen del periodo se puede expandir si lo necesitas; al entrar en un reporte no ocupa toda la pantalla.</p>
           </HelpHint>
         </div>
       </header>
 
       <GlobalSlicerBar onGenerar={seccion === 'movimiento' && tabMov ? generar : undefined} loading={loading} seccion={seccion} />
 
-      <SavedViews />
+      {!seccion ? <SavedViews /> : null}
 
-      <ReportesDashboard />
+      {!seccion ? (
+        <ReportesDashboard />
+      ) : (
+        <details className="reporte-period-summary">
+          <summary>
+            <span className="reporte-period-summary__label">Resumen del periodo</span>
+            <span className="reporte-period-summary__range">{desde} — {hasta}</span>
+          </summary>
+          <ReportesDashboard />
+        </details>
+      )}
 
       {!seccion ? (
         <ReportCardMenu
@@ -509,7 +540,7 @@ function ReportesPageContent() {
       ) : null}
 
       {seccion === 'movimiento' ? (
-        <>
+        <ReportWorkspace>
           <ReportDetailNav
             eyebrow="Reportes"
             title="Movimiento vehicular"
@@ -519,40 +550,41 @@ function ReportesPageContent() {
               setTabMov('');
             }}
           />
-          <ReportCardMenu
+          <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={data ? 4 : 3} />
+          <ReportSubreportTabs
             ariaLabel="Reportes de movimiento vehicular"
             items={MOVEMENT_REPORT_CARDS}
+            activeId={tabMov}
             onSelect={setTabMov}
           />
 
-          {tabMov ? <section className="reporte-inc-card">
-            <h2 className="reporte-inc-card__title">
-              {tabMov === 'frecuencia'
-                ? 'Reporte de vehiculos con mayor frecuencia de visitas'
-                : tabMov === 'entradas_salidas'
-                  ? 'Reporte de entradas y salidas por rango de fechas'
-                  : 'Reporte de tiempo promedio de estadia'}
-            </h2>
-            <form
-              className="reporte-inc-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                generar();
-              }}
+          {tabMov ? (
+            <ReportGeneratePanel
+              panelRef={generateRefMov}
+              title={MOVEMENT_REPORT_TITLES[tabMov]}
+              tone={movCard?.tone}
             >
-              <div className="reporte-inc-form__actions">
-                <button type="submit" className="admin-btn-primary" disabled={loading}>
-                  {loading ? 'Generando...' : 'Generar reporte'}
-                </button>
-                <button type="button" className="admin-btn-ghost" onClick={exportarPdf} disabled={loading || !desde || !hasta}>
-                  Exportar PDF
-                </button>
-                <button type="button" className="admin-btn-ghost" onClick={exportarExcel} disabled={loading || !data}>
-                  Exportar Excel
-                </button>
-              </div>
-            </form>
-          </section> : null}
+              <form
+                className="reporte-inc-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  generar();
+                }}
+              >
+                <div className="reporte-inc-form__actions">
+                  <button type="submit" className="admin-btn-primary" disabled={loading}>
+                    {loading ? 'Generando...' : 'Generar reporte'}
+                  </button>
+                  <button type="button" className="admin-btn-ghost" onClick={exportarPdf} disabled={loading || !desde || !hasta}>
+                    Exportar PDF
+                  </button>
+                  <button type="button" className="admin-btn-ghost" onClick={exportarExcel} disabled={loading || !data}>
+                    Exportar Excel
+                  </button>
+                </div>
+              </form>
+            </ReportGeneratePanel>
+          ) : null}
 
           {error ? (
             <div className="admin-banner admin-banner--error" role="alert">
@@ -560,7 +592,11 @@ function ReportesPageContent() {
             </div>
           ) : null}
 
-          {tabMov === 'frecuencia' && data ? (
+          <ReportResultsSection
+            visible={!!data}
+            render={() => (
+            <>
+            {tabMov === 'frecuencia' ? (
             <>
               {!detalleFrecuencia.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
               {detalleFrecuencia.length ? (
@@ -698,12 +734,12 @@ function ReportesPageContent() {
                 </>
               ) : null}
             </>
-          ) : null}
+            ) : null}
 
-          {tabMov === 'entradas_salidas' && data ? (
+          {tabMov === 'entradas_salidas' ? (
             <>
-              {!data.detalle?.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
-              {data.detalle?.length ? (
+              {!data?.detalle?.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
+              {data?.detalle?.length ? (
                 <>
                   <div className="admin-kpi-grid reporte-mov-kpi-grid" style={{ marginTop: '1rem' }}>
                     <article className="admin-kpi admin-kpi--alerts">
@@ -861,10 +897,10 @@ function ReportesPageContent() {
             </>
           ) : null}
 
-          {tabMov === 'tiempo_estadia' && data ? (
+          {tabMov === 'tiempo_estadia' ? (
             <>
-              {!data.totalRegistros ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
-              {data.totalRegistros > 0 ? (
+              {!data?.totalRegistros ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
+              {data?.totalRegistros > 0 ? (
                 <>
                   <div className="admin-kpi-grid reporte-mov-kpi-grid" style={{ marginTop: '1rem' }}>
                     <article className="admin-kpi admin-kpi--spaces">
@@ -1014,7 +1050,10 @@ function ReportesPageContent() {
               ) : null}
             </>
           ) : null}
-        </>
+            </>
+            )}
+          />
+        </ReportWorkspace>
       ) : null}
 
       {seccion === 'operativos' ? <ReportesOperativosMaquinasSection onBackToReports={() => setSeccion('')} /> : null}

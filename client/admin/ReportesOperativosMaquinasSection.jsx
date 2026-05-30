@@ -12,7 +12,16 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
-import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
+import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
 
 import { useReportFilter } from './ReportFilterContext.jsx';
 const OPERATIVE_REPORT_CARDS = [
@@ -86,6 +95,24 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
   const [filtroEstadoFinalMant, setFiltroEstadoFinalMant] = useState('');
   const [filtroMaquinaRecargas, setFiltroMaquinaRecargas] = useState('');
   const [filtroTipoIncidente, setFiltroTipoIncidente] = useState('');
+  const generateRef = useReportGenerateScroll(tab);
+  const activeCard = OPERATIVE_REPORT_CARDS.find((item) => item.id === tab);
+  const reportTitle =
+    tab === 'alertas'
+      ? 'Reporte de alertas por maquina y tipo'
+      : tab === 'mantenimientos'
+        ? 'Reporte de mantenimientos por maquina'
+        : tab === 'recargas'
+          ? 'Reporte de recargas de efectivo por maquina'
+          : 'Reporte de incidentes';
+  const hasResults =
+    tab === 'alertas'
+      ? !!dataAlertas
+      : tab === 'mantenimientos'
+        ? !!dataMantenimientos
+        : tab === 'recargas'
+          ? !!dataRecargas
+          : !!dataIncidentes;
 
   useEffect(() => {
     fetchCatalog('/maquina').then(setCatalogMaquinas);
@@ -385,30 +412,22 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
   });
 
   return (
-    <>
+    <ReportWorkspace>
       <ReportDetailNav
         eyebrow="Reportes"
         title="Reportes operativos"
         backLabel="Volver a reportes"
         onBack={onBackToReports}
       />
-      <ReportCardMenu
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={hasResults ? 4 : 3} />
+      <ReportSubreportTabs
         ariaLabel="Subreportes operativos de maquinas"
         items={OPERATIVE_REPORT_CARDS}
+        activeId={tab}
         onSelect={setTab}
       />
 
-      <section className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">
-          {tab === 'alertas'
-            ? 'Reporte de alertas por maquina y tipo'
-            : tab === 'mantenimientos'
-              ? 'Reporte de mantenimientos por maquina'
-              : tab === 'recargas'
-                ? 'Reporte de recargas de efectivo por maquina'
-                : 'Reporte de incidentes'}
-        </h2>
-
+      <ReportGeneratePanel panelRef={generateRef} title={reportTitle} tone={activeCard?.tone}>
         <form
           className="reporte-inc-form"
           onSubmit={(e) => {
@@ -487,7 +506,7 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
             </button>
           </div>
         </form>
-      </section>
+      </ReportGeneratePanel>
 
       {error ? (
         <div className="admin-banner admin-banner--error" role="alert">
@@ -495,7 +514,9 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
         </div>
       ) : null}
 
-      {tab === 'alertas' && dataAlertas ? (
+      <ReportResultsSection visible={hasResults} render={() => (
+      <>
+      {tab === 'alertas' ? (
         <>
           {!alertasDetalle.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
           {alertasDetalle.length ? (
@@ -601,7 +622,7 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
         </>
       ) : null}
 
-      {tab === 'mantenimientos' && dataMantenimientos ? (
+      {tab === 'mantenimientos' ? (
         <>
           {!mantDetalle.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
           {mantDetalle.length ? (
@@ -777,7 +798,7 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
         </>
       ) : null}
 
-      {tab === 'recargas' && dataRecargas ? (
+      {tab === 'recargas' ? (
         <>
           {!recargasDetalle.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
           {recargasDetalle.length ? (
@@ -910,7 +931,7 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
         </>
       ) : null}
 
-      {tab === 'incidentes' && dataIncidentes ? (
+      {tab === 'incidentes' ? (
         <>
           {!dataIncidentes.porRango?.detalle?.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
           {dataIncidentes.porRango?.detalle?.length ? (
@@ -1032,7 +1053,9 @@ export default function ReportesOperativosMaquinasSection({ onBackToReports = nu
           ) : null}
         </>
       ) : null}
-    </>
+      </>
+      )} />
+    </ReportWorkspace>
   );
 }
 

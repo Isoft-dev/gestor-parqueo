@@ -11,7 +11,16 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
-import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
+import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
 
 import { useReportFilter } from './ReportFilterContext.jsx';
 import { useDrillDown, drillRange, nextAgrupacion } from './useDrillDown.js';
@@ -69,6 +78,9 @@ export default function ReportesAfluenciaSection({ onBackToReports = null }) {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [filtroPeriodo, setFiltroPeriodo] = useState('');
+  const generateRef = useReportGenerateScroll(tab);
+  const activeCard = AFLUENCIA_REPORT_CARDS.find((item) => item.id === tab);
+  const reportTitle = tab === 'detallado' ? 'Reporte de afluencia detallado' : 'Reporte de afluencia anual y resumen ejecutivo';
 
   useEffect(() => {
     setError('');
@@ -206,21 +218,22 @@ export default function ReportesAfluenciaSection({ onBackToReports = null }) {
   };
 
   return (
-    <>
+    <ReportWorkspace>
       <ReportDetailNav
         eyebrow="Reportes"
         title="Afluencia"
         backLabel="Volver a reportes"
         onBack={onBackToReports}
       />
-      <ReportCardMenu
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={data ? 4 : 3} />
+      <ReportSubreportTabs
         ariaLabel="Subreportes de afluencia"
         items={AFLUENCIA_REPORT_CARDS}
+        activeId={tab}
         onSelect={setTab}
       />
 
-      <section className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">{tab === 'detallado' ? 'Reporte de afluencia detallado' : 'Reporte de afluencia anual y resumen ejecutivo'}</h2>
+      <ReportGeneratePanel panelRef={generateRef} title={reportTitle} tone={activeCard?.tone}>
         <form className="reporte-inc-form" onSubmit={(e) => { e.preventDefault(); generate(); }}>
           {tab === 'detallado' ? (
             <>
@@ -235,8 +248,8 @@ export default function ReportesAfluenciaSection({ onBackToReports = null }) {
             </>
           ) : (
             <>
-              <label className="reporte-inc-field"><span>Anio inicio</span><input type="number" min="2000" max="2100" value={anioInicio} onChange={(e) => setAnioInicio(e.target.value)} required /></label>
-              <label className="reporte-inc-field"><span>Anio fin</span><input type="number" min="2000" max="2100" value={anioFin} onChange={(e) => setAnioFin(e.target.value)} required /></label>
+              <label className="reporte-inc-field"><span>Anio inicio</span><input type="number" min="2000" max={new Date().getFullYear()} value={anioInicio} onChange={(e) => setAnioInicio(String(Math.min(Number(e.target.value) || 2000, new Date().getFullYear())))} required /></label>
+              <label className="reporte-inc-field"><span>Anio fin</span><input type="number" min="2000" max={new Date().getFullYear()} value={anioFin} onChange={(e) => setAnioFin(String(Math.min(Number(e.target.value) || 2000, new Date().getFullYear())))} required /></label>
             </>
           )}
           <div className="reporte-inc-form__actions">
@@ -244,10 +257,10 @@ export default function ReportesAfluenciaSection({ onBackToReports = null }) {
             <button type="button" className="admin-btn-ghost" onClick={exportPdf} disabled={loading}>Exportar PDF</button>
           </div>
         </form>
-      </section>
+      </ReportGeneratePanel>
 
       {error ? <div className="admin-banner admin-banner--error">{error}</div> : null}
-      {data == null ? null : (
+      <ReportResultsSection visible={data != null} render={() => (
         <>
           {!chartRows.length ? <p className="reporte-inc-empty">No hay datos disponibles para el rango seleccionado.</p> : null}
           {chartRows.length ? (
@@ -399,8 +412,8 @@ export default function ReportesAfluenciaSection({ onBackToReports = null }) {
             </>
           ) : null}
         </>
-      )}
-    </>
+      )} />
+    </ReportWorkspace>
   );
 }
 

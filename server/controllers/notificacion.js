@@ -1,6 +1,6 @@
 import * as service from '../services/notificacion.js';
 import { getMailMode } from '../utils/mailer.js';
-import { runDailyMembershipJobs } from '../services/jobMembershipTasks.js';
+import { previewMembershipJobs, runDailyMembershipJobs } from '../services/jobMembershipTasks.js';
 
 function businessStatus(err) {
   const msg = String(err?.message || '');
@@ -41,12 +41,28 @@ export async function getInbox(_req, res) {
   } catch (err) { res.status(businessStatus(err)).json({ error: err.message }); }
 }
 
-/** Forzar la ejecucion del job diario desde el panel admin. */
-export async function runJobsNow(_req, res) {
+/** Vista previa del job diario (membresías que recibirían correo hoy). */
+export async function getJobsPreview(_req, res) {
   try {
-    const result = await runDailyMembershipJobs();
+    const preview = await previewMembershipJobs();
+    res.json({ mailMode: getMailMode(), ...preview });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'No se pudo obtener la vista previa' });
+  }
+}
+
+/** Forzar la ejecucion del job diario desde el panel admin. */
+export async function runJobsNow(req, res) {
+  try {
+    const force = Boolean(req.body?.force);
+    const demoOnly = Boolean(req.body?.demoOnly);
+    const result = await runDailyMembershipJobs({ force, demoOnly });
     res.json({ ok: true, mailMode: getMailMode(), result });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('[notificacion/jobs/run]', err);
+    res.status(500).json({
+      ok: false,
+      error: err.message || 'No se pudo ejecutar el job de membresías',
+    });
   }
 }

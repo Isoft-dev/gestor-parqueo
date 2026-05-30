@@ -67,7 +67,13 @@ export function ReportFilterProvider({ children }) {
 
   /** Actualiza un único filtro */
   const setFiltro = useCallback((key, value) => {
-    setFiltros((prev) => ({ ...prev, [key]: value }));
+    const today = ymd(new Date());
+    let nextValue = value;
+    if (key === 'desde' || key === 'hasta') {
+      const v = String(value ?? '').slice(0, 10);
+      nextValue = v && v > today ? today : v;
+    }
+    setFiltros((prev) => ({ ...prev, [key]: nextValue }));
   }, []);
 
   /** Restablece todos los filtros a los valores por defecto */

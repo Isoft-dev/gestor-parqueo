@@ -207,7 +207,7 @@ BEGIN
       v_cli_ape,
       LPAD(TO_CHAR(1000000000000 + i), 13, '1'),
       TO_CHAR(8000000 + i),
-      'mem' || LPAD(TO_CHAR(i), 3, '0') || '@clientes.seed',
+      'mem' || LPAD(TO_CHAR(i), 3, '0') || CHR(64) || 'clientes.seed',
       TO_CHAR(50000000 + MOD(i * 7919, 29999999)),
       'Zona ' || TO_CHAR(MOD(i, 18) + 1),
       TO_CHAR(MOD(i * 3, 20) + 1) || ' Calle',
@@ -460,7 +460,7 @@ BEGIN
                                                             WHEN 6 THEN '09001'
                                                             ELSE '03001'
                                                           END)
-   WHERE LOWER(TRIM(CLI_CORREO)) LIKE 'mem%@clientes.seed'
+   WHERE LOWER(TRIM(CLI_CORREO)) LIKE 'mem%' || CHR(64) || 'clientes.seed'
      AND (
        TRIM(CLI_NIT) IS NULL
        OR TRIM(CLI_TELEFONO) IS NULL
@@ -479,7 +479,7 @@ BEGIN
     ' (vencidas=' || v_inserted_venc || ')' ||
     ' pagos=' || v_inserted_pag ||
     ' movimientos=' || v_inserted_rmm ||
-    ' (correo memNNN@clientes.seed, placas M######, nombres/apellidos comunes).'
+    ' (correo memNNN' || CHR(64) || 'clientes.seed, placas M######, nombres/apellidos comunes).'
   );
 END;
 /
@@ -640,7 +640,7 @@ BEGIN
       v_cli_ape,
       TO_CHAR(1900000000000 + i),
       TO_CHAR(8100000 + i),
-      'demo.' || v_tag || LPAD(TO_CHAR(i), 2, '0') || '@clientes.seed',
+      'demo.' || v_tag || LPAD(TO_CHAR(i), 2, '0') || CHR(64) || 'clientes.seed',
       TO_CHAR(51000000 + MOD(i * 3571, 29999999)),
       'Zona ' || TO_CHAR(MOD(i, 18) + 1),
       TO_CHAR(MOD(i * 4, 20) + 1) || ' Avenida',
@@ -787,7 +787,7 @@ BEGIN
                                                               WHEN 6 THEN '09001'
                                                               ELSE '03001'
                                                             END)
-     WHERE LOWER(TRIM(CLI_CORREO)) = 'demo.' || v_tag || LPAD(TO_CHAR(i), 2, '0') || '@clientes.seed';
+     WHERE LOWER(TRIM(CLI_CORREO)) = 'demo.' || v_tag || LPAD(TO_CHAR(i), 2, '0') || CHR(64) || 'clientes.seed';
   END LOOP;
 
   COMMIT;
@@ -795,7 +795,7 @@ BEGIN
   DBMS_OUTPUT.PUT_LINE(
     'OK bloque presentación: ' || v_ins_mem || ' membresías (4 por vencer Activa, 4 en mora Vencida),' ||
     ' ' || v_ins_pag || ' pagos.' ||
-    ' Placas P######, correos demo.mora/vencerNN@clientes.seed.'
+    ' Placas P######, correos demo.mora/vencerNN' || CHR(64) || 'clientes.seed.'
   );
 END;
 /

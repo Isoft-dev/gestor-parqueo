@@ -12,7 +12,17 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
-import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
+import { ReportDetailNav } from './ReportCardMenu.jsx';
+import {
+  REPORT_FLOW_STEPS,
+  ReportFlowBar,
+  ReportGeneratePanel,
+  ReportResultsSection,
+  ReportSubreportTabs,
+  ReportWorkspace,
+  useReportGenerateScroll,
+} from './reportNavigation.jsx';
+import { clampMonthYm, currentMonthYm } from '../utils/dateLimits.js';
 
 import { useReportFilter } from './ReportFilterContext.jsx';
 const FINANCIAL_REPORT_CARDS = [
@@ -55,6 +65,7 @@ export default function ReportesFinancierosSection({ onBackToReports = null }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const maxMonth = currentMonthYm();
 
   const [filtroFecha, setFiltroFecha] = useState('');
   const [filtroReferencia, setFiltroReferencia] = useState('');
@@ -63,6 +74,16 @@ export default function ReportesFinancierosSection({ onBackToReports = null }) {
   const [filtroPlaca, setFiltroPlaca] = useState('');
   const [filtroMaquina, setFiltroMaquina] = useState('');
   const [filtroMetodoPago, setFiltroMetodoPago] = useState('');
+  const generateRef = useReportGenerateScroll(tab);
+  const activeCard = FINANCIAL_REPORT_CARDS.find((item) => item.id === tab);
+  const reportTitle =
+    tab === 'cobros_maquina'
+      ? 'Reporte de cobros procesados por maquina'
+      : tab === 'pagos_membresia'
+        ? 'Reporte de pagos de membresias por mes'
+        : tab === 'ingresos_tipo'
+          ? 'Reporte de ingresos por tipo de cliente'
+          : 'Reporte de ingresos totales por rango de fechas';
 
   useEffect(() => {
     setError('');
@@ -268,29 +289,22 @@ export default function ReportesFinancierosSection({ onBackToReports = null }) {
   });
 
   return (
-    <>
+    <ReportWorkspace>
       <ReportDetailNav
         eyebrow="Reportes"
         title="Reportes financieros"
         backLabel="Volver a reportes"
         onBack={onBackToReports}
       />
-      <ReportCardMenu
+      <ReportFlowBar steps={REPORT_FLOW_STEPS} activeStep={data ? 4 : 3} />
+      <ReportSubreportTabs
         ariaLabel="Subreportes financieros"
         items={FINANCIAL_REPORT_CARDS}
+        activeId={tab}
         onSelect={setTab}
       />
 
-      <section className="reporte-inc-card">
-        <h2 className="reporte-inc-card__title">
-          {tab === 'cobros_maquina'
-            ? 'Reporte de cobros procesados por maquina'
-            : tab === 'pagos_membresia'
-              ? 'Reporte de pagos de membresias por mes'
-              : tab === 'ingresos_tipo'
-                ? 'Reporte de ingresos por tipo de cliente'
-                : 'Reporte de ingresos totales por rango de fechas'}
-        </h2>
+      <ReportGeneratePanel panelRef={generateRef} title={reportTitle} tone={activeCard?.tone}>
         <form
           className="reporte-inc-form"
           onSubmit={(e) => {
@@ -302,11 +316,11 @@ export default function ReportesFinancierosSection({ onBackToReports = null }) {
             <>
               <label className="reporte-inc-field">
                 <span>Mes inicio</span>
-                <input type="month" value={mesInicio} onChange={(e) => setMesInicio(e.target.value)} required />
+                <input type="month" value={mesInicio} max={maxMonth} onChange={(e) => setMesInicio(clampMonthYm(e.target.value))} required />
               </label>
               <label className="reporte-inc-field">
                 <span>Mes fin</span>
-                <input type="month" value={mesFin} onChange={(e) => setMesFin(e.target.value)} required />
+                <input type="month" value={mesFin} max={maxMonth} onChange={(e) => setMesFin(clampMonthYm(e.target.value))} required />
               </label>
             </>
           ) : null}
@@ -319,10 +333,10 @@ export default function ReportesFinancierosSection({ onBackToReports = null }) {
             </button>
           </div>
         </form>
-      </section>
+      </ReportGeneratePanel>
 
       {error ? <div className="admin-banner admin-banner--error">{error}</div> : null}
-      {data == null ? null : (
+      <ReportResultsSection visible={data != null} render={() => (
         <>
           {tab === 'cobros_maquina' ? (
             <>
@@ -663,8 +677,8 @@ export default function ReportesFinancierosSection({ onBackToReports = null }) {
             </>
           ) : null}
         </>
-      )}
-    </>
+      )} />
+    </ReportWorkspace>
   );
 }
 

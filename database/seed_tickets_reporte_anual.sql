@@ -337,7 +337,7 @@ BEGIN
     -- Igual que server/services/ticket.js buildTicketCodigo(placa, entrada)
     v_codigo :=
       TO_CHAR(CAST(v_entrada AS DATE), 'DDMMYYHH24MI') ||
-      UPPER(TRIM(TRANSLATE(v_placa, '- ', '--')));
+      UPPER(TRIM(TRANSLATE(v_placa, '- ', CHR(45) || CHR(45))));
     SELECT MOD_ID
       INTO v_mod_id
       FROM (
@@ -423,7 +423,7 @@ BEGIN
             v_cli_nom, NULL,
             v_cli_ape1, v_cli_ape2,
             '7' || LPAD(SUBSTR(v_cmp_nit, 1, 12), 12, '0'), v_nit,
-            'ticket.' || LOWER(v_cmp_nit) || '@mail.demo',
+            'ticket.' || LOWER(v_cmp_nit) || CHR(64) || 'mail.demo',
             TO_CHAR(30000000 + MOD(i * 7919, 49999999)),
             'Zona ' || TO_CHAR(MOD(i, 18) + 1),
             TO_CHAR(MOD(i * 5, 20) + 1) || ' Avenida',
@@ -468,6 +468,13 @@ BEGIN
          SET CLI_ID = v_cli_id
        WHERE VEH_ID = v_veh_id
          AND CLI_ID IS NULL;
+
+      -- ~35 % de clientes esporadicos con ticket quedan sin NIT (consumidor final / dato pendiente)
+      IF v_cli_id IS NOT NULL AND DBMS_RANDOM.VALUE(0, 1) < 0.35 THEN
+        UPDATE PAR_CLIENTE
+           SET CLI_NIT = NULL
+         WHERE CLI_ID = v_cli_id;
+      END IF;
     END IF;
 
     v_rec := monto_cob + TRUNC(DBMS_RANDOM.VALUE(0, 25));
@@ -564,8 +571,7 @@ BEGIN
                                   WHEN 6 THEN 'Aguilar'
                                   ELSE 'Mendez'
                                 END,
-         CLI_NIT = NVL(TRIM(CLI_NIT), REGEXP_REPLACE(UPPER(TRIM(SUBSTR(CLI_CORREO, 8, INSTR(CLI_CORREO, '@') - 8))), '[^0-9A-Z]', '')),
-         CLI_DPI = '7' || LPAD(SUBSTR(REGEXP_REPLACE(UPPER(TRIM(NVL(CLI_NIT, SUBSTR(CLI_CORREO, 8, INSTR(CLI_CORREO, '@') - 8)))), '[^0-9A-Z]', ''), 1, 12), 12, '0'),
+         CLI_DPI = '7' || LPAD(SUBSTR(REGEXP_REPLACE(UPPER(TRIM(NVL(CLI_NIT, SUBSTR(CLI_CORREO, 8, INSTR(CLI_CORREO, CHR(64)) - 8)))), '[^0-9A-Z]', ''), 1, 12), 12, '0'),
          CLI_TELEFONO = NVL(TRIM(CLI_TELEFONO), TO_CHAR(30000000 + MOD(CLI_ID * 7919, 49999999))),
          CLI_ZONA = NVL(TRIM(CLI_ZONA), 'Zona ' || TO_CHAR(MOD(CLI_ID, 18) + 1)),
          CLI_CALLE = NVL(TRIM(CLI_CALLE), TO_CHAR(MOD(CLI_ID * 5, 20) + 1) || ' Avenida'),
@@ -600,12 +606,11 @@ BEGIN
                                                             WHEN 6 THEN '09001'
                                                             ELSE '03001'
                                                           END)
-   WHERE LOWER(TRIM(CLI_CORREO)) LIKE 'ticket.%@mail.demo'
+   WHERE LOWER(TRIM(CLI_CORREO)) LIKE 'ticket.%' || CHR(64) || 'mail.demo'
      AND (
        UPPER(NVL(CLI_PRIMER_NOMBRE, '')) = 'CLIENTE'
        OR UPPER(NVL(CLI_PRIMER_APELLIDO, '')) = 'ESPORADICO'
        OR LENGTH(TRIM(CLI_DPI)) <> 13
-       OR TRIM(CLI_NIT) IS NULL
        OR TRIM(CLI_TELEFONO) IS NULL
        OR TRIM(CLI_ZONA) IS NULL
        OR TRIM(CLI_CALLE) IS NULL
