@@ -27,14 +27,15 @@ export default function AdminSectionPage({
               </HelpHint>
             ) : null}
           </div>
-          {sectionPath === 'tarifas' ? (
-            <div className="admin-page-header__title-aside">
-              <CobroMinimoSub1hToggle />
-            </div>
-          ) : null}
+
         </div>
         {footnote ? <p className="admin-page-footnote">{footnote}</p> : null}
       </header>
+      {sectionPath === 'tarifas' ? (
+        <div className="tarifa-card-wrap">
+          <CobroMinimoSub1hToggle />
+        </div>
+      ) : null}
       <div className="admin-crud-embed">
         <CrudDemo
           key={sectionPath}

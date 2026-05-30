@@ -83,8 +83,11 @@ export async function getInbox() {
   const rows = await getAll();
   return rows.map((r) => {
     const tnoTipo = String(r.TNO_TIPO ?? '').toLowerCase();
-    const esSuspension = tnoTipo.includes('susp');
-    const etapa = etapaFromTnoTipo(r.TNO_TIPO);
+    const mensaje = `${r.NOT_ASUNTO ?? ''} ${r.NOT_CUERPO ?? ''}`.toLowerCase();
+    const esSuspension = tnoTipo.includes('susp') && !mensaje.includes('quedó vencida');
+    const etapa = mensaje.includes('quedó vencida')
+      ? 'aviso de vencimiento'
+      : etapaFromTnoTipo(r.TNO_TIPO);
     return {
       notId: r.NOT_ID,
       tnoId: r.TNO_ID,

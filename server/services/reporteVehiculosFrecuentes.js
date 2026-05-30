@@ -1,5 +1,6 @@
 import { executeSql } from '../db/oracle.js';
 import { buildVehiculosFrecuentesPdfBuffer as buildVehiculosFrecuentesPdfBufferBase } from './reporteMovimientoVehicular.js';
+import { vehiculoCatalogGroupBy, vehiculoCatalogJoin, vehiculoCatalogSelect } from '../utils/vehiculoCatalogSql.js';
 
 function parseYmd(s) {
   const m = String(s ?? '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -49,26 +50,26 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
     executeSql(
       `SELECT t.VEH_ID,
               v.VEH_PLACA,
-              v.VEH_MODELO,
-              v.VEH_COLOR,
+              ${vehiculoCatalogSelect('v')},
               COUNT(*) AS TOTAL_VISITAS
          FROM PAR_TICKET t
          JOIN PAR_VEHICULO v ON v.VEH_ID = t.VEH_ID
+         ${vehiculoCatalogJoin('v')}
         WHERE TRUNC(t.TIC_FECHA_HORA_ENTRADA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
-        GROUP BY t.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR`,
+        GROUP BY t.VEH_ID, v.VEH_PLACA, ${vehiculoCatalogGroupBy('v')}`,
       periodo
     ),
     executeSql(
       `SELECT v.VEH_ID,
               v.VEH_PLACA,
-              v.VEH_MODELO,
-              v.VEH_COLOR,
+              ${vehiculoCatalogSelect('v')},
               COUNT(*) AS TOTAL_VISITAS
          FROM PAR_REGISTRO_MOVIMIENTO_MEMBRESIA r
          JOIN PAR_MEMBRESIA m ON m.MEM_ID = r.MEM_ID
          JOIN PAR_VEHICULO v ON v.VEH_ID = m.VEH_ID
+         ${vehiculoCatalogJoin('v')}
         WHERE TRUNC(r.RMM_FECHA_HORA_ENTRADA) BETWEEN TO_DATE(:desde, 'YYYY-MM-DD') AND TO_DATE(:hasta, 'YYYY-MM-DD')
-        GROUP BY v.VEH_ID, v.VEH_PLACA, v.VEH_MODELO, v.VEH_COLOR`,
+        GROUP BY v.VEH_ID, v.VEH_PLACA, ${vehiculoCatalogGroupBy('v')}`,
       periodo
     ),
   ]);
@@ -79,7 +80,9 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
       const vehiculoId = r.VEH_ID ?? r.veh_id;
       const placa = r.VEH_PLACA ?? r.veh_placa ?? '-';
       const modelo = r.VEH_MODELO ?? r.veh_modelo ?? '-';
+      const marca = r.MAR_NOMBRE ?? r.mar_nombre ?? '-';
       const color = r.VEH_COLOR ?? r.veh_color ?? '-';
+      const tipoVehiculo = r.TVE_TIPO ?? r.tve_tipo ?? '-';
       const visitas = Number(r.TOTAL_VISITAS ?? r.total_visitas ?? 0);
       const key = vehiculoId != null ? `veh-${vehiculoId}` : `placa-${placa}`;
 
@@ -88,7 +91,9 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
           vehiculoId,
           placa,
           modelo,
+          marca,
           color,
+          tipoVehiculo,
           visitas: 0,
           tipoCliente,
         });
@@ -96,6 +101,10 @@ export async function getVehiculosFrecuentes(desdeStr, hastaStr) {
 
       const current = byVehiculo.get(key);
       current.visitas += visitas;
+      if (!current.modelo || current.modelo === '-') current.modelo = modelo;
+      if (!current.marca || current.marca === '-') current.marca = marca;
+      if (!current.color || current.color === '-') current.color = color;
+      if (!current.tipoVehiculo || current.tipoVehiculo === '-') current.tipoVehiculo = tipoVehiculo;
       if (current.tipoCliente !== tipoCliente) current.tipoCliente = 'Mixto';
     });
   };

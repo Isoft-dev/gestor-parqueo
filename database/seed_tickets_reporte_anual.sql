@@ -2,17 +2,13 @@
 -- SEED: Tickets esporádicos (entrada + salida + cobro) para reportes ~1 año
 -- =============================================================================
 -- Prerrequisitos:
---   - Tablas PAR_* creadas; catálogos mínimos cargados (seed_demo_hu / seed_catalogo_funcional).
+--   - Tablas PAR_* creadas; catálogos mínimos cargados (seed_catalogo_funcional.sql).
 --   - PAR_TARIFA con precio por hora y TAR_TIEMPO_GRACIA (p. ej. esporádico 15 min).
 --   - PAR_ESTADO_TICKET con estados «Pagado» (LIKE %pagad%) y «Validado» (LIKE %valid%).
---   - PAR_TIPO_COBRO «Efectivo» y PAR_TIPO_VEHICULO al menos una fila.
---   - PAR_MAQUINA: entrada / cobro / salida.
---     [!] IMPORTANTE: Para que los IDs cuadren correctamente con el código del backend,
---         debes crear las máquinas manualmente en este orden exacto:
---         1. Entrada_1
---         2. Cobro_1
---         3. Salida_1
---         (Una vez creadas estas 3, puedes agregar las demás que desees).
+--   - PAR_TIPO_COBRO «Efectivo», PAR_MODELO_VEHICULO y PAR_COLOR_VEHICULO con datos.
+--   - PAR_MAQUINA: Entrada_1, Cobro_1 y Salida_1.
+--     seed_catalogo_funcional.sql las crea automaticamente si no existen.
+--     Una vez creadas estas 3, puedes agregar las demas que desees.
 --
 -- Convención SIN borrar datos existentes (no DELETE/TRUNCATE):
 --   - Placas nuevas: formato R###### (7 caracteres: R + 6 dígitos), compatible con columnas VARCHAR2(7).
@@ -37,7 +33,8 @@ SET SERVEROUTPUT ON SIZE UNLIMITED
 
 DECLARE
   c_seeded       NUMBER;
-  v_tve_id       NUMBER;
+  v_mod_id       NUMBER;
+  v_col_id       NUMBER;
   v_eti_pagado   NUMBER;
   v_eti_validado NUMBER;
   v_tco_id       NUMBER;
@@ -62,8 +59,6 @@ DECLARE
 
   v_placa        VARCHAR2(20);
   v_codigo       VARCHAR2(64);
-  v_modelo       VARCHAR2(40);
-  v_color        VARCHAR2(40);
   v_veh_id       NUMBER;
   v_tic_id       NUMBER;
   v_cli_id       NUMBER;
@@ -93,11 +88,23 @@ DECLARE
   v_fh_sal       DATE;
   v_fh_cob       DATE;
   v_proc_maq     NUMBER;
+  v_cli_nom      VARCHAR2(30);
+  v_cli_ape1     VARCHAR2(30);
+  v_cli_ape2     VARCHAR2(30);
 
-  TYPE t_model IS VARRAY(8) OF VARCHAR2(40);
-  TYPE t_color IS VARRAY(8) OF VARCHAR2(24);
-  models t_model := t_model('Sentra', 'Civic', 'CX-5', 'Hilux', 'Swift', 'RAV4', 'Groove', 'Sportage');
-  colors t_color := t_color('Blanco', 'Gris', 'Azul', 'Rojo', 'Negro', 'Plata', 'Verde', 'Amarillo');
+  TYPE t_nom_arr IS VARRAY(16) OF VARCHAR2(30);
+  v_nombres t_nom_arr := t_nom_arr(
+    'Alejandro', 'Maria', 'Diego', 'Sofia',
+    'Javier', 'Andrea', 'Fernando', 'Paola',
+    'Ricardo', 'Gabriela', 'Manuel', 'Valeria',
+    'Carlos', 'Lucia', 'Roberto', 'Daniela'
+  );
+  v_apellidos t_nom_arr := t_nom_arr(
+    'Garcia', 'Lopez', 'Morales', 'Perez',
+    'Rodriguez', 'Martinez', 'Gonzalez', 'Hernandez',
+    'Reyes', 'Castillo', 'Flores', 'Vasquez',
+    'Ramirez', 'Torres', 'Jimenez', 'Ortiz'
+  );
 
   ---------------------------------------------------------------------------
   -- Máquinas: Entrada_1 / Cobro_1 / Salida_1 (tu esquema), si no por tipo, si no 1/2/3
@@ -198,9 +205,14 @@ BEGIN
        FETCH FIRST 1 ROW ONLY;
   END;
 
-  SELECT MIN(TVE_ID) INTO v_tve_id FROM PAR_TIPO_VEHICULO;
-  IF v_tve_id IS NULL THEN
-    RAISE_APPLICATION_ERROR(-20002, 'PAR_TIPO_VEHICULO vacío.');
+  SELECT MIN(MOD_ID) INTO v_mod_id FROM PAR_MODELO_VEHICULO;
+  IF v_mod_id IS NULL THEN
+    RAISE_APPLICATION_ERROR(-20002, 'PAR_MODELO_VEHICULO vacío.');
+  END IF;
+
+  SELECT MIN(COL_ID) INTO v_col_id FROM PAR_COLOR_VEHICULO;
+  IF v_col_id IS NULL THEN
+    RAISE_APPLICATION_ERROR(-20008, 'PAR_COLOR_VEHICULO vacío.');
   END IF;
 
   SELECT MIN(ETI_ID) INTO v_eti_pagado
@@ -326,13 +338,28 @@ BEGIN
     v_codigo :=
       TO_CHAR(CAST(v_entrada AS DATE), 'DDMMYYHH24MI') ||
       UPPER(TRIM(TRANSLATE(v_placa, '- ', '--')));
-    v_modelo := models(1 + MOD(i - 1, models.COUNT));
-    v_color := colors(1 + MOD(i + 3, colors.COUNT));
+    SELECT MOD_ID
+      INTO v_mod_id
+      FROM (
+        SELECT MOD_ID
+          FROM PAR_MODELO_VEHICULO
+         ORDER BY DBMS_RANDOM.VALUE
+      )
+     WHERE ROWNUM = 1;
+
+    SELECT COL_ID
+      INTO v_col_id
+      FROM (
+        SELECT COL_ID
+          FROM PAR_COLOR_VEHICULO
+         ORDER BY DBMS_RANDOM.VALUE
+      )
+     WHERE ROWNUM = 1;
 
     INSERT INTO PAR_VEHICULO (
-      VEH_PLACA, VEH_MODELO, VEH_COLOR, TVE_ID, CLI_ID
+      VEH_PLACA, MOD_ID, COL_ID, CLI_ID
     ) VALUES (
-      v_placa, v_modelo, v_color, v_tve_id, NULL
+      v_placa, v_mod_id, v_col_id, NULL
     )
     RETURNING VEH_ID INTO v_veh_id;
 
@@ -383,17 +410,56 @@ BEGIN
          WHERE ROWNUM = 1;
       EXCEPTION
         WHEN NO_DATA_FOUND THEN
+          v_cli_nom := v_nombres(MOD(i - 1, v_nombres.COUNT) + 1);
+          v_cli_ape1 := v_apellidos(MOD(i + 3, v_apellidos.COUNT) + 1);
+          v_cli_ape2 := v_apellidos(MOD(i + 9, v_apellidos.COUNT) + 1);
+
           INSERT INTO PAR_CLIENTE (
             CLI_PRIMER_NOMBRE, CLI_SEGUNDO_NOMBRE,
             CLI_PRIMER_APELLIDO, CLI_SEGUNDO_APELLIDO, CLI_DPI, CLI_NIT,
             CLI_CORREO, CLI_TELEFONO, CLI_ZONA, CLI_CALLE, CLI_NUMERO,
             CLI_COLONIA, CLI_CIUDAD, CLI_CODIGO_POSTAL, CLI_ACTIVO, CLI_FECHA_REGISTRO
           ) VALUES (
-            'Cliente', NULL,
-            'Esporadico', SUBSTR(v_cmp_nit, GREATEST(1, LENGTH(v_cmp_nit) - 3)),
-            LPAD(SUBSTR(v_cmp_nit, 1, 13), 13, '0'), v_nit,
-            'ticket.' || LOWER(v_cmp_nit) || '@mail.demo', NULL, NULL, NULL, NULL,
-            NULL, 'Guatemala', NULL, 1, SYSDATE
+            v_cli_nom, NULL,
+            v_cli_ape1, v_cli_ape2,
+            '7' || LPAD(SUBSTR(v_cmp_nit, 1, 12), 12, '0'), v_nit,
+            'ticket.' || LOWER(v_cmp_nit) || '@mail.demo',
+            TO_CHAR(30000000 + MOD(i * 7919, 49999999)),
+            'Zona ' || TO_CHAR(MOD(i, 18) + 1),
+            TO_CHAR(MOD(i * 5, 20) + 1) || ' Avenida',
+            TO_CHAR(MOD(i * 29, 200) + 1) || '-' || LPAD(TO_CHAR(MOD(i * 17, 90) + 1), 2, '0'),
+            CASE MOD(i, 8)
+              WHEN 0 THEN 'Colonia Centro America'
+              WHEN 1 THEN 'Colonia Mariscal'
+              WHEN 2 THEN 'Colonia La Reformita'
+              WHEN 3 THEN 'Colonia Santa Elisa'
+              WHEN 4 THEN 'Colonia El Naranjo'
+              WHEN 5 THEN 'Colonia Primero de Julio'
+              WHEN 6 THEN 'Colonia San Cristobal'
+              ELSE 'Colonia Las Charcas'
+            END,
+            CASE MOD(i, 8)
+              WHEN 0 THEN 'Guatemala'
+              WHEN 1 THEN 'Mixco'
+              WHEN 2 THEN 'Villa Nueva'
+              WHEN 3 THEN 'San Miguel Petapa'
+              WHEN 4 THEN 'Amatitlan'
+              WHEN 5 THEN 'Santa Catarina Pinula'
+              WHEN 6 THEN 'Quetzaltenango'
+              ELSE 'Antigua Guatemala'
+            END,
+            CASE MOD(i, 8)
+              WHEN 0 THEN '01001'
+              WHEN 1 THEN '01057'
+              WHEN 2 THEN '01064'
+              WHEN 3 THEN '01066'
+              WHEN 4 THEN '01063'
+              WHEN 5 THEN '01051'
+              WHEN 6 THEN '09001'
+              ELSE '03001'
+            END,
+            1,
+            SYSDATE
           )
           RETURNING CLI_ID INTO v_cli_id;
       END;
@@ -455,6 +521,102 @@ BEGIN
   END LOOP;
 
   COMMIT;
+
+  -- Normaliza clientes de tickets creados por versiones anteriores del seed:
+  -- nombres reales y DPI de 13 digitos, conservando NIT/correo/relaciones.
+  UPDATE PAR_CLIENTE
+     SET CLI_PRIMER_NOMBRE = CASE MOD(CLI_ID, 12)
+                               WHEN 0 THEN 'Alejandro'
+                               WHEN 1 THEN 'Maria'
+                               WHEN 2 THEN 'Diego'
+                               WHEN 3 THEN 'Sofia'
+                               WHEN 4 THEN 'Javier'
+                               WHEN 5 THEN 'Andrea'
+                               WHEN 6 THEN 'Fernando'
+                               WHEN 7 THEN 'Paola'
+                               WHEN 8 THEN 'Ricardo'
+                               WHEN 9 THEN 'Gabriela'
+                               WHEN 10 THEN 'Manuel'
+                               ELSE 'Valeria'
+                             END,
+         CLI_SEGUNDO_NOMBRE = NULL,
+         CLI_PRIMER_APELLIDO = CASE MOD(CLI_ID, 12)
+                                 WHEN 0 THEN 'Garcia'
+                                 WHEN 1 THEN 'Lopez'
+                                 WHEN 2 THEN 'Morales'
+                                 WHEN 3 THEN 'Perez'
+                                 WHEN 4 THEN 'Rodriguez'
+                                 WHEN 5 THEN 'Martinez'
+                                 WHEN 6 THEN 'Gonzalez'
+                                 WHEN 7 THEN 'Hernandez'
+                                 WHEN 8 THEN 'Reyes'
+                                 WHEN 9 THEN 'Castillo'
+                                 WHEN 10 THEN 'Flores'
+                                 ELSE 'Vasquez'
+                               END,
+         CLI_SEGUNDO_APELLIDO = CASE MOD(CLI_ID, 8)
+                                  WHEN 0 THEN 'Ramirez'
+                                  WHEN 1 THEN 'Torres'
+                                  WHEN 2 THEN 'Jimenez'
+                                  WHEN 3 THEN 'Ortiz'
+                                  WHEN 4 THEN 'Medina'
+                                  WHEN 5 THEN 'Ruiz'
+                                  WHEN 6 THEN 'Aguilar'
+                                  ELSE 'Mendez'
+                                END,
+         CLI_NIT = NVL(TRIM(CLI_NIT), REGEXP_REPLACE(UPPER(TRIM(SUBSTR(CLI_CORREO, 8, INSTR(CLI_CORREO, '@') - 8))), '[^0-9A-Z]', '')),
+         CLI_DPI = '7' || LPAD(SUBSTR(REGEXP_REPLACE(UPPER(TRIM(NVL(CLI_NIT, SUBSTR(CLI_CORREO, 8, INSTR(CLI_CORREO, '@') - 8)))), '[^0-9A-Z]', ''), 1, 12), 12, '0'),
+         CLI_TELEFONO = NVL(TRIM(CLI_TELEFONO), TO_CHAR(30000000 + MOD(CLI_ID * 7919, 49999999))),
+         CLI_ZONA = NVL(TRIM(CLI_ZONA), 'Zona ' || TO_CHAR(MOD(CLI_ID, 18) + 1)),
+         CLI_CALLE = NVL(TRIM(CLI_CALLE), TO_CHAR(MOD(CLI_ID * 5, 20) + 1) || ' Avenida'),
+         CLI_NUMERO = NVL(TRIM(CLI_NUMERO), TO_CHAR(MOD(CLI_ID * 29, 200) + 1) || '-' || LPAD(TO_CHAR(MOD(CLI_ID * 17, 90) + 1), 2, '0')),
+         CLI_COLONIA = NVL(TRIM(CLI_COLONIA), CASE MOD(CLI_ID, 8)
+                                               WHEN 0 THEN 'Colonia Centro America'
+                                               WHEN 1 THEN 'Colonia Mariscal'
+                                               WHEN 2 THEN 'Colonia La Reformita'
+                                               WHEN 3 THEN 'Colonia Santa Elisa'
+                                               WHEN 4 THEN 'Colonia El Naranjo'
+                                               WHEN 5 THEN 'Colonia Primero de Julio'
+                                               WHEN 6 THEN 'Colonia San Cristobal'
+                                               ELSE 'Colonia Las Charcas'
+                                             END),
+         CLI_CIUDAD = NVL(TRIM(CLI_CIUDAD), CASE MOD(CLI_ID, 8)
+                                             WHEN 0 THEN 'Guatemala'
+                                             WHEN 1 THEN 'Mixco'
+                                             WHEN 2 THEN 'Villa Nueva'
+                                             WHEN 3 THEN 'San Miguel Petapa'
+                                             WHEN 4 THEN 'Amatitlan'
+                                             WHEN 5 THEN 'Santa Catarina Pinula'
+                                             WHEN 6 THEN 'Quetzaltenango'
+                                             ELSE 'Antigua Guatemala'
+                                           END),
+         CLI_CODIGO_POSTAL = NVL(TRIM(CLI_CODIGO_POSTAL), CASE MOD(CLI_ID, 8)
+                                                            WHEN 0 THEN '01001'
+                                                            WHEN 1 THEN '01057'
+                                                            WHEN 2 THEN '01064'
+                                                            WHEN 3 THEN '01066'
+                                                            WHEN 4 THEN '01063'
+                                                            WHEN 5 THEN '01051'
+                                                            WHEN 6 THEN '09001'
+                                                            ELSE '03001'
+                                                          END)
+   WHERE LOWER(TRIM(CLI_CORREO)) LIKE 'ticket.%@mail.demo'
+     AND (
+       UPPER(NVL(CLI_PRIMER_NOMBRE, '')) = 'CLIENTE'
+       OR UPPER(NVL(CLI_PRIMER_APELLIDO, '')) = 'ESPORADICO'
+       OR LENGTH(TRIM(CLI_DPI)) <> 13
+       OR TRIM(CLI_NIT) IS NULL
+       OR TRIM(CLI_TELEFONO) IS NULL
+       OR TRIM(CLI_ZONA) IS NULL
+       OR TRIM(CLI_CALLE) IS NULL
+       OR TRIM(CLI_NUMERO) IS NULL
+       OR TRIM(CLI_COLONIA) IS NULL
+       OR TRIM(CLI_CIUDAD) IS NULL
+       OR TRIM(CLI_CODIGO_POSTAL) IS NULL
+     );
+
+  COMMIT;
+
   DBMS_OUTPUT.PUT_LINE(
     'OK: insertados ' || v_inserted || ' tickets validados + 3 DMT/ticket (entrada/cobro/salida), con cliente esporadico cuando hubo NIT.'
   );

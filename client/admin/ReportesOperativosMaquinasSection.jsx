@@ -12,6 +12,15 @@ import {
   formatNumber,
 } from './reportChartUtils.js';
 import { ReportChartCard, ReportLegend } from './ReportChartPrimitives.jsx';
+import { ReportCardMenu, ReportDetailNav } from './ReportCardMenu.jsx';
+
+import { useReportFilter } from './ReportFilterContext.jsx';
+const OPERATIVE_REPORT_CARDS = [
+  { id: 'alertas', badge: 'ALE', eyebrow: 'Atencion', label: 'Alertas por maquina', summary: 'Alertas por tipo, estado, maquina y tiempo de atencion.', traits: ['Maquina', 'Tipo', 'Estado'], icon: 'alert', tone: 'sunset' },
+  { id: 'mantenimientos', badge: 'MAN', eyebrow: 'Servicio', label: 'Mantenimientos', summary: 'Intervenciones por maquina, rango y resultado operativo.', traits: ['Maquina', 'Fecha', 'Estado'], icon: 'machine', tone: 'steel' },
+  { id: 'recargas', badge: 'REC', eyebrow: 'Efectivo', label: 'Recargas de efectivo', summary: 'Eventos de recarga y saldo disponible por maquina de cobro.', traits: ['Saldo', 'Maquina', 'Denominacion'], icon: 'money', tone: 'mint' },
+  { id: 'incidentes', badge: 'INC', eyebrow: 'Bitacora', label: 'Incidentes', summary: 'Incidentes por tipo, resolucion y seguimiento operativo.', traits: ['Tipo', 'Estado', 'Rango'], icon: 'alert', tone: 'ocean' },
+];
 
 function ymd(d) {
   const y = d.getFullYear();
@@ -20,12 +29,6 @@ function ymd(d) {
   return `${y}-${m}-${day}`;
 }
 
-function defaultRange() {
-  const hasta = new Date();
-  const desde = new Date(hasta);
-  desde.setDate(desde.getDate() - 29);
-  return { desde: ymd(desde), hasta: ymd(hasta) };
-}
 
 async function parseJsonSafe(res) {
   const text = await res.text();
@@ -52,11 +55,11 @@ function clickedLabel(elements, chart) {
   return String(chart.data.labels[elements[0].index] || '');
 }
 
-export default function ReportesOperativosMaquinasSection() {
-  const initial = useMemo(() => defaultRange(), []);
+export default function ReportesOperativosMaquinasSection({ onBackToReports = null }) {
+  const { filtros, setFiltro } = useReportFilter();
+  const desde = filtros.desde;
+  const hasta = filtros.hasta;
   const [tab, setTab] = useState('alertas');
-  const [desde, setDesde] = useState(initial.desde);
-  const [hasta, setHasta] = useState(initial.hasta);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -383,20 +386,17 @@ export default function ReportesOperativosMaquinasSection() {
 
   return (
     <>
-      <div className="reporte-tabs" role="tablist" aria-label="Subreportes operativos de maquinas">
-        <button type="button" role="tab" aria-selected={tab === 'alertas'} className={`reporte-tab-btn${tab === 'alertas' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('alertas')}>
-          Alertas por maquina y tipo
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'mantenimientos'} className={`reporte-tab-btn${tab === 'mantenimientos' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('mantenimientos')}>
-          Mantenimientos por maquina
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'recargas'} className={`reporte-tab-btn${tab === 'recargas' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('recargas')}>
-          Recargas de efectivo
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'incidentes'} className={`reporte-tab-btn${tab === 'incidentes' ? ' reporte-tab-btn--active' : ''}`} onClick={() => setTab('incidentes')}>
-          Incidentes
-        </button>
-      </div>
+      <ReportDetailNav
+        eyebrow="Reportes"
+        title="Reportes operativos"
+        backLabel="Volver a reportes"
+        onBack={onBackToReports}
+      />
+      <ReportCardMenu
+        ariaLabel="Subreportes operativos de maquinas"
+        items={OPERATIVE_REPORT_CARDS}
+        onSelect={setTab}
+      />
 
       <section className="reporte-inc-card">
         <h2 className="reporte-inc-card__title">
@@ -416,15 +416,6 @@ export default function ReportesOperativosMaquinasSection() {
             generate();
           }}
         >
-          <label className="reporte-inc-field">
-            <span>Fecha inicio</span>
-            <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
-          </label>
-          <label className="reporte-inc-field">
-            <span>Fecha fin</span>
-            <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} required />
-          </label>
-
           {tab === 'alertas' ? (
             <>
               <label className="reporte-inc-field">
@@ -1044,3 +1035,4 @@ export default function ReportesOperativosMaquinasSection() {
     </>
   );
 }
+

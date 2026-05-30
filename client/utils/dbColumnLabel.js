@@ -1,14 +1,15 @@
-/**
+﻿/**
  * Etiquetas legibles para columnas estilo Oracle (PREFIJO_CAMPO).
  * Usado en tablas y vistas donde la API devuelve nombres de columna literales.
  */
 
-/** Prefijos TAB_ de TAB_CAMPO → nombre corto en español (para heurística). */
+/** Prefijos TAB_ de TAB_CAMPO -> nombre corto en español (para heurística). */
 const TABLE_PREFIX_ES = {
   ALE: 'Alerta',
   BIV: 'Bitácora incidente',
   CLI: 'Cliente',
   COB: 'Cobro',
+  COL: 'Color',
   DMT: 'Det. máquina/ticket',
   DPM: 'Det. pago membresía',
   DSA: 'Detalle saldo',
@@ -20,7 +21,9 @@ const TABLE_PREFIX_ES = {
   ESP: 'Espacio',
   INC: 'Incidente',
   MAQ: 'Máquina',
+  MAR: 'Marca',
   MEM: 'Membresía',
+  MOD: 'Modelo',
   NOT: 'Notificación',
   PAG: 'Pago',
   REM: 'Mantenimiento',
@@ -123,3 +126,4 @@ export function getDbColumnLabel(key, labelMap) {
   }
   return humanizeDbColumn(k);
 }
+

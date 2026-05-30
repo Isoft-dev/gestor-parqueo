@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit/js/pdfkit.js';
 import { executeSql } from '../db/oracle.js';
+import { vehiculoCatalogJoin, vehiculoCatalogSelect } from '../utils/vehiculoCatalogSql.js';
 
 function nombreCompleto(r) {
   const parts = [
@@ -24,13 +25,14 @@ function toYmd(v) {
 }
 
 /**
- * Membresías activas con vencimiento estrictamente anterior a hoy (mora).
- * Días de mora = TRUNC(hoy) − TRUNC(vencimiento), alineado al job de suspensión (>3 días ⇒ riesgo).
+ * Membresías en estado Vencida (la fecha de vencimiento ya pasó y el cliente no ha renovado).
+ * Días de mora = TRUNC(hoy) − TRUNC(vencimiento). Más de 3 días: se resalta en el reporte.
  */
 export async function getClientesMoraActual() {
   const rows = await executeSql(
     `SELECT m.MEM_ID,
             v.VEH_PLACA,
+            ${vehiculoCatalogSelect('v')},
             m.MEM_FECHA_VENCIMIENTO,
             (TRUNC(SYSDATE) - TRUNC(m.MEM_FECHA_VENCIMIENTO)) AS DIAS_MORA,
             tm.TME_PRECIO,
@@ -46,10 +48,10 @@ export async function getClientesMoraActual() {
        JOIN PAR_ESTADO_MEMBRESIA em ON m.EME_ID = em.EME_ID
        JOIN PAR_TIPO_MEMBRESIA tm ON m.TME_ID = tm.TME_ID
        JOIN PAR_VEHICULO v ON m.VEH_ID = v.VEH_ID
+       ${vehiculoCatalogJoin('v')}
        LEFT JOIN PAR_CLIENTE c ON v.CLI_ID = c.CLI_ID
-      WHERE TRUNC(m.MEM_FECHA_VENCIMIENTO) < TRUNC(SYSDATE)
-        AND LOWER(NVL(em.EME_ESTADO, '')) LIKE '%activ%'
-        AND LOWER(NVL(em.EME_ESTADO, '')) NOT LIKE '%inactiv%'
+      WHERE LOWER(NVL(em.EME_ESTADO, '')) LIKE '%venc%'
+        AND TRUNC(m.MEM_FECHA_VENCIMIENTO) < TRUNC(SYSDATE)
       ORDER BY (TRUNC(SYSDATE) - TRUNC(m.MEM_FECHA_VENCIMIENTO)) DESC, m.MEM_ID DESC`
   );
 
@@ -69,11 +71,13 @@ export async function getClientesMoraActual() {
       correo: r.CLI_CORREO ?? r.cli_correo ?? '—',
       telefono: r.CLI_TELEFONO ?? r.cli_telefono ?? '—',
       placa: r.VEH_PLACA ?? r.veh_placa ?? '—',
+      modelo: r.VEH_MODELO ?? r.veh_modelo ?? '—',
+      tipoVehiculo: r.TVE_TIPO ?? r.tve_tipo ?? '—',
       tipoPlan: r.TME_TIPO ?? r.tme_tipo ?? '—',
       fechaVencimiento: toYmd(r.MEM_FECHA_VENCIMIENTO ?? r.mem_fecha_vencimiento),
       diasMora: Number.isFinite(diasMora) ? diasMora : 0,
       montoTipoReferencia: Number.isFinite(precio) ? precio : 0,
-      /** Misma regla que el job automático: TRUNC(hoy) > TRUNC(venc) + 3 */
+      /** Resaltado en rojo si lleva más de 3 días vencida sin renovar */
       alertaSuspension: diasMora > 3,
     };
   });
@@ -111,7 +115,7 @@ export async function buildClientesMoraPdfBuffer(data) {
     doc.font('Helvetica').fontSize(9);
     doc.text(`Clientes distintos: ${totalClientesDistintos} | Membresías en mora: ${totalMembresiasEnMora} | Monto referencial: Q ${montoSafe.toFixed(2)}`);
     doc.moveDown(0.3);
-    doc.fontSize(8).fillColor('#64748b').text('* Riesgo suspensión: más de 3 días de mora.');
+    doc.fontSize(8).fillColor('#64748b').text('* Resaltado en rojo: más de 3 días vencida sin renovar.');
     doc.moveDown(0.5);
 
     const y = doc.y;

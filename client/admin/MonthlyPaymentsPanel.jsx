@@ -183,7 +183,7 @@ export default function MonthlyPaymentsPanel() {
               checked={reactivar}
               onChange={(e) => setReactivar(e.target.checked)}
             />
-            Reactivar si esta suspendida
+            Reactivar si está suspendida, cancelada o vencida
           </label>
           <button onClick={registerPayment} disabled={loading}>
             Registrar pago
